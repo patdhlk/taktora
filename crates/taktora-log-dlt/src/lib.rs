@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod backend;
 pub mod control;
 pub mod encode;
 pub mod flusher;
@@ -18,3 +19,5 @@ mod kv;
 pub mod level_table;
 pub mod ring;
 pub mod transport;
+
+pub use backend::{BuildError, DltBackend, DltBackendBuilder};
