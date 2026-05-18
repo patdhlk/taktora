@@ -18,4 +18,4 @@ tracing-log = { workspace = true }
 thiserror   = { workspace = true }
 
 [dev-dependencies]
-tracing = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
