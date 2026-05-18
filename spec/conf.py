@@ -1,11 +1,11 @@
-"""Sphinx configuration for the taktora-executor specification."""
+"""Sphinx configuration for the taktora architecture & specification site."""
 
 import json
 from pathlib import Path
 
 # -- Project information -------------------------------------------------------
 
-project = "taktora-executor — Specification"
+project = "taktora — Architecture & Specification"
 author = "Patrick Dahlke"
 copyright = "2026, Patrick Dahlke"
 release = "0.1.0"

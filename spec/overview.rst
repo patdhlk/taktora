@@ -1,16 +1,21 @@
 Overview
 ========
 
-``taktora-executor`` is a Rust execution framework on `iceoryx2`_ that turns IPC
-events, intervals, and request/response activity into deterministic,
-observable schedules of executable items.
+The ``taktora`` workspace builds a soft-real-time runtime stack on
+`iceoryx2`_, in two layered pieces:
 
-This specification frames ``taktora-executor`` as the **runtime heart of a
+* ``taktora-executor`` turns IPC events, intervals, and request/response
+  activity into deterministic, observable schedules of executable items.
+* ``taktora-connector-*`` exposes typed channels behind a uniform plugin
+  surface, so application logic talks to EtherCAT, Zenoh, and any future
+  fieldbus through the same ``ChannelReader`` / ``ChannelWriter`` types.
+
+This specification frames the workspace as the **runtime heart of a
 soft-real-time PLC**: a foundation for non-safety industrial automation,
 robotics control loops, machine-monitoring runtimes, and R&D testbeds where
 occasional jitter is acceptable. The framing follows directly from a gap
 analysis (recorded in :doc:`requirements/plc-runtime`) that distinguishes
-the capabilities ``taktora-executor`` already provides from those that must be
+the capabilities ``taktora`` already provides from those that must be
 added before it can credibly call itself a soft-RT PLC.
 
 What is **out of scope** for the runtime heart:
