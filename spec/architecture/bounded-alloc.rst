@@ -1,7 +1,7 @@
 Bounded global allocator — architecture
 =======================================
 
-Design notes for the ``sonic-bounded-alloc`` crate (:need:`FEAT_0040`).
+Design notes for the ``taktora-bounded-alloc`` crate (:need:`FEAT_0040`).
 Captures the design decisions, the building-block decomposition, and
 the concrete implementation footprint. Test cases live in
 :doc:`../verification/bounded-alloc`.
@@ -38,7 +38,7 @@ Solution strategy
 
    * *Runtime-configured caps.* More flexible — integrators could tune
      ``MAX_BLOCKS`` / ``BLOCK_SIZE`` without recompiling
-     ``sonic-bounded-alloc``. Rejected because (a) the values are
+     ``taktora-bounded-alloc``. Rejected because (a) the values are
      dimensioning decisions made once per binary and rarely changed,
      (b) const generics let the bitmap word count
      (``MAX_BLOCKS / 64``) be a compile-time array length, avoiding a
@@ -72,13 +72,13 @@ Solution strategy
 Building blocks
 ---------------
 
-.. building-block:: sonic-bounded-alloc crate
+.. building-block:: taktora-bounded-alloc crate
    :id: BB_0024
    :status: open
    :implements: REQ_0300, REQ_0301, REQ_0302, REQ_0303, REQ_0304
    :refines: ADR_0012
 
-   The ``sonic-bounded-alloc`` workspace crate. Single public type
+   The ``taktora-bounded-alloc`` workspace crate. Single public type
    ``BoundedAllocator<const MAX_BLOCKS: usize, const BLOCK_SIZE:
    usize>`` exposing the ``GlobalAlloc`` impl plus the
    ``lock`` / ``alloc_count`` / ``dealloc_count`` /
@@ -107,7 +107,7 @@ Building blocks
 Implementation
 --------------
 
-.. impl:: sonic-bounded-alloc crate + sample binary
+.. impl:: taktora-bounded-alloc crate + sample binary
    :id: IMPL_0002
    :status: open
    :implements: BB_0024
@@ -115,13 +115,13 @@ Implementation
 
    **Workspace integration**
 
-   * Register ``crates/sonic-bounded-alloc`` in the root
+   * Register ``crates/taktora-bounded-alloc`` in the root
      ``Cargo.toml`` ``[workspace] members``.
    * Crate has no runtime dependencies — only ``core`` and ``std``
      (the latter used only by the sample binary and integration
      tests; ``lib.rs`` itself is ``#![no_std]``-compatible).
 
-   **``crates/sonic-bounded-alloc/Cargo.toml``**
+   **``crates/taktora-bounded-alloc/Cargo.toml``**
 
    * Inherits ``edition``, ``rust-version``, ``license``, etc. from
      workspace.
@@ -129,7 +129,7 @@ Implementation
      "abort"`` (required by :need:`REQ_0302`).
    * ``[[example]] name = "fail_closed"`` for the sample binary.
 
-   **``crates/sonic-bounded-alloc/src/lib.rs``**
+   **``crates/taktora-bounded-alloc/src/lib.rs``**
 
    * ``#![no_std]`` plus ``extern crate alloc`` only inside the
      ``test`` cfg.
@@ -158,7 +158,7 @@ Implementation
      transition on bit ``i`` is the unique owner of block ``i``
      until it CASs the bit back to ``1`` in ``dealloc``).
 
-   **``crates/sonic-bounded-alloc/tests/``**
+   **``crates/taktora-bounded-alloc/tests/``**
 
    * ``cap.rs`` — exhaustion and oversize cases (:need:`TEST_0180`).
    * ``lock.rs`` — lock then alloc panics (:need:`TEST_0182`).
@@ -171,7 +171,7 @@ Implementation
      itself continue to use the system allocator for
      ``Vec``/``String``/etc.
 
-   **``crates/sonic-bounded-alloc/examples/fail_closed.rs``**
+   **``crates/taktora-bounded-alloc/examples/fail_closed.rs``**
 
    * Sets a ``BoundedAllocator<8, 64>`` as ``#[global_allocator]``.
    * In ``main`` allocates ``Box<[u8; 32]>`` in a loop, printing
@@ -181,17 +181,17 @@ Implementation
      before the abort; the process exits with a non-zero status
      (SIGABRT). Demonstrates :need:`REQ_0301` end-to-end.
 
-   **``crates/sonic-executor/tests/no_alloc_dispatch.rs`` migration**
+   **``crates/taktora-executor/tests/no_alloc_dispatch.rs`` migration**
 
    * Replace the inline ``CountingAllocator`` (the existing
      ~70 lines covering ``GlobalAlloc``, size buckets, tracking
-     flag) with a dependency on ``sonic-bounded-alloc``'s public
+     flag) with a dependency on ``taktora-bounded-alloc``'s public
      counting API. Set ``MAX_BLOCKS`` deliberately high
      (~``1 << 20``) so the steady-state caps never fire during
      the differential measurement — :need:`REQ_0060` is about
      the *count*, not about provisioning.
-   * Add ``sonic-bounded-alloc`` to
-     ``crates/sonic-executor/Cargo.toml`` ``[dev-dependencies]``.
+   * Add ``taktora-bounded-alloc`` to
+     ``crates/taktora-executor/Cargo.toml`` ``[dev-dependencies]``.
    * Delete the size-bucket diagnostic and the
      ``trip_first_alloc_backtrace`` test (use the new crate's
      counters; deeper triage stays a developer-side workflow,

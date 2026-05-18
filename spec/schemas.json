@@ -1,5 +1,5 @@
 {
-  "$comment": "Schema validation for sonic-spec. See spec/conf.py for how this is loaded and the sphinx-needs schema docs at https://sphinx-needs.readthedocs.io/en/latest/schema/index.html for the rule grammar. Groups: (1) ID format per type, (2) status enum, (5) status=implemented network contracts. Authored 2026-05-11.",
+  "$comment": "Schema validation for taktora-spec. See spec/conf.py for how this is loaded and the sphinx-needs schema docs at https://sphinx-needs.readthedocs.io/en/latest/schema/index.html for the rule grammar. Groups: (1) ID format per type, (2) status enum, (5) status=implemented network contracts. Authored 2026-05-11.",
 
   "$defs": {
     "type-feat":           { "properties": { "type": { "const": "feat" } } },

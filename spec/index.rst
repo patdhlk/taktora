@@ -1,16 +1,16 @@
-sonic-executor — Specification
-==============================
+taktora-executor — Specification
+================================
 
-Engineering-as-Code specification for `sonic-executor`_, a Rust execution
+Engineering-as-Code specification for `taktora-executor`_, a Rust execution
 framework on top of `iceoryx2`_.
 
 .. warning::
 
    This specification is part of a personal experiment. APIs, requirements,
    and architecture decisions may shift without notice. See the project
-   `README <https://github.com/patdhlk/sonic#readme>`_ for the full caveat.
+   `README <https://github.com/patdhlk/taktora#readme>`_ for the full caveat.
 
-.. _sonic-executor: https://github.com/patdhlk/sonic
+.. _taktora-executor: https://github.com/patdhlk/taktora
 .. _iceoryx2: https://github.com/eclipse-iceoryx/iceoryx2
 
 .. toctree::

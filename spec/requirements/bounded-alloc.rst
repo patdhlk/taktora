@@ -2,9 +2,9 @@ Bounded global allocator
 ========================
 
 Workspace infrastructure providing a static, pre-allocated, fixed-block
-global allocator for sonic binaries that must give compile-time
-guarantees on memory usage. The crate (``sonic-bounded-alloc``) is
-independent of ``sonic-executor`` but composes naturally with it —
+global allocator for taktora binaries that must give compile-time
+guarantees on memory usage. The crate (``taktora-bounded-alloc``) is
+independent of ``taktora-executor`` but composes naturally with it —
 :need:`REQ_0060` (zero-alloc steady-state dispatch) is *tested* by a
 counting allocator and *enforced* in deployed binaries by registering
 this crate's allocator as ``#[global_allocator]``.

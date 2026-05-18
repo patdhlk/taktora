@@ -231,7 +231,7 @@ Live under ``crates/ethercat-esi-rt/tests/``.
    compilation succeeds; the async signature shape catches the
    trait-method-async constraint.
 
-.. test:: ethercat-esi-rt is the trait home, not sonic-internal
+.. test:: ethercat-esi-rt is the trait home, not taktora-internal
    :id: TEST_0432
    :status: open
    :verifies: REQ_0532

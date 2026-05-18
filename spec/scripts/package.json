@@ -1,9 +1,9 @@
 {
-  "name": "sonic-spec-tooling",
+  "name": "taktora-spec-tooling",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Tooling for the sonic-spec sphinx-needs project. Currently only ships the mermaid validator (validate-mermaid.mjs) used by CI to catch syntax errors in `.. mermaid::` blocks before deploy.",
+  "description": "Tooling for the taktora-spec sphinx-needs project. Currently only ships the mermaid validator (validate-mermaid.mjs) used by CI to catch syntax errors in `.. mermaid::` blocks before deploy.",
   "scripts": {
     "validate-mermaid": "node validate-mermaid.mjs .."
   },

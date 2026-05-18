@@ -459,7 +459,7 @@ wheels = [
 ]
 
 [[package]]
-name = "sonic-spec"
+name = "taktora-spec"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

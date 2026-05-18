@@ -21,7 +21,7 @@ preserved end-to-end.
 
 The connector framework's reason-to-exist is fault isolation: keep messy
 network protocol code (MQTT, OPC UA, gRPC, fieldbus) outside the
-sonic-executor application's deterministic core, while preserving
+taktora-executor application's deterministic core, while preserving
 zero-copy data flow. Quality goals capture the qualities that the
 architecture is optimised for.
 
@@ -32,7 +32,7 @@ architecture is optimised for.
 
    A panic, hang, or crash in a protocol stack (rumqttc, opcua, tonic,
    ADS) shall not be able to crash, deadlock, or stall the
-   sonic-executor application that uses the framework. This goal is
+   taktora-executor application that uses the framework. This goal is
    what motivates the gateway-as-separate-process deployment shape and
    the single-direction control plane.
 
@@ -74,14 +74,14 @@ architecture is optimised for.
 Constraints come from the surrounding workspace and the iceoryx2
 ecosystem; they are non-negotiable inputs to the architecture.
 
-.. constraint:: Built on sonic-executor's WaitSet
+.. constraint:: Built on taktora-executor's WaitSet
    :id: CON_0001
    :status: open
    :refines: FEAT_0030
 
-   The plugin and gateway shall be sonic-executor consumers
+   The plugin and gateway shall be taktora-executor consumers
    (``ExecutableItem``-based, WaitSet-driven). The framework shall not
-   introduce a second reactor model running alongside sonic-executor.
+   introduce a second reactor model running alongside taktora-executor.
 
 .. constraint:: iceoryx2 0.8.x as the IPC layer
    :id: CON_0002
@@ -117,8 +117,8 @@ ecosystem; they are non-negotiable inputs to the architecture.
 
    Where async protocol stacks (``rumqttc``, ``tonic``) require tokio,
    each connector crate shall host its own tokio runtime sidecar; tokio
-   shall not appear as a dependency of ``sonic-connector-core``,
-   ``sonic-connector-transport-iox``, or ``sonic-connector-codec``.
+   shall not appear as a dependency of ``taktora-connector-core``,
+   ``taktora-connector-transport-iox``, or ``taktora-connector-codec``.
 
 ----
 
@@ -130,7 +130,7 @@ ecosystem; they are non-negotiable inputs to the architecture.
    :status: open
    :refines: FEAT_0030
 
-   The connector framework sits between a sonic-executor application
+   The connector framework sits between a taktora-executor application
    and one or more external systems (brokers, servers, PLCs).
    Internally, the boundary is split between a **plugin** (in-app side)
    and a **gateway** (out-of-app side); externally, the gateway is the
@@ -139,9 +139,9 @@ ecosystem; they are non-negotiable inputs to the architecture.
    .. mermaid::
 
       flowchart LR
-        APP["sonic-executor application<br/>(plugin uses Connector trait)"]
+        APP["taktora-executor application<br/>(plugin uses Connector trait)"]
         SHM[("iceoryx2 shared memory<br/>+ event service")]
-        GW["sonic-connector gateway<br/>(tokio + protocol stack)"]
+        GW["taktora-connector gateway<br/>(tokio + protocol stack)"]
         EXT[("external system<br/>e.g. MQTT broker")]
         APP -- ConnectorEnvelope --> SHM
         SHM -- ConnectorEnvelope --> APP
@@ -269,7 +269,7 @@ that ``:refines:`` the requirement or feature it answers.
    entries) versus an explicit builder (``ConnectorHost::builder()
    .with(MqttConnector::<JsonCodec>::new(...)).build()``).
 
-   **Decision.** Explicit builder. Matches sonic-executor's existing
+   **Decision.** Explicit builder. Matches taktora-executor's existing
    ``Executor::builder()`` idiom.
 
    **Consequences.** ✅ One file you can grep for the wiring; no
@@ -277,17 +277,17 @@ that ``:refines:`` the requirement or feature it answers.
    Adding a connector requires rebuilding the host (already true given
    :need:`ADR_0005`).
 
-.. arch-decision:: Plugin and gateway are both sonic-executor consumers
+.. arch-decision:: Plugin and gateway are both taktora-executor consumers
    :id: ADR_0007
    :status: open
    :refines: CON_0001
 
    **Context.** Three options: tokio-only gateway (separate world from
-   plugin), sonic-executor on both sides with tokio bridged in, or
+   plugin), taktora-executor on both sides with tokio bridged in, or
    raw-iceoryx2 gateway emitting unified observability.
 
    **Decision.** Both halves are ``ExecutableItem``-based. Tokio runs
-   as a sidecar inside connector crates; sonic-executor's
+   as a sidecar inside connector crates; taktora-executor's
    ``Channel<T>`` bridges the two. One programming model, one
    observability surface, one shutdown story.
 
@@ -363,7 +363,7 @@ that ``:refines:`` the requirement or feature it answers.
    (FFI wrapper around the C SOEM stack), or hand-rolled. SOEM is the
    industry-standard C implementation, but pulling C dependencies and
    their build complexity into the workspace conflicts with the
-   no-C-deps posture the rest of sonic adopts.
+   no-C-deps posture the rest of taktora adopts.
 
    **Decision.** Use ``ethercrab`` from the workspace. It is pure
    Rust, supports both ``std`` (tokio TX/RX task on Linux raw socket)
@@ -423,7 +423,7 @@ that ``:refines:`` the requirement or feature it answers.
    ❌ Adding a new SubDevice model requires a code change, not a
    config-file swap. ❌ Out-of-tree SubDevices with unusual PDO
    assignments need manual mapping (acceptable — matches the rest of
-   sonic's compile-time-config posture).
+   taktora's compile-time-config posture).
 
 .. arch-decision:: Distributed Clocks bring-up is opt-in
    :id: ADR_0023
@@ -468,7 +468,7 @@ that ``:refines:`` the requirement or feature it answers.
    (they can run plugins; the gateway must live on Linux).
    ❌ Embedded MCU EtherCAT mainboards await a follow-on spec.
 
-.. arch-decision:: ``sonic-connector-ethercat`` module decomposition
+.. arch-decision:: ``taktora-connector-ethercat`` module decomposition
    :id: ADR_0025
    :status: open
    :refines: FEAT_0041
@@ -480,7 +480,7 @@ that ``:refines:`` the requirement or feature it answers.
    navigate) or mirror the BB decomposition in module structure
    (one-to-one mapping to specs, slightly more setup).
 
-   **Decision.** ``sonic-connector-ethercat`` mirrors the BB tree as
+   **Decision.** ``taktora-connector-ethercat`` mirrors the BB tree as
    sibling modules: ``plugin``, ``gateway``, ``pdo``, ``bridge``,
    ``options``, and ``health``. The public surface re-exports
    ``EthercatConnector`` from ``plugin``, ``EthercatGateway`` from
@@ -502,7 +502,7 @@ that ``:refines:`` the requirement or feature it answers.
 
    **Context.** :need:`REQ_0321` requires the ethercrab TX/RX task to
    run on a tokio runtime contained inside the connector crate, with
-   no tokio leakage into sonic-executor's ``WaitSet`` thread. Three
+   no tokio leakage into taktora-executor's ``WaitSet`` thread. Three
    shapes are possible: (1) a global ``OnceCell<Runtime>`` shared
    across gateway instances, (2) a runtime owned per-``EthercatGateway``
    instance, joined on ``Drop``, (3) a runtime spawned externally and
@@ -546,7 +546,7 @@ that ``:refines:`` the requirement or feature it answers.
    same reason.
 
    **Consequences.** ✅ No heap allocation for the PDO map after
-   gateway construction (consistent with sonic-executor's REQ_0060
+   gateway construction (consistent with taktora-executor's REQ_0060
    posture for the steady-state hot path). ✅ Builder API parallel to
    the framework's other connector options. ❌ Applications that need
    runtime-discovered PDO maps (e.g. EEPROM-parsed) must roll their
@@ -582,7 +582,7 @@ that ``:refines:`` the requirement or feature it answers.
    land via this path). The remaining bus-driven tests
    (TEST_0202, TEST_0203, TEST_0205-full, TEST_0208 wire-side,
    TEST_0211-full, TEST_0215) live in
-   ``crates/sonic-connector-ethercat/tests`` and are gated on the
+   ``crates/taktora-connector-ethercat/tests`` and are gated on the
    ``ETHERCAT_TEST_NIC`` environment variable; absent the variable
    they ``skip!`` rather than failing. CI runs the pure-logic tests
    on every push; the bus suite runs only on the gateway host
@@ -715,11 +715,11 @@ that ``:refines:`` the requirement or feature it answers.
 ----------------------
 
 The framework decomposes into five workspace crates plus reuse of two
-existing sonic-executor crates. The decomposition is hierarchical: a
+existing taktora-executor crates. The decomposition is hierarchical: a
 level-1 view shows crate-level building blocks; level-2 zooms into the
 two crates that carry the most logic.
 
-.. building-block:: sonic-connector-core
+.. building-block:: taktora-connector-core
    :id: BB_0001
    :status: open
    :implements: REQ_0220, REQ_0221, REQ_0222
@@ -730,7 +730,7 @@ two crates that carry the most logic.
    ``ConnectorHealth``, ``HealthEvent``, ``ReconnectPolicy``,
    ``ExponentialBackoff``, ``ConnectorError``.
 
-.. building-block:: sonic-connector-transport-iox
+.. building-block:: taktora-connector-transport-iox
    :id: BB_0002
    :status: open
    :implements: REQ_0200, REQ_0205, REQ_0206
@@ -739,9 +739,9 @@ two crates that carry the most logic.
    iceoryx2-backed channel handles
    (``ChannelWriter<T, C, N>``, ``ChannelReader<T, C, N>``,
    ``ServiceFactory``). Depends on
-   ``sonic-connector-core``, ``iceoryx2``, ``sonic-executor``.
+   ``taktora-connector-core``, ``iceoryx2``, ``taktora-executor``.
 
-.. building-block:: sonic-connector-codec
+.. building-block:: taktora-connector-codec
    :id: BB_0003
    :status: open
    :implements: REQ_0210, REQ_0212
@@ -750,7 +750,7 @@ two crates that carry the most logic.
    default-on; ``MsgPackCodec`` and ``ProtoCodec`` are deferred behind
    cargo features.
 
-.. building-block:: sonic-connector-mqtt
+.. building-block:: taktora-connector-mqtt
    :id: BB_0004
    :status: open
    :implements: REQ_0250, REQ_0251, REQ_0258
@@ -758,17 +758,17 @@ two crates that carry the most logic.
    MQTT plugin (``MqttConnector<C>`` implementing ``Connector``) and
    gateway (``MqttGateway`` exposing executable items). Hosts the
    tokio sidecar driving ``rumqttc::EventLoop`` and the bridge
-   between sonic-executor and tokio.
+   between taktora-executor and tokio.
 
-.. building-block:: sonic-connector-host
+.. building-block:: taktora-connector-host
    :id: BB_0005
    :status: open
    :implements: REQ_0270, REQ_0271, REQ_0272
 
    Composition layer. Provides ``ConnectorHost::builder()`` and
    ``ConnectorGateway::builder()`` wrapping a
-   ``sonic_executor::Executor``. Optional ``Observer`` adapter to
-   ``sonic-executor-tracing`` lives behind a ``tracing`` cargo feature.
+   ``taktora_executor::Executor``. Optional ``Observer`` adapter to
+   ``taktora-executor-tracing`` lives behind a ``tracing`` cargo feature.
 
 .. architecture:: Level-1 building block decomposition
    :id: ARCH_0002
@@ -778,25 +778,25 @@ two crates that carry the most logic.
    Crate-level building blocks and their dependency graph. All edges
    point from depender to dependee. The graph is acyclic; the host is
    the only consumer of every other new crate. The
-   ``sonic-connector-ethercat`` crate (BB_0030) is a peer of
-   ``sonic-connector-mqtt`` (BB_0004) — both depend on the same
+   ``taktora-connector-ethercat`` crate (BB_0030) is a peer of
+   ``taktora-connector-mqtt`` (BB_0004) — both depend on the same
    core / transport / codec triad and feed the host.
 
    .. mermaid::
 
       flowchart TB
         subgraph existing_crates[existing crates]
-          EX[sonic-executor]
-          TR[sonic-executor-tracing]
+          EX[taktora-executor]
+          TR[taktora-executor-tracing]
         end
         subgraph new_crates["new crates (this spec)"]
-          CO[sonic-connector-core<br/>BB_0001]
-          TX[sonic-connector-transport-iox<br/>BB_0002]
-          CD[sonic-connector-codec<br/>BB_0003]
-          MQ[sonic-connector-mqtt<br/>BB_0004]
-          EC[sonic-connector-ethercat<br/>BB_0030]
-          ZE[sonic-connector-zenoh<br/>BB_0040]
-          HO[sonic-connector-host<br/>BB_0005]
+          CO[taktora-connector-core<br/>BB_0001]
+          TX[taktora-connector-transport-iox<br/>BB_0002]
+          CD[taktora-connector-codec<br/>BB_0003]
+          MQ[taktora-connector-mqtt<br/>BB_0004]
+          EC[taktora-connector-ethercat<br/>BB_0030]
+          ZE[taktora-connector-zenoh<br/>BB_0040]
+          HO[taktora-connector-host<br/>BB_0005]
         end
         CO --> TX
         CO --> CD
@@ -859,10 +859,10 @@ two crates that carry the most logic.
 
    .. code-block:: text
 
-      out service:    sonic.connector.<connector>.<channel>.out
-      in  service:    sonic.connector.<connector>.<channel>.in
-      out event:      sonic.connector.<connector>.<channel>.out.evt
-      in  event:      sonic.connector.<connector>.<channel>.in.evt
+      out service:    taktora.connector.<connector>.<channel>.out
+      in  service:    taktora.connector.<connector>.<channel>.in
+      out event:      taktora.connector.<connector>.<channel>.out.evt
+      in  event:      taktora.connector.<connector>.<channel>.in.evt
 
 .. building-block:: MqttConnector (sub-block of BB_0004, plugin side)
    :id: BB_0020
@@ -882,19 +882,19 @@ two crates that carry the most logic.
    Hosts ``rumqttc::AsyncClient`` + ``EventLoop`` on a tokio runtime,
    plus the bridge channels and the executable items
    (``OutboundGatewayItem``, ``InboundGatewayItem``) registered with
-   sonic-executor.
+   taktora-executor.
 
 .. building-block:: Tokio bridge (sub-block of BB_0021)
    :id: BB_0022
    :status: open
    :implements: REQ_0259, REQ_0260, REQ_0261
 
-   Two bounded channel pairs that translate between sonic-executor's
+   Two bounded channel pairs that translate between taktora-executor's
    thread (WaitSet driver) and the tokio runtime owning rumqttc.
    Outbound = ``tokio::sync::mpsc``; inbound = ``crossbeam_channel``
-   wired as a sonic-executor signal source.
+   wired as a taktora-executor signal source.
 
-.. building-block:: sonic-connector-ethercat
+.. building-block:: taktora-connector-ethercat
    :id: BB_0030
    :status: open
    :implements: REQ_0310, REQ_0311, REQ_0312, REQ_0321
@@ -902,9 +902,9 @@ two crates that carry the most logic.
    EtherCAT plugin (``EthercatConnector<C>`` implementing
    ``Connector``) and gateway (``EthercatGateway`` exposing executable
    items). Hosts the tokio sidecar driving ethercrab's ``tx_rx_task``
-   and the bridge between sonic-executor and tokio. Depends on
-   ``sonic-connector-core``, ``sonic-connector-transport-iox``,
-   ``ethercrab``, ``sonic-executor``.
+   and the bridge between taktora-executor and tokio. Depends on
+   ``taktora-connector-core``, ``taktora-connector-transport-iox``,
+   ``ethercrab``, ``taktora-executor``.
 
 .. building-block:: EthercatConnector (sub-block of BB_0030, plugin side)
    :id: BB_0031
@@ -946,14 +946,14 @@ two crates that carry the most logic.
    :status: open
    :implements: REQ_0322, REQ_0323, REQ_0324
 
-   Two bounded channel pairs that translate between sonic-executor's
+   Two bounded channel pairs that translate between taktora-executor's
    WaitSet thread and the tokio runtime owning ethercrab's
    ``tx_rx_task``. Outbound saturation surfaces as
    ``ConnectorError::BackPressure`` plus ``ConnectorHealth::Degraded``;
    inbound saturation emits ``HealthEvent::DroppedInbound { count }``
    and drops the inbound process image for the affected cycle.
 
-.. building-block:: sonic-connector-zenoh
+.. building-block:: taktora-connector-zenoh
    :id: BB_0040
    :status: open
    :implements: REQ_0400, REQ_0420, REQ_0440, REQ_0444
@@ -961,9 +961,9 @@ two crates that carry the most logic.
    Zenoh plugin (``ZenohConnector<C>`` implementing ``Connector``)
    and gateway (``ZenohGateway`` exposing executable items). Hosts
    the tokio sidecar driving ``zenoh::Session`` and the bridge
-   between sonic-executor and tokio. Depends on
-   ``sonic-connector-core``, ``sonic-connector-transport-iox``,
-   ``sonic-connector-codec``, ``sonic-executor``, and (behind the
+   between taktora-executor and tokio. Depends on
+   ``taktora-connector-core``, ``taktora-connector-transport-iox``,
+   ``taktora-connector-codec``, ``taktora-executor``, and (behind the
    ``zenoh-integration`` feature) ``zenoh``.
 
 .. building-block:: ZenohConnector (sub-block of BB_0040, plugin side)
@@ -1018,7 +1018,7 @@ two crates that carry the most logic.
    :status: open
    :implements: REQ_0403, REQ_0404, REQ_0405, REQ_0406
 
-   Two bounded channel pairs that translate between sonic-executor's
+   Two bounded channel pairs that translate between taktora-executor's
    WaitSet thread and the tokio runtime owning ``zenoh::Session``.
    Outbound saturation surfaces as ``ConnectorError::BackPressure``
    plus ``ConnectorHealth::Degraded``; inbound saturation emits
@@ -1026,7 +1026,7 @@ two crates that carry the most logic.
    offending sample or reply chunk. Same shape as :need:`BB_0034`
    (EtherCAT) and :need:`BB_0022` (MQTT).
 
-.. building-block:: sonic-connector-can crate
+.. building-block:: taktora-connector-can crate
    :id: BB_0070
    :status: open
    :implements: REQ_0600, REQ_0602, REQ_0603, REQ_0604, REQ_0605
@@ -1034,9 +1034,9 @@ two crates that carry the most logic.
    CAN plugin (``CanConnector<C>`` implementing ``Connector``) and
    gateway (``CanGateway`` exposing executable items). Hosts the
    tokio sidecar driving N SocketCAN sockets and the bridges
-   between sonic-executor and tokio. Depends on
-   ``sonic-connector-core``, ``sonic-connector-transport-iox``,
-   ``sonic-connector-codec``, ``sonic-executor``, and (behind the
+   between taktora-executor and tokio. Depends on
+   ``taktora-connector-core``, ``taktora-connector-transport-iox``,
+   ``taktora-connector-codec``, ``taktora-executor``, and (behind the
    ``socketcan-integration`` feature) ``socketcan`` with its
    ``tokio`` feature enabled. Ships ``MockCanInterface``
    unfeature-gated for layer-1 tests on any host OS.
@@ -1083,7 +1083,7 @@ two crates that carry the most logic.
    :implements: REQ_0605, REQ_0606, REQ_0607, REQ_0608
 
    Two bounded channel pairs per owned interface that translate
-   between sonic-executor's WaitSet thread and the tokio runtime
+   between taktora-executor's WaitSet thread and the tokio runtime
    owning the SocketCAN sockets. Outbound saturation surfaces as
    ``ConnectorError::BackPressure`` plus
    ``ConnectorHealth::Degraded``; inbound saturation emits
@@ -1150,7 +1150,7 @@ behaviour and the building blocks that implement it.
         autonumber
         participant U as user code
         participant W as ChannelWriter
-        participant P as Publisher (sonic-executor)
+        participant P as Publisher (taktora-executor)
         participant SHM as iceoryx2 SHM
         participant S as Subscriber (gateway)
         participant GI as OutboundGatewayItem
@@ -1195,7 +1195,7 @@ behaviour and the building blocks that implement it.
 
         B->>MQ: PUBLISH (topic, payload)
         MQ-->>BR: tokio task pushes (topic, payload) into bridge_in
-        BR->>GI: sonic-executor Channel wakes item
+        BR->>GI: taktora-executor Channel wakes item
         GI->>GI: resolve channel by topic match (wildcard demux)
         GI->>P: publisher.loan(|slot| copy payload, set header)
         P->>SHM: zero-copy publish + notify
@@ -1227,7 +1227,7 @@ behaviour and the building blocks that implement it.
         Down --> [*]: shutdown
 
    Every transition emits a ``HealthEvent`` on the connector's health
-   channel; the host can forward these into ``sonic_executor::Observer``
+   channel; the host can forward these into ``taktora_executor::Observer``
    via the optional ``tracing``-feature adapter.
 
 .. architecture:: Shutdown coordination
@@ -1235,7 +1235,7 @@ behaviour and the building blocks that implement it.
    :status: open
    :refines: REQ_0243, BB_0005, BB_0021
 
-   Shutdown is downstream of sonic-executor: when ``Executor::run()``
+   Shutdown is downstream of taktora-executor: when ``Executor::run()``
    returns (signal or programmatic stop), the host triggers the tokio
    runtime's ``shutdown_timeout(5s)`` (configurable). Out-of-process
    gateway binaries follow the same pattern; the app side detects loss
@@ -1246,7 +1246,7 @@ behaviour and the building blocks that implement it.
       sequenceDiagram
         autonumber
         participant SIG as SIGINT/SIGTERM
-        participant EX as sonic-executor WaitSet
+        participant EX as taktora-executor WaitSet
         participant HO as ConnectorHost / Gateway
         participant GI as Gateway items
         participant TT as Tokio runtime
@@ -1372,7 +1372,7 @@ behaviour and the building blocks that implement it.
         autonumber
         participant U as user code
         participant W as ChannelWriter
-        participant P as Publisher (sonic-executor)
+        participant P as Publisher (taktora-executor)
         participant SHM as iceoryx2 SHM
         participant S as Subscriber (gateway)
         participant GI as OutboundGatewayItem
@@ -1432,7 +1432,7 @@ behaviour and the building blocks that implement it.
             loop for each matching reader
                 FC->>BR: enqueue (descriptor, data)
             end
-            BR->>GI: sonic-executor Channel wakes item
+            BR->>GI: taktora-executor Channel wakes item
             GI->>P: publisher.loan(|slot| copy payload bytes, set header)
             P->>SHM: zero-copy publish + notify
             SHM-->>S: WaitSet wakes
@@ -1496,7 +1496,7 @@ plugin's code is unchanged across both.
       flowchart LR
         subgraph one_process[Single OS process]
           direction LR
-          PLUGIN[Plugin executor<br/>sonic-executor]
+          PLUGIN[Plugin executor<br/>taktora-executor]
           GATEWAY[Gateway tokio task<br/>rumqttc + bridge]
           SHM[(iceoryx2 SHM)]
           PLUGIN <--> SHM <--> GATEWAY
@@ -1515,7 +1515,7 @@ plugin's code is unchanged across both.
    :status: open
    :refines: REQ_0240, REQ_0242
 
-   Two OS processes; each runs its own sonic-executor. The plugin's
+   Two OS processes; each runs its own taktora-executor. The plugin's
    process embeds only ``ConnectorHost``; the gateway's process
    embeds ``ConnectorGateway`` + the protocol stack. SHM transport is
    inter-process shared memory.
@@ -1524,7 +1524,7 @@ plugin's code is unchanged across both.
 
       flowchart LR
         subgraph plugin_proc[Plugin process]
-          PLUGIN[Plugin executor<br/>sonic-executor]
+          PLUGIN[Plugin executor<br/>taktora-executor]
         end
         subgraph shm[iceoryx2 SHM]
           POOL[(shared memory pool)]
@@ -1583,11 +1583,11 @@ These concepts cut across building blocks and runtime scenarios.
         - Propagates as
         - Surfaces to user as
       * - ``Transport``
-        - ``sonic-connector-transport-iox``
+        - ``taktora-connector-transport-iox``
         - ``Result`` from ``send`` / ``try_recv``
         - ``Err`` from the call
       * - ``Codec``
-        - ``sonic-connector-codec``
+        - ``taktora-connector-codec``
         - ``Result`` from ``encode`` / ``decode``
         - ``Err`` from ``send`` (encode) or ``try_recv`` (decode)
       * - ``Routing``
@@ -1623,12 +1623,12 @@ These concepts cut across building blocks and runtime scenarios.
    :status: open
    :refines: REQ_0273, BB_0005
 
-   The gateway is a sonic-executor consumer (:need:`ADR_0007`), so
+   The gateway is a taktora-executor consumer (:need:`ADR_0007`), so
    ``Observer::on_app_*`` and ``ExecutionMonitor::pre_execute`` /
    ``post_execute`` hooks already cover the gateway items.
-   ``HealthEvent`` arrives on a dedicated sonic-executor
+   ``HealthEvent`` arrives on a dedicated taktora-executor
    ``Channel<HealthEvent>`` exposed by ``Connector::subscribe_health``.
-   Behind a ``tracing`` cargo feature, ``sonic-connector-host``
+   Behind a ``tracing`` cargo feature, ``taktora-connector-host``
    provides an adapter that maps both into ``tracing`` span events
    so a single ``RUST_LOG=...`` config controls the full stack.
 
@@ -1726,11 +1726,11 @@ throughput) become first-class.
    :status: open
    :links: BB_0022, ADR_0007
 
-   The sonic-executor↔tokio bridge adds a channel hop on every
+   The taktora-executor↔tokio bridge adds a channel hop on every
    message in both directions. **Mitigation:** the bridge stays in the
    gateway process (not crossing SHM); benchmarks at plan stage
    characterise added latency; if intolerable, a follow-on can move
-   the rumqttc EventLoop directly onto a sonic-executor item triggered
+   the rumqttc EventLoop directly onto a taktora-executor item triggered
    from a raw socket.
 
 .. risk:: Wildcard demux pathological topic patterns
@@ -1753,7 +1753,7 @@ throughput) become first-class.
    :id: GLOSS_0001
    :status: open
 
-   A pair of (plugin, gateway) that bridges a sonic-executor
+   A pair of (plugin, gateway) that bridges a taktora-executor
    application to one external protocol family (MQTT, OPC UA, gRPC,
    ADS, ...). One concrete crate per protocol; all connectors share
    the framework's five contracts.
@@ -1772,7 +1772,7 @@ throughput) become first-class.
 
    The out-of-app side of a connector. Hosts the actual protocol
    stack (e.g. ``rumqttc::EventLoop``) on a tokio runtime sidecar and
-   exposes itself to sonic-executor as a set of ``ExecutableItem``
+   exposes itself to taktora-executor as a set of ``ExecutableItem``
    instances. Deployed in-process or as a separate binary.
 
 .. term:: ConnectorEnvelope
@@ -1805,10 +1805,10 @@ throughput) become first-class.
    :id: GLOSS_0007
    :status: open
 
-   The bounded-channel pair connecting sonic-executor's WaitSet
+   The bounded-channel pair connecting taktora-executor's WaitSet
    thread to the tokio runtime inside a connector crate. Outbound
    bridge is ``tokio::sync::mpsc``; inbound bridge is
-   ``crossbeam_channel`` wired as a sonic-executor signal source.
+   ``crossbeam_channel`` wired as a taktora-executor signal source.
    See :need:`BB_0022`.
 
 .. term:: Health
@@ -1862,13 +1862,13 @@ Each crate has its own ``impl::`` directive recording which BB it
 realises, which requirements it refines, and any deviations from the
 spec text that needed amendment during implementation.
 
-.. impl:: sonic-connector-core crate
+.. impl:: taktora-connector-core crate
    :id: IMPL_0010
    :status: open
    :implements: BB_0001
    :refines: REQ_0201, REQ_0210, REQ_0213, REQ_0214, REQ_0221, REQ_0222, REQ_0230, REQ_0232, REQ_0233, REQ_0234
 
-   **Crate.** ``crates/sonic-connector-core``. No iceoryx2 or
+   **Crate.** ``crates/taktora-connector-core``. No iceoryx2 or
    tokio dependency; the crate is the framework's small-types layer.
    Depends on ``thiserror``, ``serde``, ``rand`` (jitter for
    ``ExponentialBackoff``); ``proptest`` dev-only.
@@ -1898,14 +1898,14 @@ spec text that needed amendment during implementation.
    proptest); TEST_0101 (state-machine transitions + illegal-pair
    rejection); TEST_0103 (``ChannelDescriptor`` validation).
 
-.. impl:: sonic-connector-transport-iox crate
+.. impl:: taktora-connector-transport-iox crate
    :id: IMPL_0020
    :status: open
    :implements: BB_0002
    :refines: REQ_0200, REQ_0202, REQ_0203, REQ_0204, REQ_0205, REQ_0206, REQ_0214
 
-   **Crate.** ``crates/sonic-connector-transport-iox``. Depends on
-   ``sonic-connector-core``, ``iceoryx2``, ``serde``.
+   **Crate.** ``crates/taktora-connector-transport-iox``. Depends on
+   ``taktora-connector-core``, ``iceoryx2``, ``serde``.
 
    **Surface.**
 
@@ -1939,14 +1939,14 @@ spec text that needed amendment during implementation.
    verbatim + default zero), TEST_0125 (payload overflow rejection
    + no sequence advance).
 
-.. impl:: sonic-connector-codec crate
+.. impl:: taktora-connector-codec crate
    :id: IMPL_0030
    :status: open
    :implements: BB_0003
    :refines: REQ_0210, REQ_0212, REQ_0213, REQ_0214
 
-   **Crate.** ``crates/sonic-connector-codec``. Re-exports
-   ``PayloadCodec`` from ``sonic-connector-core``; ships
+   **Crate.** ``crates/taktora-connector-codec``. Re-exports
+   ``PayloadCodec`` from ``taktora-connector-core``; ships
    ``JsonCodec`` behind a default-on ``json`` cargo feature
    (``REQ_0212``).
 
@@ -1970,16 +1970,16 @@ spec text that needed amendment during implementation.
    buffer-too-small to ``PayloadOverflow``), TEST_0112 (decode
    error paths).
 
-.. impl:: sonic-connector-host crate
+.. impl:: taktora-connector-host crate
    :id: IMPL_0040
    :status: open
    :implements: BB_0005
    :refines: REQ_0220, REQ_0223, REQ_0231, REQ_0270, REQ_0271, REQ_0272, REQ_0273
 
-   **Crate.** ``crates/sonic-connector-host``. Depends on
-   ``sonic-connector-core``, ``sonic-connector-transport-iox``,
-   ``sonic-executor``, ``crossbeam-channel``. Optional
-   ``sonic-executor-tracing`` dep behind a default-off ``tracing``
+   **Crate.** ``crates/taktora-connector-host``. Depends on
+   ``taktora-connector-core``, ``taktora-connector-transport-iox``,
+   ``taktora-executor``, ``crossbeam-channel``. Optional
+   ``taktora-executor-tracing`` dep behind a default-off ``tracing``
    feature (``REQ_0273``).
 
    **Surface.**
@@ -1995,20 +1995,20 @@ spec text that needed amendment during implementation.
      amended :need:`REQ_0231`, this is the in-process
      implementation of the spec's "observable handle" contract;
      the alternative cross-process form using
-     ``sonic_executor::Channel<HealthEventWire>`` is deferred
+     ``taktora_executor::Channel<HealthEventWire>`` is deferred
      until a real connector exercises out-of-process health
      observation.
    * ``ConnectorHost::builder()`` + ``register`` +
      ``run`` / ``run_for`` / ``run_n`` (``REQ_0270``,
      ``REQ_0272``). Owns the underlying
-     ``sonic_executor::Executor`` and exposes a ``Stoppable``
+     ``taktora_executor::Executor`` and exposes a ``Stoppable``
      handle for external shutdown.
    * ``ConnectorGateway::builder()`` — parallel construction for
      the gateway side (``REQ_0271``).
 
    **Deviation from :need:`REQ_0273`.** The default-off
    ``tracing`` cargo feature is wired (deps pull
-   ``sonic-executor-tracing`` when the feature is on); the
+   ``taktora-executor-tracing`` when the feature is on); the
    ``Observer`` adapter implementation that forwards
    ``HealthEvent`` and ``ExecutionMonitor`` callbacks through the
    global ``tracing`` subscriber is deferred until a real
@@ -2021,15 +2021,15 @@ spec text that needed amendment during implementation.
    ``HealthSubscription`` delivers events published on the
    connector's internal health channel.
 
-.. impl:: sonic-connector-ethercat crate (C5a–C5e + C7a)
+.. impl:: taktora-connector-ethercat crate (C5a–C5e + C7a)
    :id: IMPL_0050
    :status: open
    :implements: BB_0030
    :refines: REQ_0310, REQ_0311, REQ_0312, REQ_0313, REQ_0314, REQ_0315, REQ_0316, REQ_0317, REQ_0318, REQ_0319, REQ_0320, REQ_0321, REQ_0322, REQ_0323, REQ_0324, REQ_0325, REQ_0326, REQ_0327, REQ_0328
 
-   **Crate.** ``crates/sonic-connector-ethercat``. Default deps:
-   ``sonic-connector-core``, ``sonic-connector-transport-iox``,
-   ``sonic-connector-host``, ``sonic-executor``,
+   **Crate.** ``crates/taktora-connector-ethercat``. Default deps:
+   ``taktora-connector-core``, ``taktora-connector-transport-iox``,
+   ``taktora-connector-host``, ``taktora-executor``,
    ``crossbeam-channel``, ``tokio`` (``rt`` +
    ``rt-multi-thread`` + ``macros`` + ``sync``). Optional
    ``ethercrab`` dep behind the default-off ``bus-integration``
@@ -2169,7 +2169,7 @@ spec text that needed amendment during implementation.
      raw iceoryx2 reader / writer to ``OutboundDrain`` /
      ``InboundPublish`` (``REQ_0326``, ``REQ_0327``, ``REQ_0328``).
    * ``raw::RawChannelWriter<N>`` / ``raw::RawChannelReader<N>``
-     in ``sonic-connector-transport-iox`` — byte-only iceoryx2
+     in ``taktora-connector-transport-iox`` — byte-only iceoryx2
      ports used by the dispatcher. ``send_raw_bytes`` /
      ``try_recv_into`` bypass the codec entirely, keeping the
      dispatcher hot path codec-free (``REQ_0327`` amended in
@@ -2206,16 +2206,16 @@ spec text that needed amendment during implementation.
    trait surface, ``create_writer`` / ``create_reader``
    registration semantics).
 
-.. impl:: sonic-connector-zenoh crate (planned)
+.. impl:: taktora-connector-zenoh crate (planned)
    :id: IMPL_0060
    :status: draft
    :implements: BB_0040
    :refines: REQ_0400, REQ_0401, REQ_0402, REQ_0403, REQ_0404, REQ_0405, REQ_0406, REQ_0407, REQ_0408, REQ_0420, REQ_0421, REQ_0422, REQ_0423, REQ_0424, REQ_0425, REQ_0426, REQ_0427, REQ_0428, REQ_0440, REQ_0442, REQ_0443, REQ_0444, REQ_0445, REQ_0446
 
-   **Crate.** ``crates/sonic-connector-zenoh`` (planned; not yet
-   scaffolded). Default deps: ``sonic-connector-core``,
-   ``sonic-connector-transport-iox``, ``sonic-connector-host``,
-   ``sonic-executor``, ``crossbeam-channel``, ``tokio`` (``rt`` +
+   **Crate.** ``crates/taktora-connector-zenoh`` (planned; not yet
+   scaffolded). Default deps: ``taktora-connector-core``,
+   ``taktora-connector-transport-iox``, ``taktora-connector-host``,
+   ``taktora-executor``, ``crossbeam-channel``, ``tokio`` (``rt`` +
    ``rt-multi-thread`` + ``macros`` + ``sync``). Optional
    ``zenoh`` dep behind the default-off ``zenoh-integration``
    cargo feature (:need:`REQ_0444`).
@@ -2343,17 +2343,17 @@ spec text that needed amendment during implementation.
    ``:status: draft`` until the ``zenoh-integration`` and
    ``ZENOH_TEST_ROUTER`` CI jobs land.
 
-.. impl:: sonic-connector-can crate (layer-1)
+.. impl:: taktora-connector-can crate (layer-1)
    :id: IMPL_0080
    :status: open
    :implements: BB_0070
    :refines: REQ_0600, REQ_0601, REQ_0602, REQ_0603, REQ_0604, REQ_0605, REQ_0606, REQ_0607, REQ_0608, REQ_0610, REQ_0611, REQ_0612, REQ_0613, REQ_0614, REQ_0615, REQ_0620, REQ_0621, REQ_0622, REQ_0623, REQ_0624, REQ_0625, REQ_0630, REQ_0631, REQ_0632, REQ_0633, REQ_0634, REQ_0635, REQ_0636
 
-   **Crate.** ``crates/sonic-connector-can`` (layer-1 landed;
+   **Crate.** ``crates/taktora-connector-can`` (layer-1 landed;
    real ``socketcan::tokio::*`` integration deferred to layer-2).
-   Default deps: ``sonic-connector-core``,
-   ``sonic-connector-transport-iox``, ``sonic-connector-host``,
-   ``sonic-executor``, ``crossbeam-channel``, ``tokio`` (``rt`` +
+   Default deps: ``taktora-connector-core``,
+   ``taktora-connector-transport-iox``, ``taktora-connector-host``,
+   ``taktora-executor``, ``crossbeam-channel``, ``tokio`` (``rt`` +
    ``rt-multi-thread`` + ``macros`` + ``sync``). Optional
    ``socketcan`` dep (with its ``tokio`` feature) behind the
    default-off ``socketcan-integration`` cargo feature

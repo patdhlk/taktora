@@ -4,7 +4,7 @@ Freedom From Interference Argument
 ==================================
 
 Per ISO 26262-6 Annex D, the FFI argument justifies that the Element A
-(sonic + hosted application) at ASIL B(D) can stand even with QM-grade
+(taktora + hosted application) at ASIL B(D) can stand even with QM-grade
 code co-hosted in the same item. FFI must hold across three categories:
 spatial, temporal, and information-exchange.
 
@@ -49,13 +49,13 @@ Temporal FFI
 **Threats:** QM-grade items consume CPU, hold OS locks, or block
 priorities such that SC items miss their deadlines.
 
-**Mitigations within sonic:**
+**Mitigations within taktora:**
 
-1. **Missed-deadline detection** in ``sonic-executor`` — :need:`TSR_0004`.
+1. **Missed-deadline detection** in ``taktora-executor`` — :need:`TSR_0004`.
 2. **Heartbeat emission** to the integrator's Element B monitor —
    :need:`TSR_0010`.
 
-**Sonic does not itself enforce temporal FFI.** Temporal isolation is
+**Taktora does not itself enforce temporal FFI.** Temporal isolation is
 delegated to the OS scheduler and the Element B monitor:
 
 * AOU_0005 — integrator configures real-time scheduling class

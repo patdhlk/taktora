@@ -1,0 +1,16 @@
+[package]
+name         = "taktora-executor-tracing"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+description  = "tracing-based Observer for taktora-executor."
+
+[dependencies]
+taktora-executor = { path = "../taktora-executor", version = "0.1" }
+tracing        = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["fmt"] }

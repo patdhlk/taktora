@@ -1,17 +1,17 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/sonic-bounded-alloc",
-    "crates/sonic-connector-can",
-    "crates/sonic-connector-codec",
-    "crates/sonic-connector-core",
-    "crates/sonic-connector-ethercat",
-    "crates/sonic-connector-host",
-    "crates/sonic-connector-transport-iox",
-    "crates/sonic-connector-zenoh",
-    "crates/sonic-executor",
-    "crates/sonic-executor-tracing",
-    "crates/sonic-replay",
+    "crates/taktora-bounded-alloc",
+    "crates/taktora-connector-can",
+    "crates/taktora-connector-codec",
+    "crates/taktora-connector-core",
+    "crates/taktora-connector-ethercat",
+    "crates/taktora-connector-host",
+    "crates/taktora-connector-transport-iox",
+    "crates/taktora-connector-zenoh",
+    "crates/taktora-executor",
+    "crates/taktora-executor-tracing",
+    "crates/taktora-replay",
 ]
 
 [workspace.package]
@@ -19,7 +19,7 @@ version      = "0.1.0"
 edition      = "2024"
 rust-version = "1.85"
 license      = "Apache-2.0 OR MIT"
-repository   = "https://github.com/patdhlk/sonic"
+repository   = "https://github.com/patdhlk/taktora"
 authors      = ["Patrick Dahlke"]
 
 [workspace.dependencies]

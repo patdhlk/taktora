@@ -1,0 +1,35 @@
+#![allow(missing_docs)]
+
+use core::time::Duration;
+use std::sync::Arc;
+use taktora_executor::{ControlFlow, Executor, Observer, UserEvent, item_with_triggers};
+use taktora_executor_tracing::TracingObserver;
+
+#[test]
+fn tracing_observer_runs_without_panic() {
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_test_writer()
+        .finish();
+
+    tracing::subscriber::with_default(subscriber, || {
+        let obs: Arc<dyn Observer> = Arc::new(TracingObserver);
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .observer(obs)
+            .build()
+            .unwrap();
+        exec.add(item_with_triggers(
+            |d| {
+                d.interval(Duration::from_millis(10));
+                Ok(())
+            },
+            |ctx| {
+                ctx.send_event(UserEvent::new(1, 7).with_string("hi"));
+                Ok(ControlFlow::Continue)
+            },
+        ))
+        .unwrap();
+        exec.run_n(1).unwrap();
+    });
+}

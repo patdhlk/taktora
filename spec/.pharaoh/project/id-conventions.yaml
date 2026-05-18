@@ -1,4 +1,4 @@
-# id-conventions.yaml — sonic-spec ID prefix policy.
+# id-conventions.yaml — taktora-spec ID prefix policy.
 #
 # Source of truth: spec/ubproject.toml `[[needs.types]]` declarations. The
 # prefix table below is the full set of 17 directive→prefix mappings the

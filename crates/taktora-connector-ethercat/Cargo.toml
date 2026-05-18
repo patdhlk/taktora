@@ -1,0 +1,47 @@
+[package]
+name         = "taktora-connector-ethercat"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+description  = "EtherCAT reference connector for the taktora-connector framework. Implements BB_0030 (FEAT_0041)."
+
+[features]
+default = []
+# `bus-integration` pulls `ethercrab` and exposes the `bus_driver`
+# module that wires the pure-logic helpers (sdo / scheduler / wkc)
+# to a real EtherCAT MainDevice. Off by default so consumers that
+# only want the framework types and pure-logic helpers don't pull
+# ethercrab's transitive dependencies.
+bus-integration = ["dep:ethercrab"]
+
+[dependencies]
+taktora-connector-core           = { path = "../taktora-connector-core" }
+taktora-connector-transport-iox  = { path = "../taktora-connector-transport-iox" }
+taktora-connector-host           = { path = "../taktora-connector-host" }
+taktora-executor                 = { path = "../taktora-executor" }
+iceoryx2                       = { workspace = true }
+crossbeam-channel              = { workspace = true }
+tokio                          = { workspace = true }
+serde                          = { workspace = true, features = ["std"] }
+thiserror                      = { workspace = true }
+ethercrab                      = { workspace = true, optional = true }
+
+[dev-dependencies]
+taktora-connector-codec = { path = "../taktora-connector-codec" }
+taktora-bounded-alloc   = { path = "../taktora-bounded-alloc" }
+proptest              = { workspace = true }
+serde_json            = { workspace = true, features = ["std"] }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"

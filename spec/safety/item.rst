@@ -6,20 +6,20 @@ Assumed Item
 SEooC item-level scope. The integrator's real item must be confirmed
 against this description (AOU_0006).
 
-The assumed item is a sonic-hosted **safety-critical periodic control
+The assumed item is a taktora-hosted **safety-critical periodic control
 application** running on a single multi-core SoC under a POSIX-compliant
 operating system. The item performs cyclic input acquisition, control
 computation, and actuation via field-bus (EtherCAT) and/or pub/sub
-(Zenoh) connectors at a cycle rate in the range 1–100 ms. Sonic provides
-the execution framework (``sonic-executor``) and the I/O substrate
-(``sonic-connector-*``).
+(Zenoh) connectors at a cycle rate in the range 1–100 ms. Taktora provides
+the execution framework (``taktora-executor``) and the I/O substrate
+(``taktora-connector-*``).
 
-In scope (sonic's responsibility)
----------------------------------
+In scope (taktora's responsibility)
+-----------------------------------
 
 * Deterministic execution of registered items at declared triggers
   (intervals, channel arrivals, request/response).
-* Bounded memory allocation (``sonic-bounded-alloc``).
+* Bounded memory allocation (``taktora-bounded-alloc``).
 * Spatial Freedom From Interference between safety-critical items and
   QM-grade items co-hosted in the same workspace.
 * Detection and propagation of internal framework faults — allocator
@@ -37,6 +37,6 @@ Out of scope (→ becomes Assumption of Use on the integrator)
   CPU pinning).
 * The diverse monitoring path required by the ASIL D = B(D) + B(D)
   decomposition (see :doc:`decomposition`).
-* Reaction to safety-goal violations escalated by sonic — sonic raises
+* Reaction to safety-goal violations escalated by taktora — taktora raises
   ``HealthEvent::Faulted``; it does not define what safe state means
   for any particular application.

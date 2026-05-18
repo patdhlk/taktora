@@ -1,16 +1,16 @@
 Connector framework
 ===================
 
-This page captures the requirements for ``sonic-connector``: a framework that
-connects sonic-executor applications to external protocols (MQTT, OPC UA,
+This page captures the requirements for ``taktora-connector``: a framework that
+connects taktora-executor applications to external protocols (MQTT, OPC UA,
 gRPC, fieldbus) through a controlled boundary, so messy network code lives
 outside the application's deterministic core.
 
 The decomposition is two-tier:
 
 * **Top-level umbrella feature** — :need:`FEAT_0030` — peer to
-  :need:`FEAT_0010`. Sonic-connector is a general-purpose framework usable
-  by any sonic-executor consumer; it is not bound to the PLC use case.
+  :need:`FEAT_0010`. Taktora-connector is a general-purpose framework usable
+  by any taktora-executor consumer; it is not bound to the PLC use case.
 * **Capability-cluster sub-features** — one per architectural concern, each
   ``:satisfies:`` :need:`FEAT_0030`.
 * **Requirements** — concrete shall-clauses that ``:satisfies:`` a
@@ -27,12 +27,12 @@ Top-level umbrella
    :id: FEAT_0030
    :status: open
 
-   A Rust framework that bridges sonic-executor applications to external
+   A Rust framework that bridges taktora-executor applications to external
    protocols through a typed envelope carried over iceoryx2 shared memory.
    The framework provides five contracts — envelope, codec, routing, health,
    lifecycle — that every protocol connector instantiates as a plugin
    (in-app side) and a gateway (out-of-app side). Both halves are
-   sonic-executor ``ExecutableItem`` consumers; protocol-specific async
+   taktora-executor ``ExecutableItem`` consumers; protocol-specific async
    work runs on a tokio sidecar contained inside each connector crate.
 
    Deployment chooses whether the gateway runs as a tokio task in-process
@@ -170,7 +170,7 @@ Codec abstraction
    :satisfies: FEAT_0032
 
    The framework shall ship a ``JsonCodec`` implementation in
-   ``sonic-connector-codec`` behind a default-on ``json`` cargo feature.
+   ``taktora-connector-codec`` behind a default-on ``json`` cargo feature.
 
 .. req:: Codec encode error variant
    :id: REQ_0213
@@ -243,8 +243,8 @@ Connector trait and routing
    :status: open
    :satisfies: FEAT_0033
 
-   Each connector crate (``sonic-connector-mqtt``, future
-   ``sonic-connector-opcua``, etc.) shall define its own routing struct
+   Each connector crate (``taktora-connector-mqtt``, future
+   ``taktora-connector-opcua``, etc.) shall define its own routing struct
    (``MqttRouting``, ``OpcUaRouting``, ...) implementing the ``Routing``
    marker trait, exposing protocol-specific fields.
 
@@ -280,7 +280,7 @@ Connection lifecycle
    over the connector's ``HealthEvent`` stream so callers can wire
    health transitions into ``ExecutableItem`` triggers. The handle
    type is connector-implementation dependent — typically a
-   sonic-executor ``Channel<HealthEventWire>`` (where
+   taktora-executor ``Channel<HealthEventWire>`` (where
    ``HealthEventWire`` is the POD wire form, preferred for
    cross-process gateways) or a thin in-process wrapper around a
    ``crossbeam_channel::Receiver<HealthEvent>`` (acceptable when the
@@ -469,16 +469,16 @@ MQTT reference connector
    :satisfies: FEAT_0036
 
    The MQTT gateway shall host ``rumqttc::EventLoop`` on a tokio runtime
-   contained inside ``sonic-connector-mqtt``. Tokio shall not leak into
-   sonic-executor's WaitSet thread.
+   contained inside ``taktora-connector-mqtt``. Tokio shall not leak into
+   taktora-executor's WaitSet thread.
 
 .. req:: Bridge channels are bounded
    :id: REQ_0259
    :status: open
    :satisfies: FEAT_0036
 
-   The outbound (sonic-executor → tokio) and inbound (tokio →
-   sonic-executor) bridges shall be bounded channels with configurable
+   The outbound (taktora-executor → tokio) and inbound (tokio →
+   taktora-executor) bridges shall be bounded channels with configurable
    capacity in ``MqttConnectorOptions``.
 
 .. req:: Outbound bridge saturation surfaces as BackPressure
@@ -513,7 +513,7 @@ EtherCAT reference connector
    Distributed Clocks bring-up, and ``ReconnectPolicy``-driven bus
    re-bringup. The gateway owns a single ethercrab ``MainDevice`` on
    one Linux network interface and runs the TX/RX cycle on a tokio
-   sidecar contained inside ``sonic-connector-ethercat``. Linux is the
+   sidecar contained inside ``taktora-connector-ethercat``. Linux is the
    only supported host OS in the first cut.
 
 .. req:: EthercatConnector implements Connector
@@ -620,16 +620,16 @@ EtherCAT reference connector
    :satisfies: FEAT_0041
 
    The EtherCAT gateway shall host the ethercrab TX/RX task on a tokio
-   runtime contained inside ``sonic-connector-ethercat``. Tokio shall not
-   leak into sonic-executor's WaitSet thread.
+   runtime contained inside ``taktora-connector-ethercat``. Tokio shall not
+   leak into taktora-executor's WaitSet thread.
 
 .. req:: Bridge channels are bounded
    :id: REQ_0322
    :status: open
    :satisfies: FEAT_0041
 
-   The outbound (sonic-executor → tokio) and inbound (tokio →
-   sonic-executor) bridges between the plugin and the gateway sidecar
+   The outbound (taktora-executor → tokio) and inbound (tokio →
+   taktora-executor) bridges between the plugin and the gateway sidecar
    shall be bounded channels with configurable capacity in
    ``EthercatConnectorOptions``.
 
@@ -719,27 +719,27 @@ Host wiring
    :status: open
    :satisfies: FEAT_0030
 
-   The composition layer that wraps a ``sonic_executor::Executor`` and
+   The composition layer that wraps a ``taktora_executor::Executor`` and
    registers each connector's contributed ``ExecutableItem`` instances —
-   matching sonic-executor's existing builder idiom.
+   matching taktora-executor's existing builder idiom.
 
 .. req:: ConnectorHost builder API
    :id: REQ_0270
    :status: open
    :satisfies: FEAT_0037
 
-   ``sonic-connector-host`` shall expose
+   ``taktora-connector-host`` shall expose
    ``ConnectorHost::builder()...with(connector)...build()`` returning a
-   ``ConnectorHost`` that owns a ``sonic_executor::Executor``.
+   ``ConnectorHost`` that owns a ``taktora_executor::Executor``.
 
 .. req:: ConnectorGateway builder API
    :id: REQ_0271
    :status: open
    :satisfies: FEAT_0037
 
-   ``sonic-connector-host`` shall expose a parallel
+   ``taktora-connector-host`` shall expose a parallel
    ``ConnectorGateway::builder()`` for the gateway-side composition,
-   producing a binary that owns its own ``sonic_executor::Executor``.
+   producing a binary that owns its own ``taktora_executor::Executor``.
 
 .. req:: Host registers connector items with the executor
    :id: REQ_0272
@@ -756,7 +756,7 @@ Host wiring
    :satisfies: FEAT_0037
 
    Behind a default-off ``tracing`` cargo feature, the host shall provide
-   an ``Observer`` adapter (using ``sonic-executor-tracing``) that
+   an ``Observer`` adapter (using ``taktora-executor-tracing``) that
    forwards ``HealthEvent`` and ``ExecutionMonitor`` callbacks through
    the global ``tracing`` subscriber.
 
@@ -776,7 +776,7 @@ Zenoh reference connector
    exposed via concrete methods on ``ZenohConnector`` only — the
    shared ``Connector`` trait is not modified. The gateway owns one
    ``zenoh::Session`` and runs Zenoh's async callbacks on a tokio
-   sidecar contained inside ``sonic-connector-zenoh``. Linux, macOS,
+   sidecar contained inside ``taktora-connector-zenoh``. Linux, macOS,
    and Windows are supported host operating systems.
 
 .. feat:: Zenoh pub/sub
@@ -787,7 +787,7 @@ Zenoh reference connector
    The pub/sub half of the Zenoh connector. ``ChannelWriter`` and
    ``ChannelReader`` carry codec-encoded values through iceoryx2 SHM
    services to / from Zenoh publishers and subscribers running on
-   the gateway's tokio sidecar. Bridges between sonic-executor and
+   the gateway's tokio sidecar. Bridges between taktora-executor and
    tokio are bounded; saturation surfaces as ``BackPressure`` on
    outbound and ``DroppedInbound`` health events on inbound.
 
@@ -834,8 +834,8 @@ Zenoh reference connector
 
    The Zenoh gateway shall host the ``zenoh::Session`` and all
    Zenoh async callbacks on a tokio runtime contained inside
-   ``sonic-connector-zenoh``. Tokio shall not leak into
-   sonic-executor's WaitSet thread (mirrors :need:`REQ_0321` and
+   ``taktora-connector-zenoh``. Tokio shall not leak into
+   taktora-executor's WaitSet thread (mirrors :need:`REQ_0321` and
    :need:`REQ_0258`).
 
 .. req:: Zenoh bridge channels are bounded
@@ -843,8 +843,8 @@ Zenoh reference connector
    :status: open
    :satisfies: FEAT_0043
 
-   The outbound (sonic-executor → tokio) and inbound (tokio →
-   sonic-executor) bridges between the plugin and the Zenoh gateway
+   The outbound (taktora-executor → tokio) and inbound (tokio →
+   taktora-executor) bridges between the plugin and the Zenoh gateway
    sidecar shall be bounded channels with capacities configurable
    via ``ZenohConnectorOptions`` (``outbound_bridge_capacity`` and
    ``inbound_bridge_capacity``).
@@ -1085,7 +1085,7 @@ Zenoh reference connector
    :links: BB_0040, TEST_0310
 
    The real ``zenoh`` crate shall be an optional dependency of
-   ``sonic-connector-zenoh``, activated only by a default-off
+   ``taktora-connector-zenoh``, activated only by a default-off
    ``zenoh-integration`` cargo feature (mirrors :need:`BB_0030`'s
    ``bus-integration`` posture). Availability of
    ``MockZenohSession`` and the connector framework types in the
@@ -1131,7 +1131,7 @@ CAN (SocketCAN) reference connector
    ``MockCanInterface`` for layer-1 tests. The gateway owns N
    ``socketcan::CanSocket`` / ``CanFdSocket`` instances — one per
    registered interface — and runs the RX/TX loops on a tokio
-   sidecar contained inside ``sonic-connector-can``. Linux is the
+   sidecar contained inside ``taktora-connector-can``. Linux is the
    only supported host OS for real I/O; the in-process mock
    interface is portable.
 
@@ -1211,7 +1211,7 @@ CAN (SocketCAN) reference connector
    :satisfies: FEAT_0046
 
    The ``socketcan`` crate shall be an optional dependency of
-   ``sonic-connector-can``, activated only by a default-off
+   ``taktora-connector-can``, activated only by a default-off
    ``socketcan-integration`` cargo feature (mirrors
    :need:`REQ_0444`'s ``zenoh-integration`` posture and
    :need:`BB_0030`'s ``bus-integration`` posture).
@@ -1235,8 +1235,8 @@ CAN (SocketCAN) reference connector
    :satisfies: FEAT_0046
 
    The CAN gateway shall host its RX/TX tasks on a tokio runtime
-   contained inside ``sonic-connector-can``. Tokio shall not leak
-   into sonic-executor's WaitSet thread (mirrors :need:`REQ_0321`,
+   contained inside ``taktora-connector-can``. Tokio shall not leak
+   into taktora-executor's WaitSet thread (mirrors :need:`REQ_0321`,
    :need:`REQ_0258`, :need:`REQ_0403`).
 
 .. req:: CAN bridge channels are bounded
@@ -1244,8 +1244,8 @@ CAN (SocketCAN) reference connector
    :status: open
    :satisfies: FEAT_0046
 
-   The outbound (sonic-executor → tokio) and inbound (tokio →
-   sonic-executor) bridges between the plugin and the CAN gateway
+   The outbound (taktora-executor → tokio) and inbound (tokio →
+   taktora-executor) bridges between the plugin and the CAN gateway
    sidecar shall be bounded channels with capacities configurable
    via ``CanConnectorOptions`` (``outbound_bridge_capacity`` and
    ``inbound_bridge_capacity``).
@@ -1590,9 +1590,9 @@ to keep the umbrella's traceability complete.
    The framework shall **not** catch panics from the tokio task or any
    protocol-stack worker. A panic shall propagate and abort the gateway
    process; restart policy is the host's responsibility, matching
-   sonic-executor's existing posture.
+   taktora-executor's existing posture.
 
-.. req:: NO DBC parsing or typed signal extraction in sonic-connector-can
+.. req:: NO DBC parsing or typed signal extraction in taktora-connector-can
    :id: REQ_0640
    :status: rejected
    :satisfies: FEAT_0046
@@ -1602,7 +1602,7 @@ to keep the umbrella's traceability complete.
    a raw-frame transport; typed signal codecs are a separate concern
    for a future feature layered on top.
 
-.. req:: NO ISO-TP or J1939 support in sonic-connector-can
+.. req:: NO ISO-TP or J1939 support in taktora-connector-can
    :id: REQ_0641
    :status: rejected
    :satisfies: FEAT_0046
@@ -1644,7 +1644,7 @@ to keep the umbrella's traceability complete.
    ``can-restart-ms`` netlink attribute on owned interfaces.
    Interface bring-up (``ip link set canX up type can …``) and
    auto-restart configuration remain a host / sysadmin concern;
-   ``sonic-connector-can`` only opens the already-up interface.
+   ``taktora-connector-can`` only opens the already-up interface.
 
 ----
 

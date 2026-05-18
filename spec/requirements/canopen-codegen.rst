@@ -5,7 +5,7 @@ This page captures the requirements for the **CANopen device-driver
 codegen toolchain**: a layered set of crates that translates CANopen
 Electronic Data Sheet (EDS, CiA 306) files into strongly-typed Rust
 driver modules at build time, with zero runtime INI parsing and no
-dependency on the ``sonic-connector-can`` runtime.
+dependency on the ``taktora-connector-can`` runtime.
 
 The decomposition is the peer of :doc:`device-codegen` for CANopen,
 executing the lift foreseen by :need:`ADR_0073` (now closed by
@@ -47,7 +47,7 @@ Top-level umbrella
       Depends on ``fieldbus-od-core``. No codegen, no transport dep.
    3. **Codegen layer** — ``canopen-eds-codegen`` (IR →
       ``TokenStream`` via ``CodegenBackend`` trait) plus
-      ``canopen-eds-codegen-sonic`` (the one concrete backend this
+      ``canopen-eds-codegen-taktora`` (the one concrete backend this
       round, targeting the ``CanOpenDevice`` trait surface).
    4. **Runtime trait crate** — ``canopen-eds-rt``: the
       ``CanOpenDevice`` / ``CanOpenConfigurable`` traits the
@@ -58,7 +58,7 @@ Top-level umbrella
       one-shot tools), and ``canopen-eds-verify`` (offline diff of
       EDS XML against a captured SDO-upload JSON dump).
 
-   The ``sonic-connector-can`` crate (see :need:`FEAT_0046`) is not
+   The ``taktora-connector-can`` crate (see :need:`FEAT_0046`) is not
    part of this toolchain. A thin adapter that maps any
    ``CanOpenDevice`` into the connector's frame plumbing is a
    follow-on spec; this umbrella does not require changes to
@@ -93,7 +93,7 @@ Shared OD core
 
    ``fieldbus-od-core`` shall declare no transport-specific types.
    The crate shall not name ``ethercrab``, ``socketcan``,
-   ``sonic_connector_*``, or any I/O-bearing crate as a dependency.
+   ``taktora_connector_*``, or any I/O-bearing crate as a dependency.
 
 .. req:: no_std + alloc, no mandatory serde
    :id: REQ_0701
@@ -151,7 +151,7 @@ EDS parser
 
    A pure parser crate. Reads CiA 306 INI, emits a typed IR rooted
    in :need:`FEAT_0061` types. Knows nothing about codegen,
-   transports, or sonic-internal crates. Suitable for any downstream
+   transports, or taktora-internal crates. Suitable for any downstream
    tool — codegen, network configurator, simulator, verifier.
 
 .. req:: Pure parse function with no I/O
@@ -170,7 +170,7 @@ EDS parser
 
    The crate shall be ``#![no_std]`` with ``alloc``, and shall not
    depend on ``ethercrab``, ``canopen-eds-codegen``,
-   ``sonic-connector-can``, or any transport crate. A downstream
+   ``taktora-connector-can``, or any transport crate. A downstream
    tool that only needs the IR shall not be forced to compile the
    codegen layer.
 
@@ -242,7 +242,7 @@ Codegen IR and backend trait
    collision policy applied) and the ``CodegenBackend`` trait that
    lets multiple emitters share that IR. This crate
    (``canopen-eds-codegen``) knows nothing about INI and nothing
-   about sonic-connector-can.
+   about taktora-connector-can.
 
 .. req:: CodegenBackend trait shape
    :id: REQ_0730
@@ -310,10 +310,10 @@ Codegen IR and backend trait
    device per file plus the shared registry table per
    :need:`REQ_0745`.
 
-sonic-connector-can backend
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+taktora-connector-can backend
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. feat:: sonic-connector-can codegen backend
+.. feat:: taktora-connector-can codegen backend
    :id: FEAT_0064
    :status: open
    :satisfies: FEAT_0060
@@ -327,7 +327,7 @@ sonic-connector-can backend
    :status: open
    :satisfies: FEAT_0064
 
-   ``canopen-eds-codegen-sonic`` shall be the only crate in the
+   ``canopen-eds-codegen-taktora`` shall be the only crate in the
    toolchain that declares ``canopen-eds-rt`` as a dependency.
    Neither ``canopen-eds``, ``canopen-eds-codegen``,
    ``canopen-eds-build``, ``canopen-eds-cli``, nor
@@ -463,16 +463,16 @@ Runtime trait surface
    PDO mapping, optional NMT start) live inside the generated
    body of this method.
 
-.. req:: Traits live in canopen-eds-rt, not sonic-connector-can
+.. req:: Traits live in canopen-eds-rt, not taktora-connector-can
    :id: REQ_0752
    :status: open
    :satisfies: FEAT_0065
 
    ``CanOpenDevice`` and ``CanOpenConfigurable`` shall live in a
    dedicated ``canopen-eds-rt`` crate. They shall not live in
-   ``sonic-connector-can``, ``fieldbus-od-core``, or any other
-   sonic-internal crate. Any CAN consumer shall be able to adopt
-   the generated drivers without depending on sonic.
+   ``taktora-connector-can``, ``fieldbus-od-core``, or any other
+   taktora-internal crate. Any CAN consumer shall be able to adopt
+   the generated drivers without depending on taktora.
 
 .. req:: Frame payloads use heapless::Vec<u8, 8>
    :id: REQ_0753
@@ -623,7 +623,7 @@ CLI inspection
    :satisfies: FEAT_0067
 
    The CLI shall depend on ``canopen-eds`` and
-   ``canopen-eds-codegen-sonic`` as library dependencies. It shall
+   ``canopen-eds-codegen-taktora`` as library dependencies. It shall
    not duplicate parse or emit logic. Output produced by the CLI
    for a given input shall be byte-identical to the output produced
    by ``canopen-eds-build`` for the same input and formatter
@@ -678,7 +678,7 @@ EDS ↔ SDO-dump verification
    :need:`FEAT_0062` and shall not maintain a second parse path.
    JSON SDO-dump decoding lives inside the verifier crate. The
    verifier shall not depend on ``canopen-eds-codegen``,
-   ``canopen-eds-rt``, or ``sonic-connector-can``.
+   ``canopen-eds-rt``, or ``taktora-connector-can``.
 
 .. req:: Verifier exits non-zero on mismatch
    :id: REQ_0783
@@ -698,7 +698,7 @@ EDS ↔ SDO-dump verification
 
    The SDO-dump file format shall be versioned via a top-level
    ``schema`` field carrying the string
-   ``sonic.canopen.sdo-dump.v1``. Unknown schema strings shall be
+   ``taktora.canopen.sdo-dump.v1``. Unknown schema strings shall be
    rejected with a parse error before any field comparison runs
    (per :need:`ADR_0086`).
 
@@ -770,7 +770,7 @@ not do, and why. Each rejected requirement ``:satisfies:``
    generated modules shall not need to ship EDS files alongside
    their binary. Mirrors :need:`REQ_0593`.
 
-.. req:: NO modification of sonic-connector-can runtime
+.. req:: NO modification of taktora-connector-can runtime
    :id: REQ_0795
    :status: rejected
    :satisfies: FEAT_0060
@@ -802,7 +802,7 @@ not do, and why. Each rejected requirement ``:satisfies:``
    interface, send live SDO upload requests, or otherwise touch a
    real bus. Verification is strictly offline — EDS file vs.
    captured JSON dump (:need:`REQ_0780`). Live verification
-   belongs in the follow-on ``sonic-connector-can`` adapter spec
+   belongs in the follow-on ``taktora-connector-can`` adapter spec
    where the bus is already at hand.
 
 ----

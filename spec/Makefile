@@ -1,4 +1,4 @@
-# Build the sonic-executor specification with uv-managed Sphinx.
+# Build the taktora-executor specification with uv-managed Sphinx.
 
 .PHONY: help install html clean strict
 

@@ -1,11 +1,11 @@
-"""Sphinx configuration for the sonic-executor specification."""
+"""Sphinx configuration for the taktora-executor specification."""
 
 import json
 from pathlib import Path
 
 # -- Project information -------------------------------------------------------
 
-project = "sonic-executor — Specification"
+project = "taktora-executor — Specification"
 author = "Patrick Dahlke"
 copyright = "2026, Patrick Dahlke"
 release = "0.1.0"
@@ -67,6 +67,6 @@ html_theme = "sphinx_hextra"
 html_static_path = ["_static"]
 html_title = project
 
-# Canonical URL for the published site (GitHub Pages → patdhlk.com/sonic/).
+# Canonical URL for the published site (GitHub Pages → patdhlk.com/taktora/).
 # Affects only metadata (sitemaps, canonical links); does not change asset paths.
-html_baseurl = "https://patdhlk.com/sonic/"
+html_baseurl = "https://patdhlk.com/taktora/"

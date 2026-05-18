@@ -12,7 +12,7 @@ Architecture decisions supporting the SEooC safety concept (see
    :refines: AFSR_0001, AFSR_0002
    :satisfies: TSR_0003, TSR_0009
 
-   **Context.** Sonic-hosted items at different integrity levels
+   **Context.** Taktora-hosted items at different integrity levels
    (safety-critical and QM-grade) must coexist in the same workspace
    without QM code being able to corrupt safety-critical state. The
    spatial Freedom From Interference argument has to hold without
@@ -54,7 +54,7 @@ Architecture decisions supporting the SEooC safety concept (see
    guarantee.
 
    **Decision.** All allocation by safety-critical hosted code goes
-   through ``sonic-bounded-alloc`` with compile-time-declared
+   through ``taktora-bounded-alloc`` with compile-time-declared
    per-integrity-level quotas.
 
    **Alternatives considered.**
@@ -68,5 +68,5 @@ Architecture decisions supporting the SEooC safety concept (see
 
    **Consequences.** Caps must be sized at build time; growing past
    the cap requires a rebuild. Partitioned pools (:need:`TSR_0002`)
-   require extending ``sonic-bounded-alloc``'s public API to take an
+   require extending ``taktora-bounded-alloc``'s public API to take an
    integrity-level argument at the allocator-init macro.

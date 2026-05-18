@@ -29,7 +29,7 @@ Per-crate, no IPC, parallel-safe.
    delays are monotonically non-decreasing until the cap is reached,
    delays never exceed the configured maximum, ``reset()`` returns the
    policy to the initial delay, and jitter stays within the configured
-   ratio. Lives under ``sonic-connector-core/tests/``.
+   ratio. Lives under ``taktora-connector-core/tests/``.
 
 .. test:: ConnectorHealth state-machine transitions
    :id: TEST_0101
@@ -305,7 +305,7 @@ EtherCAT tests come in two flavours: software tests (unit + raw-frame
 mock) parallel-safe on any host, and hardware-in-the-loop tests marked
 ``[bench]`` that require an EK1100 + EL-series fixture on the CI test
 bench. The mock implementation lives in
-``sonic-connector-ethercat/tests/mock/`` and replays canned EtherCAT
+``taktora-connector-ethercat/tests/mock/`` and replays canned EtherCAT
 frame responses so bring-up, PDO mapping, and WKC scenarios can be
 exercised without hardware. Bench tests run only when invoked as
 ``cargo test --features ethercat-bench``.
@@ -434,9 +434,9 @@ exercised without hardware. Bench tests run only when invoked as
    :verifies: REQ_0321
 
    Structural test using ``cargo tree``: assert that
-   ``sonic-executor`` does not appear with ``tokio`` in its
+   ``taktora-executor`` does not appear with ``tokio`` in its
    transitive dependency closure, and that ``tokio`` appears only
-   under ``sonic-connector-ethercat`` (and other connector crates).
+   under ``taktora-connector-ethercat`` (and other connector crates).
    A second assertion: the published ``EthercatConnector`` plugin
    surface contains no ``tokio::`` types.
 
@@ -583,7 +583,7 @@ exercised without hardware. Bench tests run only when invoked as
 Workspace end-to-end tests
 --------------------------
 
-Full stack exercised via ``sonic-connector-host`` examples or
+Full stack exercised via ``taktora-connector-host`` examples or
 ``assert_cmd``-driven binary smoke tests.
 
 .. test:: In-process gateway smoke
@@ -744,10 +744,10 @@ land.
    the documented payload (``since`` timestamp, ``reason``
    string). Realised across two test files: the
    ``Connecting → Up → Down`` legs by
-   ``crates/sonic-connector-zenoh/tests/health_transitions.rs``,
+   ``crates/taktora-connector-zenoh/tests/health_transitions.rs``,
    and the ``Up → Degraded → Up`` legs (driven by ``min_peers``
    threshold crossings) by
-   ``crates/sonic-connector-zenoh/tests/min_peers_degraded.rs``.
+   ``crates/taktora-connector-zenoh/tests/min_peers_degraded.rs``.
 
 .. test:: REQ_0441 anti-req — no ReconnectPolicy on session loss
    :id: TEST_0309
@@ -767,7 +767,7 @@ land.
    ``ReconnectPolicy``-typed field and the
    ``ZenohConnectorOptions`` struct does not declare a
    ``reconnect_policy`` setting. Realised as
-   ``crates/sonic-connector-zenoh/tests/no_reconnect_policy.rs``,
+   ``crates/taktora-connector-zenoh/tests/no_reconnect_policy.rs``,
    which shells out to ``cargo public-api`` and asserts the
    public surface contains no ``ReconnectPolicy`` /
    ``reconnect_policy`` identifier.
@@ -818,23 +818,23 @@ land.
    ``ConnectorHealth`` reaches ``Up``. Status remains
    ``deferred`` until the client-mode CI job lands.
 
-.. test:: Tokio sidecar contained inside sonic-connector-zenoh
+.. test:: Tokio sidecar contained inside taktora-connector-zenoh
    :id: TEST_0314
    :status: implemented
    :verifies: REQ_0403
 
    Static check that the ``zenoh::Session`` and any tokio runtime
-   handle live entirely inside the ``sonic-connector-zenoh`` crate.
-   No public type exported by ``sonic-connector-zenoh`` shall name a
+   handle live entirely inside the ``taktora-connector-zenoh`` crate.
+   No public type exported by ``taktora-connector-zenoh`` shall name a
    ``tokio::*`` type in its signature (compile-time API surface scan).
    Realised as
-   ``crates/sonic-connector-zenoh/tests/tokio_containment.rs``,
+   ``crates/taktora-connector-zenoh/tests/tokio_containment.rs``,
    which shells out to ``cargo public-api`` and asserts the public
    surface contains no ``tokio::`` identifier. The runtime piece —
    an executor unit test asserting that the WaitSet thread does not
    contain any tokio task handle attributable to the gateway
    sidecar (mirrors :need:`TEST_0211` under :need:`REQ_0321`) — is
-   deferred to a Z6+ stage that lands ``sonic-executor`` task
+   deferred to a Z6+ stage that lands ``taktora-executor`` task
    introspection.
 
 ----
@@ -859,7 +859,7 @@ vcan && ip link set up vcan0``).
    and ``create_reader<T>`` return the framework's concrete
    ``ChannelWriter<T, C, N>`` / ``ChannelReader<T, C, N>`` (not boxed
    trait objects, mirroring :need:`REQ_0223`). Realised as
-   ``crates/sonic-connector-can/tests/connector_surface.rs``.
+   ``crates/taktora-connector-can/tests/connector_surface.rs``.
 
 .. test:: CanRouting field round-trip
    :id: TEST_0501
@@ -955,17 +955,17 @@ vcan && ip link set up vcan0``).
    error frames, the sub-state returns to ``Up`` and a second
    ``HealthEvent`` is emitted.
 
-.. test:: Tokio sidecar contained inside sonic-connector-can
+.. test:: Tokio sidecar contained inside taktora-connector-can
    :id: TEST_0508
    :status: open
    :verifies: REQ_0605
 
    Static check that the SocketCAN sockets and any tokio runtime
-   handle live entirely inside the ``sonic-connector-can`` crate.
-   No public type exported by ``sonic-connector-can`` shall name a
+   handle live entirely inside the ``taktora-connector-can`` crate.
+   No public type exported by ``taktora-connector-can`` shall name a
    ``tokio::*`` or ``socketcan::*`` type in its signature
    (compile-time API surface scan). Realised as
-   ``crates/sonic-connector-can/tests/tokio_containment.rs``,
+   ``crates/taktora-connector-can/tests/tokio_containment.rs``,
    shelling out to ``cargo public-api`` and asserting absence of
    ``tokio::`` and (when ``socketcan-integration`` is enabled)
    ``socketcan::`` identifiers in the public surface. Mirrors
@@ -1026,7 +1026,7 @@ vcan && ip link set up vcan0``).
    10 classical frames carrying small distinct payloads, and
    assert each round-trips byte-for-byte with the correct CAN
    identifier and ``extended`` flag. Realised as
-   ``crates/sonic-connector-can/tests/vcan_smoke.rs``, gated
+   ``crates/taktora-connector-can/tests/vcan_smoke.rs``, gated
    ``#[ignore]`` so plain ``cargo test`` skips it; the
    ``vcan-smoke`` job in ``.github/workflows/ci-can.yml`` runs
    it with ``--include-ignored`` after bringing up ``vcan0``.

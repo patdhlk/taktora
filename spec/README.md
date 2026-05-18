@@ -1,6 +1,6 @@
-# sonic-executor — Specification
+# taktora-executor — Specification
 
-Engineering-as-code specification for the [sonic-executor](https://github.com/patdhlk/sonic) crate, authored as a [Sphinx](https://www.sphinx-doc.org) site with [sphinx-needs](https://sphinx-needs.com) directives and the [sphinx-hextra](https://github.com/patdhlk/sphinx-hextra) theme. Tooling-managed via [uv](https://docs.astral.sh/uv/).
+Engineering-as-code specification for the [taktora-executor](https://github.com/patdhlk/taktora) crate, authored as a [Sphinx](https://www.sphinx-doc.org) site with [sphinx-needs](https://sphinx-needs.com) directives and the [sphinx-hextra](https://github.com/patdhlk/sphinx-hextra) theme. Tooling-managed via [uv](https://docs.astral.sh/uv/).
 
 > **Personal experiment.** Same warning as the parent project: APIs and requirements may shift, no SLA, fork before relying on it.
 

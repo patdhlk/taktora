@@ -3,7 +3,7 @@
 # configuration (extensions, theme, etc.) lives in conf.py.
 
 [project]
-name = "sonic-spec"
+name = "taktora-spec"
 
 [needs]
 id_required = true
@@ -107,9 +107,9 @@ color = "#D8D8D8"
 style = "node"
 
 # ISO 26262 SEooC safety-concept types. The `assumed-*` prefix marks
-# work products that sit *above* sonic's boundary — illustrative inputs
+# work products that sit *above* taktora's boundary — illustrative inputs
 # from a synthetic item HARA that the integrator validates against
-# their real item. `tsr` and `aou` are sonic's own commitments and
+# their real item. `tsr` and `aou` are taktora's own commitments and
 # declarations, not assumed.
 
 [[needs.types]]

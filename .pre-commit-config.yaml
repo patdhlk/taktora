@@ -1,4 +1,4 @@
-# Pre-commit hooks for sonic.
+# Pre-commit hooks for taktora.
 #
 # Install:    pre-commit install && pre-commit install --hook-type pre-push
 # Run all:    pre-commit run --all-files

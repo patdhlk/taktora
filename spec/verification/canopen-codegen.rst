@@ -38,8 +38,8 @@ under ``crates/fieldbus-od-core/tests/``.
    :verifies: REQ_0700
 
    CI shell check: ``cargo tree -p fieldbus-od-core --no-default-features``
-   shall not list ``ethercrab``, ``socketcan``, ``sonic-connector-can``,
-   ``sonic-connector-ethercat``, or any I/O-bearing crate in the
+   shall not list ``ethercrab``, ``socketcan``, ``taktora-connector-can``,
+   ``taktora-connector-ethercat``, or any I/O-bearing crate in the
    resolved graph. Fails the CI job on any match.
 
 .. test:: fieldbus-od-core compiles under no_std + alloc
@@ -101,7 +101,7 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
 
    CI shell check: ``cargo tree -p canopen-eds`` shall not list
    ``canopen-eds-codegen``, ``canopen-eds-rt``,
-   ``sonic-connector-can``, ``socketcan``, or ``ethercrab`` anywhere
+   ``taktora-connector-can``, ``socketcan``, or ``ethercrab`` anywhere
    in the resolved graph.
 
 .. test:: Unknown sections survive as RawSection
@@ -197,16 +197,16 @@ Per-crate, snapshot-based. Live under
    :verifies: REQ_0735
 
    For an N-file fixture set, the call
-   ``generate(&files, &SonicBackend::default())`` produces a
+   ``generate(&files, &TaktoraBackend::default())`` produces a
    module with exactly N distinct device-struct definitions and
    one shared registry table.
 
 ----
 
-sonic backend snapshot tests
-----------------------------
+taktora backend snapshot tests
+------------------------------
 
-Live under ``crates/canopen-eds-codegen-sonic/tests/``.
+Live under ``crates/canopen-eds-codegen-taktora/tests/``.
 
 .. test:: EPOS4 backend output snapshot
    :id: TEST_0630
@@ -236,7 +236,7 @@ Live under ``crates/canopen-eds-codegen-sonic/tests/``.
    :verifies: REQ_0748
 
    A test crate at
-   ``crates/canopen-eds-codegen-sonic/tests/no_std_consumer/``
+   ``crates/canopen-eds-codegen-taktora/tests/no_std_consumer/``
    has ``#![no_std]`` and ``extern crate alloc;``, ``include!``s
    the generated module from a fixed input set, and compiles
    successfully. Catches any accidental ``std::``-qualified path
@@ -251,7 +251,7 @@ Live under ``crates/canopen-eds-codegen-sonic/tests/``.
    ``canopen-eds-codegen``, ``canopen-eds-build``,
    ``canopen-eds-cli``, and ``canopen-eds-verify`` must none of
    them list ``canopen-eds-rt`` in the dependency graph.
-   ``canopen-eds-codegen-sonic`` is the only crate where
+   ``canopen-eds-codegen-taktora`` is the only crate where
    ``canopen-eds-rt`` is allowed.
 
 .. test:: Object-dictionary emission gated by feature flag
@@ -321,7 +321,7 @@ Live under ``crates/canopen-eds-rt/tests/``.
    driving a mock ``SdoClient``. The test passes if compilation
    succeeds; catches any trait-method-async surface drift.
 
-.. test:: canopen-eds-rt is the trait home, not sonic-internal
+.. test:: canopen-eds-rt is the trait home, not taktora-internal
    :id: TEST_0642
    :status: open
    :verifies: REQ_0752
@@ -472,7 +472,7 @@ Live under ``crates/canopen-eds-verify/tests/``.
    White-box: ``cargo tree -p canopen-eds-verify`` lists
    ``canopen-eds`` as a direct dependency and does **not** list
    ``canopen-eds-codegen``, ``canopen-eds-rt``,
-   ``sonic-connector-can``, or ``socketcan`` anywhere in the
+   ``taktora-connector-can``, or ``socketcan`` anywhere in the
    graph.
 
 .. test:: Verifier exit codes follow the documented matrix
@@ -489,7 +489,7 @@ Live under ``crates/canopen-eds-verify/tests/``.
    :status: open
    :verifies: REQ_0784
 
-   Fixture JSON dump with ``"schema": "sonic.canopen.sdo-dump.v2"``.
+   Fixture JSON dump with ``"schema": "taktora.canopen.sdo-dump.v2"``.
    The verifier shall reject the input with a parse error (exit
    code ``2``) before any field comparison runs.
 
@@ -530,7 +530,7 @@ Verify the build-time determinism quality goal
    ``Cargo.toml`` and asserts the allowed-dependency matrix:
 
    * ``fieldbus-od-core``: no ``ethercrab``, no ``socketcan``, no
-     ``sonic-connector-*``, no ``canopen-eds-rt``.
+     ``taktora-connector-*``, no ``canopen-eds-rt``.
    * ``canopen-eds``: no ``canopen-eds-codegen``,
      no ``canopen-eds-rt``, no ``socketcan``, no ``ethercrab``.
    * ``canopen-eds-codegen``: no ``canopen-eds-rt``, no transport

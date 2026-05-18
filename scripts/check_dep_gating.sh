@@ -5,7 +5,7 @@
 # Exits non-zero if:
 #   - the default build pulls `zenoh`, OR
 #   - the feature build does NOT pull `zenoh v1.x`, OR
-#   - `sonic-connector-zenoh` fails to type-check in either
+#   - `taktora-connector-zenoh` fails to type-check in either
 #     configuration (MockZenohSession unreachable).
 #
 # Run from the workspace root (or any directory — the script
@@ -17,8 +17,8 @@
 # terminal-detection heuristics (CI is non-tty). Instead of anchoring
 # on the prefix, we require the literal token ` zenoh v<digit>` with
 # a leading space — that space distinguishes the real `zenoh v1.x`
-# dep lines from the workspace self-line `sonic-connector-zenoh
-# v0.1.0` (no space between `sonic-connector-` and `zenoh`).
+# dep lines from the workspace self-line `taktora-connector-zenoh
+# v0.1.0` (no space between `taktora-connector-` and `zenoh`).
 
 set -Eeuo pipefail
 shopt -s inherit_errexit 2>/dev/null || true
@@ -26,7 +26,7 @@ shopt -s inherit_errexit 2>/dev/null || true
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd -- "${SCRIPT_DIR}/.."
 
-readonly PKG="sonic-connector-zenoh"
+readonly PKG="taktora-connector-zenoh"
 readonly FEATURE="zenoh-integration"
 readonly ZENOH_RE=' zenoh v[0-9]'
 readonly ZENOH_V1_RE=' zenoh v1\.[0-9]'

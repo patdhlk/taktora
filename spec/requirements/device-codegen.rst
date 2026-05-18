@@ -5,7 +5,7 @@ This page captures the requirements for the **device-driver codegen
 toolchain**: a layered set of crates that translates EtherCAT ESI XML
 device descriptions into strongly-typed Rust driver modules at build
 time, with zero runtime XML parsing and no dependency on the
-``sonic-connector-ethercat`` runtime.
+``taktora-connector-ethercat`` runtime.
 
 The decomposition mirrors the convention established in
 :doc:`connector` and :doc:`plc-runtime`:
@@ -14,8 +14,8 @@ The decomposition mirrors the convention established in
   :need:`FEAT_0010` (PLC runtime heart), :need:`FEAT_0030` (Connector
   framework), and :need:`FEAT_0040` (Bounded global allocator). The
   codegen toolchain is a build-time concern orthogonal to the runtime
-  connector framework; it is not bound to sonic-executor or
-  sonic-connector and could be consumed by any ethercrab user.
+  connector framework; it is not bound to taktora-executor or
+  taktora-connector and could be consumed by any ethercrab user.
 * **Capability-cluster sub-features** — one per crate-layer concern,
   each ``:satisfies:`` :need:`FEAT_0050`.
 * **Requirements** — concrete shall-clauses that ``:satisfies:`` a
@@ -52,7 +52,7 @@ Top-level umbrella
       ``EsiDevice`` / ``EsiConfigurable`` traits the generated
       drivers implement.
 
-   The ``sonic-connector-ethercat`` crate (see :need:`FEAT_0041`) is
+   The ``taktora-connector-ethercat`` crate (see :need:`FEAT_0041`) is
    not part of this toolchain. It sits one layer above as a thin
    adapter that maps any ``EsiDevice`` into the
    ``ethercat_hal::EthercatDevice`` trait it already consumes. No
@@ -77,7 +77,7 @@ ESI parser
    :satisfies: FEAT_0050
 
    A pure parser crate. Reads ESI XML, emits a typed in-memory IR.
-   Knows nothing about codegen, ethercrab, or sonic-executor. Suitable
+   Knows nothing about codegen, ethercrab, or taktora-executor. Suitable
    for any downstream tool — codegen, network configurator, simulator,
    verifier.
 
@@ -300,7 +300,7 @@ ethercrab backend
    ``static`` table) that maps each emitted device's
    ``SubDeviceIdentity`` to a factory closure returning
    ``Box<dyn EsiDevice>``. Identity-based dispatch in downstream
-   code (e.g. ``sonic-connector-ethercat``) shall be reducible to a
+   code (e.g. ``taktora-connector-ethercat``) shall be reducible to a
    ``HashMap`` lookup against this table.
 
 .. req:: Generated code compiles under no_std + alloc
@@ -322,7 +322,7 @@ Runtime trait surface
    :satisfies: FEAT_0050
 
    The minimal trait pair the generated devices implement and the
-   ``sonic-connector-ethercat`` adapter consumes. Lives in a tiny
+   ``taktora-connector-ethercat`` adapter consumes. Lives in a tiny
    ``ethercat-esi-rt`` crate so the runtime contract is not coupled
    to either the codegen or the connector.
 
@@ -350,16 +350,16 @@ Runtime trait surface
    EsiError>``. Bring-up SDO writes (InitCmds, 0x1C12 / 0x1C13 PDO
    assignment writes) live inside the generated body of this method.
 
-.. req:: Traits live in ethercat-esi-rt, not sonic-connector
+.. req:: Traits live in ethercat-esi-rt, not taktora-connector
    :id: REQ_0532
    :status: open
    :satisfies: FEAT_0054
 
    ``EsiDevice`` and ``EsiConfigurable`` shall live in a dedicated
    ``ethercat-esi-rt`` crate. They shall not live in
-   ``sonic-connector-ethercat``, ``ethercat-hal``, or any other
-   sonic-internal crate, so any ethercrab user can adopt the
-   generated drivers without depending on sonic.
+   ``taktora-connector-ethercat``, ``ethercat-hal``, or any other
+   taktora-internal crate, so any ethercrab user can adopt the
+   generated drivers without depending on taktora.
 
 .. req:: Object dictionary emission is a default-off cargo feature
    :id: REQ_0533
@@ -597,7 +597,7 @@ not do, and why. Each rejected requirement ``:satisfies:``
    generated modules shall not need to ship XML files alongside
    their binary.
 
-.. req:: NO modification of sonic-connector-ethercat runtime
+.. req:: NO modification of taktora-connector-ethercat runtime
    :id: REQ_0594
    :status: rejected
    :satisfies: FEAT_0050

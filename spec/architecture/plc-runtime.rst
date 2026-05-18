@@ -74,7 +74,7 @@ crossbeam re-dispatch channel that ``Graph::run_once`` allocates today.
    (per :need:`REQ_0060`).
    ✅ Worst-case re-dispatch latency is bounded by ring capacity,
    not allocator behaviour.
-   ❌ Adds one ``unsafe`` block to ``sonic-executor`` (the SPSC
+   ❌ Adds one ``unsafe`` block to ``taktora-executor`` (the SPSC
    ring push/pop), justified by a ``// SAFETY:`` comment and
    covered by ``loom`` tests under feature flag.
    ❌ Vertex count is now an explicit ``Executor::build`` input —
@@ -129,7 +129,7 @@ Implementation
 
    Concrete Rust changes that realise :need:`BB_0023`.
 
-   **In ``crates/sonic-executor/src/executor.rs``**
+   **In ``crates/taktora-executor/src/executor.rs``**
 
    * Add ``iter_err: Arc<Mutex<Option<ExecutorError>>>`` field on
      ``Executor`` (built once in ``Executor::build``). In
@@ -146,7 +146,7 @@ Implementation
      .job.as_deref_mut().unwrap() as *mut _))`` — no per-iter
      ``Box::new`` allocation.
 
-   **In ``crates/sonic-executor/src/pool.rs``**
+   **In ``crates/taktora-executor/src/pool.rs``**
 
    * Generalise the worker job type from ``Box<dyn FnOnce>`` to
      an enum ``Job { Owned(Box<dyn FnOnce>), Borrowed(BorrowedJob)
@@ -155,7 +155,7 @@ Implementation
      caller-owned closure path that performs no per-call
      allocation.
 
-   **In ``crates/sonic-executor/src/graph.rs``**
+   **In ``crates/taktora-executor/src/graph.rs``**
 
    * Move ``counters``, ``pending``, ``stop_flag``,
      ``stop_chain_seen``, ``first_err``, ``done_cv``,
@@ -198,13 +198,13 @@ Implementation
      exposed the race that had previously been hidden by
      ``Box::new`` latency.)
 
-   **In ``crates/sonic-executor/src/task_kind.rs``**
+   **In ``crates/taktora-executor/src/task_kind.rs``**
 
    * ``TaskKind::Graph(Box<Graph>)`` — Graph must live at a
      stable heap address because per-vertex closures capture
      ``*const Graph``.
 
-   **New module ``crates/sonic-executor/src/ready_ring.rs``**
+   **New module ``crates/taktora-executor/src/ready_ring.rs``**
 
    * ``pub(crate) struct ReadyRing { buf: Box<[AtomicUsize]>,
      mask: usize, head: AtomicUsize, tail: AtomicUsize }``
@@ -221,7 +221,7 @@ Implementation
 
    **Verification harness**
 
-   * ``crates/sonic-executor/tests/no_alloc_dispatch.rs`` ships
+   * ``crates/taktora-executor/tests/no_alloc_dispatch.rs`` ships
      a hand-rolled counting ``#[global_allocator]`` (no new
      workspace dependency — covers pool worker threads, which
      ``assert_no_alloc``'s thread-local model does not).
@@ -324,7 +324,7 @@ per-sample update path), and per-task aggregate slots allocated at
    pre-allocated buffers on ``Executor``; the caller may clone it for
    off-stack consumption but the runtime side never allocates.
 
-.. impl:: Stats module — sonic-executor/src/stats/
+.. impl:: Stats module — taktora-executor/src/stats/
    :id: IMPL_0070
    :status: open
    :implements: BB_0050, BB_0051
@@ -333,7 +333,7 @@ per-sample update path), and per-task aggregate slots allocated at
    Concrete Rust changes that realise :need:`BB_0050` and
    :need:`BB_0051`.
 
-   **New module ``crates/sonic-executor/src/stats/``**
+   **New module ``crates/taktora-executor/src/stats/``**
 
    * ``mod.rs`` — public re-exports (``CycleStats``,
      ``CycleObservation``, ``StatsSnapshot``).
@@ -346,14 +346,14 @@ per-sample update path), and per-task aggregate slots allocated at
      jitter_ns, took_ns }`` value type carried by
      ``on_cycle_stats``.
 
-   **In ``crates/sonic-executor/src/observer.rs``**
+   **In ``crates/taktora-executor/src/observer.rs``**
 
    * Extend ``Observer`` with a default-method
      ``fn on_cycle_stats(&self, _: &CycleObservation) {}`` — the
      default no-op preserves backward compatibility for existing
      ``Observer`` implementations.
 
-   **In ``crates/sonic-executor/src/executor.rs``**
+   **In ``crates/taktora-executor/src/executor.rs``**
 
    * Add a ``Vec<CycleStats>`` field on ``Executor``, sized at
      ``build`` time from the registered-task count. Pre-allocate per
@@ -415,8 +415,8 @@ sole measurement path.
      dependency as the auto-gate, with slower regression detection.
      Rejected for the same reason.
    * *Run ``cyclictest`` only, no harness.* Loses the link between
-     measurements and the ``sonic-executor`` dispatch path. Rejected
-     because the relevant question is "what jitter does sonic add on
+     measurements and the ``taktora-executor`` dispatch path. Rejected
+     because the relevant question is "what jitter does taktora add on
      top of the kernel?", which ``cyclictest`` alone cannot answer.
 
    **Consequences.**
@@ -465,7 +465,7 @@ sole measurement path.
 
    **New workspace member ``xtask/preempt-rt/``**
 
-   * ``Cargo.toml`` — depends on ``sonic-executor`` plus minimal
+   * ``Cargo.toml`` — depends on ``taktora-executor`` plus minimal
      transitive crates. Not a default workspace build target.
    * ``src/main.rs`` — argument parsing (``clap``), executor
      construction, ``Observer`` wiring, run loop.

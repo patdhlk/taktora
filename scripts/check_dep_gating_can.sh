@@ -5,7 +5,7 @@
 # Exits non-zero if:
 #   - the default build pulls `socketcan`, OR
 #   - the feature build (on Linux) does NOT pull `socketcan v3.x`, OR
-#   - `sonic-connector-can` fails to type-check in either
+#   - `taktora-connector-can` fails to type-check in either
 #     configuration (MockCanInterface unreachable).
 #
 # On non-Linux hosts the feature build legitimately omits the dep
@@ -14,7 +14,7 @@
 #
 # Same regex / tree-prefix rationale as
 # scripts/check_dep_gating.sh — match on a leading space so the
-# crate's self-line (`sonic-connector-can v0.1.0`) is not
+# crate's self-line (`taktora-connector-can v0.1.0`) is not
 # misclassified.
 
 set -Eeuo pipefail
@@ -23,7 +23,7 @@ shopt -s inherit_errexit 2>/dev/null || true
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd -- "${SCRIPT_DIR}/.."
 
-readonly PKG="sonic-connector-can"
+readonly PKG="taktora-connector-can"
 readonly FEATURE="socketcan-integration"
 readonly SOCKETCAN_RE=' socketcan v[0-9]'
 readonly SOCKETCAN_V3_RE=' socketcan v3\.[0-9]'

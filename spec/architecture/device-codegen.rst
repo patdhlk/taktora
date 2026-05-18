@@ -94,7 +94,7 @@ Quality goals capture the qualities the architecture is optimised for.
    :refines: FEAT_0053
 
    The ethercrab backend shall target the ethercrab API exposed by
-   ``ethercrab = "0.7"`` (or whichever version sonic-connector-ethercat
+   ``ethercrab = "0.7"`` (or whichever version taktora-connector-ethercat
    pins, per :need:`BB_0030`-style pinning). ``SubDevicePreOperational``,
    ``SubDeviceIdentity``, and the SDO write helpers are the
    contact surface; the backend shall not depend on private types.
@@ -107,7 +107,7 @@ Quality goals capture the qualities the architecture is optimised for.
    Generated ``decode_inputs`` / ``encode_outputs`` shall operate
    on ``bitvec::slice::BitSlice<u8, Lsb0>``, matching the
    :need:`REQ_0326` / :need:`REQ_0327` PDI access pattern already
-   in use by ``sonic-connector-ethercat``. A second bit-slice
+   in use by ``taktora-connector-ethercat``. A second bit-slice
    abstraction shall not be introduced.
 
 .. constraint:: no_std + alloc baseline for parser and runtime trait
@@ -143,7 +143,7 @@ Quality goals capture the qualities the architecture is optimised for.
 
    Four layers, strict left-to-right dependency. Each crate has one
    job and depends only on crates to its left. The
-   ``sonic-connector-ethercat`` consumer (:need:`FEAT_0041`) sits
+   ``taktora-connector-ethercat`` consumer (:need:`FEAT_0041`) sits
    to the right of the runtime trait crate and is unaware of XML
    or codegen.
 
@@ -167,7 +167,7 @@ Quality goals capture the qualities the architecture is optimised for.
         end
         subgraph Cons["Consumers"]
           USER["any ethercrab user<br/>(includes generated code)"]
-          SCE["sonic-connector-ethercat<br/>thin EsiDevice adapter"]
+          SCE["taktora-connector-ethercat<br/>thin EsiDevice adapter"]
         end
         P --> G
         G --> B
@@ -480,12 +480,12 @@ requirement or feature it answers.
    VerifyError>``). Depends on ``ethercat-esi`` only; the SII
    decoder lives in this crate to keep :need:`REQ_0520` honest.
 
-.. building-block:: sonic-connector-ethercat EsiDevice adapter
+.. building-block:: taktora-connector-ethercat EsiDevice adapter
    :id: BB_0067
    :status: open
    :implements: FEAT_0050
 
-   The thin glue inside ``sonic-connector-ethercat`` (:need:`BB_0030`
+   The thin glue inside ``taktora-connector-ethercat`` (:need:`BB_0030`
    neighbourhood) that maps any ``EsiDevice`` into whatever
    internal device-trait the connector consumes. Written once, not
    touched per terminal addition. Concrete shape is local to the
@@ -579,7 +579,7 @@ requirement or feature it answers.
    :refines: FEAT_0050
 
    All seven toolchain crates live in ``crates/`` alongside the
-   existing ``sonic-connector-ethercat`` and friends. The
+   existing ``taktora-connector-ethercat`` and friends. The
    workspace ``Cargo.toml`` adds them to ``members``; pinning
    matches the rest of the workspace (``rust-toolchain.toml`` MSRV
    1.85, edition 2024 per :need:`CON_0003`-style constraint
@@ -587,7 +587,7 @@ requirement or feature it answers.
 
    No deployment-time changes: the toolchain is a build-time
    artefact. The only runtime consequence is that
-   ``sonic-connector-ethercat`` gains a path-dep on
+   ``taktora-connector-ethercat`` gains a path-dep on
    ``ethercat-esi-rt`` and an internal ``EsiDevice`` adapter.
 
 ----
@@ -637,7 +637,7 @@ in :doc:`../verification/device-codegen` exercise each one.
    reaches ~10 KB of rodata. Mitigated by the feature flag
    (:need:`ADR_0075`); becomes a tracked debt if a downstream
    consumer enables the feature and ships to constrained MCU
-   targets. Not yet a problem in the current sonic deployment
+   targets. Not yet a problem in the current taktora deployment
    (Linux gateway only — :need:`REQ_0325`).
 
 .. risk:: Beckhoff vendor extensions churn the IR
@@ -662,7 +662,7 @@ in :doc:`../verification/device-codegen` exercise each one.
    minor-version bump can require a backend re-emit. Mitigation:
    pin ethercrab in ``ethercat-esi-codegen-ethercrab``'s
    ``Cargo.toml`` to the same range as
-   ``sonic-connector-ethercat``; bump in lockstep.
+   ``taktora-connector-ethercat``; bump in lockstep.
 
 .. risk:: ESI XML schema drift across vendors
    :id: RISK_0013

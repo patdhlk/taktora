@@ -1,0 +1,43 @@
+[package]
+name         = "taktora-executor"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+description  = "Execution framework for iceoryx2-based Rust applications."
+
+[dependencies]
+iceoryx2          = { workspace = true }
+thiserror         = { workspace = true }
+bitflags          = { workspace = true }
+crossbeam-channel = { workspace = true }
+crossbeam-utils   = { workspace = true }
+num_cpus          = { workspace = true }
+
+tracing       = { workspace = true, optional = true }
+core_affinity = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest            = { workspace = true }
+taktora-bounded-alloc = { path = "../taktora-bounded-alloc" }
+
+[features]
+default      = []
+tracing      = ["dep:tracing"]
+thread_attrs = ["dep:core_affinity", "dep:libc"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"

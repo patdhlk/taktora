@@ -3,8 +3,8 @@
 Technical Safety Concept — TSRs
 ===============================
 
-Refinement of the AFSRs (see :doc:`fsc`) onto sonic's concrete crates.
-TSRs are sonic's own commitments — not assumed. They take the ASIL of
+Refinement of the AFSRs (see :doc:`fsc`) onto taktora's concrete crates.
+TSRs are taktora's own commitments — not assumed. They take the ASIL of
 their parent AFSR (B(D)).
 
 Each TSR carries a **status** field describing today's implementation
@@ -19,12 +19,12 @@ state, with the convention:
    :asil: B(D)
    :refines: AFSR_0003
 
-   The bounded allocator (``sonic-bounded-alloc``) shall enforce hard
+   The bounded allocator (``taktora-bounded-alloc``) shall enforce hard
    compile-time caps on per-allocation size and total live blocks;
    allocation requests exceeding the cap shall return null per the
    ``core::alloc::GlobalAlloc`` contract.
 
-   :Allocates to: ``sonic-bounded-alloc``
+   :Allocates to: ``taktora-bounded-alloc``
    :Today: Satisfied by FEAT_0040.
 
 .. tsr:: Per-integrity-level allocation quotas
@@ -37,7 +37,7 @@ state, with the convention:
    integrity level, such that exhaustion of the QM-grade pool cannot
    deny allocation from the safety-critical pool.
 
-   :Allocates to: ``sonic-bounded-alloc``
+   :Allocates to: ``taktora-bounded-alloc``
    :Today: EXT — current allocator has a single global pool. Requires
        API extension to take an integrity-level argument at allocator-init.
 
@@ -52,7 +52,7 @@ state, with the convention:
    reject in-process co-hosting of mixed integrity levels and require
    QM-grade items to run in a separate OS process.
 
-   :Allocates to: ``sonic-executor``
+   :Allocates to: ``taktora-executor``
    :Today: NEW — neither the trait nor the registration API today
        carries an integrity-level field.
 
@@ -65,7 +65,7 @@ state, with the convention:
    Missed-deadline detection shall fire within one cycle of the
    configured interval and propagate via ``ExecutionMonitor``.
 
-   :Allocates to: ``sonic-executor``
+   :Allocates to: ``taktora-executor``
    :Today: Satisfied by the executor's existing deadline monitor.
 
 .. tsr:: Compile-time channel directionality
@@ -79,7 +79,7 @@ state, with the convention:
    construction shall not be able to forge a writer from a reader
    handle.
 
-   :Allocates to: ``sonic-connector-host``, ``sonic-connector-core``
+   :Allocates to: ``taktora-connector-host``, ``taktora-connector-core``
    :Today: Satisfied by BB_0001, BB_0005.
 
 .. tsr:: Bounded health-event latency
@@ -92,7 +92,7 @@ state, with the convention:
    50 ms) of a connector state transition
    (Healthy → Degraded → Faulted).
 
-   :Allocates to: ``sonic-connector-host``, ``sonic-connector-zenoh``
+   :Allocates to: ``taktora-connector-host``, ``taktora-connector-zenoh``
    :Today: Satisfied by REQ_0440..REQ_0444.
 
 .. tsr:: Single-publisher iceoryx2 topology for safety-critical channels
@@ -106,7 +106,7 @@ state, with the convention:
    holds the only write capability over the underlying shared-memory
    segment.
 
-   :Allocates to: ``sonic-connector-transport-iox``
+   :Allocates to: ``taktora-connector-transport-iox``
    :Today: Single-publisher is the iceoryx2 default for PublishSubscribe
        services; the transport-iox factory does not override.
 
@@ -121,7 +121,7 @@ state, with the convention:
    shall raise a ``HealthEvent`` and discard the frame without
    surfacing it to the reader.
 
-   :Allocates to: ``sonic-connector-transport-iox``
+   :Allocates to: ``taktora-connector-transport-iox``
    :Today: EXT — current ``ConnectorEnvelope<N>`` carries a
        ``CorrelationId`` but no sequence counter or CRC.
 
@@ -131,12 +131,12 @@ state, with the convention:
    :asil: B(D)
    :refines: AFSR_0001, AFSR_0002
 
-   Sonic shall provide a hosting mode in which safety-critical items
+   Taktora shall provide a hosting mode in which safety-critical items
    and QM-grade items run in distinct OS processes communicating
    exclusively through iceoryx2 shared-memory channels with per-process
    read/write capability.
 
-   :Allocates to: ``sonic-executor``, ``sonic-connector-host``
+   :Allocates to: ``taktora-executor``, ``taktora-connector-host``
    :Today: NEW — current executor hosts all items in one process.
 
 .. tsr:: Heartbeat for Element B monitor
@@ -149,7 +149,7 @@ state, with the convention:
    ``HealthEvent`` at a period at most FTTI/2 (50 ms) to support the
    integrator's diverse monitor (Element B per :doc:`decomposition`).
 
-   :Allocates to: ``sonic-executor``, ``sonic-connector-host``
+   :Allocates to: ``taktora-executor``, ``taktora-connector-host``
    :Today: NEW — no liveness heartbeat exists today.
 
 TSR coverage summary
@@ -171,4 +171,4 @@ isolation), since startup verification is the natural admission-time
 companion to the process-isolation invariant.
 
 The five ``draft`` TSRs are the substance of the context-based isolation
-work item and are the subject of a follow-on sonic implementation plan.
+work item and are the subject of a follow-on taktora implementation plan.

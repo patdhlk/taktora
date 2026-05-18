@@ -3,9 +3,9 @@
 Assumptions of Use
 ==================
 
-The SEooC contract with the integrator. Each AoU is a claim sonic
+The SEooC contract with the integrator. Each AoU is a claim taktora
 *makes* about the integrator's environment or process. The integrator
-MUST validate every AoU before claiming any ASIL for a sonic-hosted
+MUST validate every AoU before claiming any ASIL for a taktora-hosted
 item.
 
 .. aou:: Diverse Element B monitor at ASIL B(D)
@@ -13,7 +13,7 @@ item.
    :status: open
 
    The integrator supplies a diverse, independent **Element B monitor**
-   of equivalent ASIL B(D) capability that observes sonic's outputs and
+   of equivalent ASIL B(D) capability that observes taktora's outputs and
    forces safe state on detected omission or value failure.
 
    :Validates: Decomposition (:doc:`decomposition`)
@@ -22,7 +22,7 @@ item.
    :id: AOU_0002
    :status: open
 
-   Element A (sonic) and Element B (monitor) run on independent CPU
+   Element A (taktora) and Element B (monitor) run on independent CPU
    cores or independent SoCs, with independent power and clock
    domains where feasible.
 
@@ -32,9 +32,9 @@ item.
    :id: AOU_0003
    :status: open
 
-   The integrator implements the **receiver side** of sonic's heartbeat
+   The integrator implements the **receiver side** of taktora's heartbeat
    protocol and the safe-state forcing path with reaction time at most
-   ``FTTI − sonic's emission period`` (at most 50 ms given FTTI=100 ms
+   ``FTTI − taktora's emission period`` (at most 50 ms given FTTI=100 ms
    and heartbeat period ≤ FTTI/2).
 
    :Validates: :need:`TSR_0010`
@@ -76,7 +76,7 @@ item.
 
    The integrator's application logic enters a defined safe state on
    receipt of ``HealthEvent::Faulted`` or on absence of expected channel
-   data within deadline. Sonic raises faults; it does not define what
+   data within deadline. Taktora raises faults; it does not define what
    safe state means for any particular application.
 
    :Validates: :need:`AFSR_0004`
@@ -99,6 +99,6 @@ item.
 
    The integrator confirms that the host OS kernel, libc, iceoryx2
    runtime, and Rust toolchain are qualified to at least ASIL B(D).
-   Sonic does not qualify these — they sit below sonic in the stack.
+   Taktora does not qualify these — they sit below taktora in the stack.
 
    :Validates: Whole stack

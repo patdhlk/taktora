@@ -1,4 +1,4 @@
-# workflows.yaml — sonic-spec status lifecycle.
+# workflows.yaml — taktora-spec status lifecycle.
 #
 # Source of truth: spec/schemas.json `status-enum` rule. The eight states
 # below are exactly the values that schemas.json's enum permits, so any
@@ -17,7 +17,7 @@ lifecycle_states:
   - implemented   # implementation has landed; trace closed via :implements:
   - rejected      # explicitly rejected (anti-goals, deprecated proposals)
   - assumed       # SEooC: assumed input from the integrator's HARA, not
-                  # verified by sonic — used by assumed-hazard /
+                  # verified by taktora — used by assumed-hazard /
                   # assumed-safety-goal / assumed-fsr artefacts
   - accepted      # design decision recorded and accepted; typically used
                   # by arch-decision artefacts whose context is settled
@@ -37,7 +37,7 @@ transitions:
   - {from: review,      to: draft,       requires: []}
   - {from: approved,    to: draft,       requires: []}
   # SEooC: assumed work products stay in the assumed state — they are
-  # integrator inputs that sonic does not advance through the lifecycle.
+  # integrator inputs that taktora does not advance through the lifecycle.
   - {from: open,        to: assumed,     requires: []}
   # arch-decision: open → accepted captures the "decision recorded and
   # context is settled" transition without forcing the full review chain.

@@ -1,13 +1,13 @@
-# sonic
+# taktora
 
 A Rust workspace exploring how to build a high-level execution framework and a
 connector framework on top of [iceoryx2](https://github.com/eclipse-iceoryx/iceoryx2).
 
 Two layered pieces:
 
-- **`sonic-executor`** — items triggered by IPC, intervals, and request/response
+- **`taktora-executor`** — items triggered by IPC, intervals, and request/response
   activity; sequential chains; parallel DAGs; signal/slot; lifecycle observability.
-- **`sonic-connector-*`** — typed channels with codec-pluggable payloads,
+- **`taktora-connector-*`** — typed channels with codec-pluggable payloads,
   uniform connector health, and two reference connectors — EtherCAT (driving a
   SubDevice's process data) and Zenoh (pub/sub + query/reply over a Zenoh
   session) — both exposing the same plugin-facing `ChannelWriter` /
@@ -20,7 +20,7 @@ Two layered pieces:
 > independently audited, and there is no SLA, support, or backwards-compatibility
 > guarantee. Use it to learn from, fork, or vendor in — not to ship.
 
-**Specification:** [https://patdhlk.com/sonic/](https://patdhlk.com/sonic/) — built from `spec/` on every push to `main`.
+**Specification:** [https://patdhlk.com/taktora/](https://patdhlk.com/taktora/) — built from `spec/` on every push to `main`.
 
 ## What's here
 
@@ -28,22 +28,22 @@ Ten crates in the workspace, layered:
 
 | Crate | Purpose |
 |---|---|
-| [`sonic-executor`](crates/sonic-executor) | The execution core. Items, triggers, executor, runner, channels, services, chains, graphs, signal/slot, observer + execution monitor, optional thread tuning. |
-| [`sonic-executor-tracing`](crates/sonic-executor-tracing) | `Observer` adapter forwarding executor lifecycle and user events to the global `tracing` subscriber. |
-| [`sonic-bounded-alloc`](crates/sonic-bounded-alloc) | Static pre-allocated `#[global_allocator]` with hard caps on per-allocation size and total live blocks. `FEAT_0040`. |
-| [`sonic-connector-core`](crates/sonic-connector-core) | Framework-level traits and types shared by every connector — `Routing`, `ChannelDescriptor`, `PayloadCodec`, `ConnectorHealth` / `HealthEvent`, `ReconnectPolicy`, `ConnectorError`. `BB_0001`. |
-| [`sonic-connector-transport-iox`](crates/sonic-connector-transport-iox) | iceoryx2-backed `ChannelWriter` / `ChannelReader` + `ConnectorEnvelope` POD wire format + `ServiceFactory`. `BB_0002`. |
-| [`sonic-connector-codec`](crates/sonic-connector-codec) | `PayloadCodec` implementations. Ships `JsonCodec`; codec is compile-time-dispatched, so additional codecs are plug-in. `BB_0003`. |
-| [`sonic-connector-host`](crates/sonic-connector-host) | `Connector` trait + `ConnectorHost` / `ConnectorGateway` builders + `HealthSubscription`. The seam at which protocol-specific connectors plug into an `Executor`. `BB_0005`. |
-| [`sonic-connector-ethercat`](crates/sonic-connector-ethercat) | Reference EtherCAT connector built on the framework. Pluggable `BusDriver` (mock or `ethercrab`), bit-slice PDI routing, gateway-side dispatcher that hops bytes between iceoryx2 and the SubDevice PDI each cycle. `BB_0030` / `FEAT_0041`. |
-| [`sonic-connector-zenoh`](crates/sonic-connector-zenoh) | Reference Zenoh connector. Pluggable `ZenohSessionLike` back-end (mock or `zenoh::Session`), pub/sub + query/reply with timeout-correct sealed-queries handling, peer-count-driven health. `BB_0040` / `FEAT_0042`. |
-| [`sonic-replay`](crates/sonic-replay) | Empty placeholder for an eventual replay coordinator. Do not depend on it. |
+| [`taktora-executor`](crates/taktora-executor) | The execution core. Items, triggers, executor, runner, channels, services, chains, graphs, signal/slot, observer + execution monitor, optional thread tuning. |
+| [`taktora-executor-tracing`](crates/taktora-executor-tracing) | `Observer` adapter forwarding executor lifecycle and user events to the global `tracing` subscriber. |
+| [`taktora-bounded-alloc`](crates/taktora-bounded-alloc) | Static pre-allocated `#[global_allocator]` with hard caps on per-allocation size and total live blocks. `FEAT_0040`. |
+| [`taktora-connector-core`](crates/taktora-connector-core) | Framework-level traits and types shared by every connector — `Routing`, `ChannelDescriptor`, `PayloadCodec`, `ConnectorHealth` / `HealthEvent`, `ReconnectPolicy`, `ConnectorError`. `BB_0001`. |
+| [`taktora-connector-transport-iox`](crates/taktora-connector-transport-iox) | iceoryx2-backed `ChannelWriter` / `ChannelReader` + `ConnectorEnvelope` POD wire format + `ServiceFactory`. `BB_0002`. |
+| [`taktora-connector-codec`](crates/taktora-connector-codec) | `PayloadCodec` implementations. Ships `JsonCodec`; codec is compile-time-dispatched, so additional codecs are plug-in. `BB_0003`. |
+| [`taktora-connector-host`](crates/taktora-connector-host) | `Connector` trait + `ConnectorHost` / `ConnectorGateway` builders + `HealthSubscription`. The seam at which protocol-specific connectors plug into an `Executor`. `BB_0005`. |
+| [`taktora-connector-ethercat`](crates/taktora-connector-ethercat) | Reference EtherCAT connector built on the framework. Pluggable `BusDriver` (mock or `ethercrab`), bit-slice PDI routing, gateway-side dispatcher that hops bytes between iceoryx2 and the SubDevice PDI each cycle. `BB_0030` / `FEAT_0041`. |
+| [`taktora-connector-zenoh`](crates/taktora-connector-zenoh) | Reference Zenoh connector. Pluggable `ZenohSessionLike` back-end (mock or `zenoh::Session`), pub/sub + query/reply with timeout-correct sealed-queries handling, peer-count-driven health. `BB_0040` / `FEAT_0042`. |
+| [`taktora-replay`](crates/taktora-replay) | Empty placeholder for an eventual replay coordinator. Do not depend on it. |
 
 ## Executor quick start
 
 ```rust,no_run
 use core::time::Duration;
-use sonic_executor::{item_with_triggers, ControlFlow, Executor};
+use taktora_executor::{item_with_triggers, ControlFlow, Executor};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut exec = Executor::builder().worker_threads(0).build()?;
@@ -70,25 +70,25 @@ either `Continue`, `StopChain`, or an error.
 ```rust
 struct MyTask { /* state */ }
 
-impl sonic_executor::ExecutableItem for MyTask {
+impl taktora_executor::ExecutableItem for MyTask {
     fn declare_triggers(
         &mut self,
-        d: &mut sonic_executor::TriggerDeclarer<'_>,
-    ) -> Result<(), sonic_executor::ExecutorError> {
+        d: &mut taktora_executor::TriggerDeclarer<'_>,
+    ) -> Result<(), taktora_executor::ExecutorError> {
         d.interval(core::time::Duration::from_millis(100));
         Ok(())
     }
     fn execute(
         &mut self,
-        _ctx: &mut sonic_executor::Context<'_>,
-    ) -> sonic_executor::ExecuteResult {
+        _ctx: &mut taktora_executor::Context<'_>,
+    ) -> taktora_executor::ExecuteResult {
         // do work
-        Ok(sonic_executor::ControlFlow::Continue)
+        Ok(taktora_executor::ControlFlow::Continue)
     }
 }
 ```
 
-Or the closure-based path: `sonic_executor::item(closure)` and
+Or the closure-based path: `taktora_executor::item(closure)` and
 `item_with_triggers(declare_closure, execute_closure)`.
 
 ### Publishing options
@@ -106,7 +106,7 @@ on the sender's side:
 
 For large types use `loan` with `MaybeUninit::write(value)` or iceoryx2's
 `placement_default!` macro to get the full zero-copy benefit. The
-[`loan_demo`](crates/sonic-executor/examples/loan_demo.rs) example sends 1 KB
+[`loan_demo`](crates/taktora-executor/examples/loan_demo.rs) example sends 1 KB
 payloads constructed entirely in shared memory.
 
 ### Composition
@@ -121,13 +121,13 @@ payloads constructed entirely in shared memory.
 - `signal_slot::pair(&mut exec, topic)` — pre-built `ExecutableItem`s wrapping
   a `Channel<T>` for chain composition with `before_send`/`after_recv` hooks.
 
-See `crates/sonic-executor/examples/` for runnable variants of each.
+See `crates/taktora-executor/examples/` for runnable variants of each.
 
 ### Observability
 
 - **`Observer`** trait — `on_executor_up/down/error`, `on_app_start/stop/error`,
   `on_send_event`. No-op default impls; non-blocking. The
-  `sonic-executor-tracing` crate ships a ready-made adapter to the `tracing`
+  `taktora-executor-tracing` crate ships a ready-made adapter to the `tracing`
   ecosystem.
 - **`ExecutionMonitor`** trait — `pre_execute(task, at)` /
   `post_execute(task, at, took, ok)`. Raw timestamps; build expectations on top.
@@ -139,7 +139,7 @@ Both are configured via `ExecutorBuilder::observer(...)` /
 
 A protocol-agnostic surface for getting data into and out of an `Executor`.
 Each concrete connector implements the `Connector` trait from
-`sonic-connector-host`:
+`taktora-connector-host`:
 
 ```rust,ignore
 pub trait Connector: Send + 'static {
@@ -166,7 +166,7 @@ between iceoryx2 and the protocol-specific I/O surface.
 
 ### EtherCAT reference connector
 
-[`sonic-connector-ethercat`](crates/sonic-connector-ethercat) is the first
+[`taktora-connector-ethercat`](crates/taktora-connector-ethercat) is the first
 concrete protocol. After `register_with`, calling `ChannelWriter::send(value)`
 on the plugin side causes a bit to flip on the addressed SubDevice's PDI
 each cycle:
@@ -201,7 +201,7 @@ read-modify-write.
 
 ### Zenoh reference connector
 
-[`sonic-connector-zenoh`](crates/sonic-connector-zenoh) is the second
+[`taktora-connector-zenoh`](crates/taktora-connector-zenoh) is the second
 concrete protocol. It exposes pub/sub on the standard `ChannelWriter` /
 `ChannelReader` handles and query/reply through the connector's
 `ZenohQuerier` / `ZenohQueryable` handles, all over a single Zenoh session:
@@ -249,11 +249,11 @@ the WaitSet thread.
 
 | Flag             | Crate | Default | Effect                                     |
 |------------------|---|---------|--------------------------------------------|
-| `tracing`        | `sonic-executor` | off     | Add the `tracing` crate as a dependency for adapter integrations. |
-| `thread_attrs`   | `sonic-executor` | off     | Core-affinity, thread name prefix, and (Linux) `SCHED_FIFO` priority on the executor's worker pool. |
-| `json`           | `sonic-connector-codec` | **on** | `JsonCodec` via `serde_json`. |
-| `bus-integration`| `sonic-connector-ethercat` | off | Pull `ethercrab` and expose `EthercrabBusDriver`. Off by default so consumers that only want the framework types and pure-logic helpers don't pull ethercrab's transitive dependencies. |
-| `zenoh-integration`| `sonic-connector-zenoh` | off | Pull `zenoh` 1.x (with `transport_tcp` enabled) and expose `RealZenohSession`. Off by default so consumers that only want the framework types and `MockZenohSession` don't pull zenoh's transitive dependencies. |
+| `tracing`        | `taktora-executor` | off     | Add the `tracing` crate as a dependency for adapter integrations. |
+| `thread_attrs`   | `taktora-executor` | off     | Core-affinity, thread name prefix, and (Linux) `SCHED_FIFO` priority on the executor's worker pool. |
+| `json`           | `taktora-connector-codec` | **on** | `JsonCodec` via `serde_json`. |
+| `bus-integration`| `taktora-connector-ethercat` | off | Pull `ethercrab` and expose `EthercrabBusDriver`. Off by default so consumers that only want the framework types and pure-logic helpers don't pull ethercrab's transitive dependencies. |
+| `zenoh-integration`| `taktora-connector-zenoh` | off | Pull `zenoh` 1.x (with `transport_tcp` enabled) and expose `RealZenohSession`. Off by default so consumers that only want the framework types and `MockZenohSession` don't pull zenoh's transitive dependencies. |
 
 iceoryx2 itself handles SIGINT/SIGTERM natively — no `ctrlc` feature is
 needed and the loop exits cleanly on either signal.
@@ -277,7 +277,7 @@ The publisher's send methods return `NotifyOutcome` so callers can detect
 this programmatically without parsing logs:
 
 ```rust,no_run
-# use sonic_executor::Publisher;
+# use taktora_executor::Publisher;
 # fn run(publisher: Publisher<u64>) -> Result<(), Box<dyn std::error::Error>> {
 let outcome = publisher.send_copy(42_u64)?;
 if !outcome.delivered_to_any_listener() {
@@ -345,9 +345,9 @@ This is **pre-1.0 personal experiment code.** Concretely:
   two assumed safety goals, five AFSRs, ten TSRs allocated across the
   workspace, a Freedom-From-Interference argument, and a nine-item
   Assumption-of-Use contract. ASIL D is claimed via ISO 26262-9 §5
-  decomposition (sonic as `ASIL B(D)`, a diverse integrator-supplied
+  decomposition (taktora as `ASIL B(D)`, a diverse integrator-supplied
   monitor as the second `ASIL B(D)`) — the independence argument is
-  **not closed by sonic** and the whole concept has not been assessed.
+  **not closed by taktora** and the whole concept has not been assessed.
 - No version has been published to crates.io. There is no support, no
   release cadence, no SLA, and no backwards-compatibility guarantee.
 

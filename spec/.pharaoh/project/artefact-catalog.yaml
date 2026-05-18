@@ -1,4 +1,4 @@
-# artefact-catalog.yaml — sonic-spec per-type policy.
+# artefact-catalog.yaml — taktora-spec per-type policy.
 #
 # Source of truth alignment:
 #   - directive→prefix mapping  : spec/ubproject.toml [[needs.types]]
@@ -142,7 +142,7 @@ term:
 # ----------------------------------------------- ISO 26262 SEooC safety
 
 # 'assumed-*' types carry safety inputs that come from the integrator's
-# real HARA — sonic does not own them and does not advance them through
+# real HARA — taktora does not own them and does not advance them through
 # the normal lifecycle. The canonical status is 'assumed'.
 
 assumed-hazard:
@@ -176,7 +176,7 @@ assumed-fsr:
 tsr:
   required_fields: [id, status, title]
   optional_fields: [asil, reviewer, approved_by, source_doc]
-  # Technical Safety Requirement — sonic owns it, full lifecycle applies.
+  # Technical Safety Requirement — taktora owns it, full lifecycle applies.
   lifecycle: [open, draft, review, approved, implemented, rejected]
   required_links: [refines]
   optional_links: [satisfies, implements, verifies, links]

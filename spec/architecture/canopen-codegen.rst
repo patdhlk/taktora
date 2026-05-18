@@ -117,7 +117,7 @@ Quality goals capture the qualities the architecture is optimised for.
    :refines: FEAT_0065
 
    ``PdoOut::payload`` shall be ``heapless::Vec<u8, 8>`` from the
-   ``heapless`` 0.8 family (or whichever version sonic's workspace
+   ``heapless`` 0.8 family (or whichever version taktora's workspace
    pins). The constant-8 capacity matches classical CAN's 8-byte
    payload cap; CAN-FD's 64-byte payload is deferred per
    :need:`REQ_0791` and :need:`ADR_0084`.
@@ -134,7 +134,7 @@ Quality goals capture the qualities the architecture is optimised for.
 
    Five layers, strict left-to-right dependency. Each crate has one
    job and depends only on crates to its left. The follow-on
-   ``sonic-connector-can`` adapter would sit to the right of the
+   ``taktora-connector-can`` adapter would sit to the right of the
    runtime trait crate and is unaware of INI or codegen.
 
    .. mermaid::
@@ -149,7 +149,7 @@ Quality goals capture the qualities the architecture is optimised for.
         end
         subgraph Gen["3. Codegen layer"]
           G["canopen-eds-codegen<br/>IR → TokenStream"]
-          B["canopen-eds-codegen-sonic<br/>concrete backend"]
+          B["canopen-eds-codegen-taktora<br/>concrete backend"]
         end
         subgraph RT["4. Runtime trait"]
           RTC["canopen-eds-rt<br/>CanOpenDevice / CanOpenConfigurable"]
@@ -161,7 +161,7 @@ Quality goals capture the qualities the architecture is optimised for.
         end
         subgraph Cons["Consumers (follow-on)"]
           USER["any CAN consumer<br/>(includes generated code)"]
-          SCC["sonic-connector-can<br/>thin CanOpenDevice adapter"]
+          SCC["taktora-connector-can<br/>thin CanOpenDevice adapter"]
         end
         ODC --> EE
         ODC --> P
@@ -221,7 +221,7 @@ Quality goals capture the qualities the architecture is optimised for.
    (sanitisation, revision-suffix), structural dedup of PDO entry
    shapes, and the ``generate<B: CodegenBackend>`` entry point.
 
-.. building-block:: canopen-eds-codegen-sonic
+.. building-block:: canopen-eds-codegen-taktora
    :id: BB_0083
    :status: open
    :implements: FEAT_0064
@@ -259,7 +259,7 @@ Quality goals capture the qualities the architecture is optimised for.
    :implements: FEAT_0067
 
    ``cargo eds expand`` / ``cargo eds list`` subcommand. Shares
-   ``canopen-eds`` + ``canopen-eds-codegen-sonic`` as libraries;
+   ``canopen-eds`` + ``canopen-eds-codegen-taktora`` as libraries;
    output is byte-identical to the build helper's per-device slice.
 
 .. building-block:: canopen-eds-verify
@@ -271,7 +271,7 @@ Quality goals capture the qualities the architecture is optimised for.
    IR as the codegen path; JSON dump decoding lives inside the
    verifier. ``0 / 1 / 2`` exit code on match / mismatch / error.
 
-.. building-block:: sonic-connector-can adapter (follow-on)
+.. building-block:: taktora-connector-can adapter (follow-on)
    :id: BB_0088
    :status: open
    :implements: FEAT_0060
@@ -472,12 +472,12 @@ explicit and visible.
    (inspectable, diff-able, schema-tag-able).
 
    **Decision.** JSON with explicit ``schema`` version string
-   (``sonic.canopen.sdo-dump.v1``). Per :need:`REQ_0784`. Unknown
+   (``taktora.canopen.sdo-dump.v1``). Per :need:`REQ_0784`. Unknown
    schema strings reject before any field comparison runs.
 
    **Consequences.** ✅ Inspectable in git diffs. ✅ Easy to
    produce from any tool (Python ``canopen``, shell scripts over
-   ``candump``, future ``sonic-connector-can`` adapter). ✅
+   ``candump``, future ``taktora-connector-can`` adapter). ✅
    Versioned — schema evolution is non-breaking. ❌ One more
    serde-json dep on the verifier; trivial cost.
 

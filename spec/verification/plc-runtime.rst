@@ -78,7 +78,7 @@ Zero-allocation dispatch
 
    **Expected outcome.** All four assertions hold:
    ``per_iter == 0``. Test passes under ``cargo test
-   -p sonic-executor --test no_alloc_dispatch --release``.
+   -p taktora-executor --test no_alloc_dispatch --release``.
 
    **Negative case.** ``harness_catches_deliberate_allocation``
    registers a task whose ``execute`` body does
@@ -88,7 +88,7 @@ Zero-allocation dispatch
    where the ``#[global_allocator]`` is not actually wired up.
 
    Lives under
-   ``crates/sonic-executor/tests/no_alloc_dispatch.rs``.
+   ``crates/taktora-executor/tests/no_alloc_dispatch.rs``.
 
 ----
 
@@ -108,7 +108,7 @@ Test cases verifying the scan-cycle observability sub-feature
    known reference distribution.
 
    **Fixture.** A standalone unit test in
-   ``crates/sonic-executor/src/stats/histogram.rs`` that drives the
+   ``crates/taktora-executor/src/stats/histogram.rs`` that drives the
    ``Histogram`` directly (no full executor).
 
    **Steps.**
@@ -127,7 +127,7 @@ Test cases verifying the scan-cycle observability sub-feature
    distributions × 2 runs for stability).
 
    Lives under
-   ``crates/sonic-executor/src/stats/histogram.rs`` ``#[cfg(test)]``.
+   ``crates/taktora-executor/src/stats/histogram.rs`` ``#[cfg(test)]``.
 
 .. test:: Per-task max jitter under synthetic period violation
    :id: TEST_0191
@@ -154,7 +154,7 @@ Test cases verifying the scan-cycle observability sub-feature
    **Expected outcome.** Max jitter falls within the expected band.
 
    Lives under
-   ``crates/sonic-executor/tests/cycle_stats_max_jitter.rs``.
+   ``crates/taktora-executor/tests/cycle_stats_max_jitter.rs``.
 
 .. test:: Overrun counter increments exactly per overrun cycle
    :id: TEST_0192
@@ -179,7 +179,7 @@ Test cases verifying the scan-cycle observability sub-feature
    **Expected outcome.** All three assertions hold.
 
    Lives under
-   ``crates/sonic-executor/tests/cycle_stats_overruns.rs``.
+   ``crates/taktora-executor/tests/cycle_stats_overruns.rs``.
 
 .. test:: Push and pull stat paths agree
    :id: TEST_0193
@@ -208,7 +208,7 @@ Test cases verifying the scan-cycle observability sub-feature
    aggregates.
 
    Lives under
-   ``crates/sonic-executor/tests/cycle_stats_push_pull.rs``.
+   ``crates/taktora-executor/tests/cycle_stats_push_pull.rs``.
 
 .. test:: Allocation-free telemetry update
    :id: TEST_0194
@@ -239,7 +239,7 @@ Test cases verifying the scan-cycle observability sub-feature
    heap allocations.
 
    Lives under
-   ``crates/sonic-executor/tests/no_alloc_cycle_stats.rs``.
+   ``crates/taktora-executor/tests/no_alloc_cycle_stats.rs``.
 
 ----
 

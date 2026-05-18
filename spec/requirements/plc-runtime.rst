@@ -1,10 +1,10 @@
 Soft-RT PLC runtime heart
 =========================
 
-This page captures the requirements for using ``sonic-executor`` as the runtime
+This page captures the requirements for using ``taktora-executor`` as the runtime
 heart of a soft-real-time PLC. It follows from the gap analysis between
 typical PLC architecture (Beckhoff TwinCAT, Siemens TIA, B&R Automation
-Studio, Rockwell Logix) and the abstractions sonic-executor provides today.
+Studio, Rockwell Logix) and the abstractions taktora-executor provides today.
 
 The decomposition is two-tier:
 
@@ -15,7 +15,7 @@ The decomposition is two-tier:
   sub-feature.
 
 Sub-features are grouped into **foundation capabilities** (already provided
-by sonic-executor v0.1) and **gap capabilities** (must be added before the
+by taktora-executor v0.1) and **gap capabilities** (must be added before the
 runtime credibly serves as a soft-RT PLC heart). Foundation reqs reference
 the existing API surface; gap reqs describe TBD work.
 
@@ -42,7 +42,7 @@ Top-level feature
 Foundation capabilities
 -----------------------
 
-The following sub-features are **already provided** by sonic-executor v0.1.
+The following sub-features are **already provided** by taktora-executor v0.1.
 Their requirements describe the contracts the runtime exposes today; the
 work for them is closing the review/approval lifecycle, not authoring new
 implementation.
@@ -261,7 +261,7 @@ Cooperative shutdown
 Gap capabilities
 ----------------
 
-The following sub-features are **not yet provided** by sonic-executor v0.1.
+The following sub-features are **not yet provided** by taktora-executor v0.1.
 Each is a prerequisite for credibly calling the runtime a soft-real-time
 PLC heart. Their requirements are authored at ``status: open`` and
 represent work to be planned and executed.
@@ -578,7 +578,7 @@ PREEMPT_RT validation
 
    The repository shall include a benchmark harness, packaged as a
    cargo binary under ``xtask/preempt-rt/``, that exercises the
-   ``sonic-executor`` dispatch path under a configured load profile and
+   ``taktora-executor`` dispatch path under a configured load profile and
    emits per-cycle latency observations as NDJSON to stdout.
 
    Each NDJSON record shall conform to the schema
@@ -685,7 +685,7 @@ artefacts are authored.
 Safety refinements
 ------------------
 
-The PLC runtime (``sonic-executor``) carries four TSRs from the SEooC
+The PLC runtime (``taktora-executor``) carries four TSRs from the SEooC
 safety concept (see :doc:`../safety/tsc`):
 
 * :need:`TSR_0003` (integrity-level declaration and process isolation
