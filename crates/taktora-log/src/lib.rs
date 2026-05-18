@@ -10,6 +10,9 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod sink;
+pub use sink::LogSink;
+
 pub use log;
 pub use log::{Level, LevelFilter, Record};
 pub use log::{debug, error, info, trace, warn};
