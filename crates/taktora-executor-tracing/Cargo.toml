@@ -18,3 +18,5 @@ tracing        = { workspace = true }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
+log         = { workspace = true }
+taktora-log = { workspace = true }
