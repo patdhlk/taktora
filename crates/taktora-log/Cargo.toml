@@ -13,9 +13,7 @@ categories           = ["development-tools::debugging"]
 description          = "Workspace-wide log-crate facade for taktora. The default backend is taktora-log-dlt; integrators may swap in log4rs / env_logger / a bespoke logger via log::set_logger before calling init()."
 
 [dependencies]
-log         = { workspace = true }
-tracing-log = { workspace = true }
-thiserror   = { workspace = true }
+log = { workspace = true }
 
 [dev-dependencies]
 tracing = { workspace = true }
