@@ -18,6 +18,9 @@ pub use adapter::LogSinkLogger;
 
 pub mod console;
 
+mod init;
+pub use init::{Builder, InitError, init};
+
 pub use log;
 pub use log::{Level, LevelFilter, Record};
 pub use log::{debug, error, info, trace, warn};
