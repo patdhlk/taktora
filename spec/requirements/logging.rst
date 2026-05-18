@@ -66,7 +66,7 @@ Facade and backend-swap surface
 
 .. req:: Single facade for all taktora crates
    :id: REQ_0800
-   :status: open
+   :status: approved
    :satisfies: FEAT_0071
 
    Every taktora workspace crate shall emit log records via the ``log``
@@ -77,7 +77,7 @@ Facade and backend-swap surface
 
 .. req:: taktora-log re-exports log macros
    :id: REQ_0801
-   :status: open
+   :status: approved
    :satisfies: FEAT_0071
 
    ``taktora-log`` shall re-export the ``log`` crate's macros
@@ -88,7 +88,7 @@ Facade and backend-swap surface
 
 .. req:: LogSink trait defines backend extension surface
    :id: REQ_0802
-   :status: open
+   :status: approved
    :satisfies: FEAT_0071
 
    ``taktora-log`` shall define a ``LogSink`` trait that captures the
@@ -101,7 +101,7 @@ Facade and backend-swap surface
 
 .. req:: One-shot init builder selects the backend
    :id: REQ_0803
-   :status: open
+   :status: approved
    :satisfies: FEAT_0071
 
    ``taktora-log`` shall expose a builder API that selects the active
@@ -126,7 +126,7 @@ Facade and backend-swap surface
 
 .. req:: Integrator may install any log::Log implementation
    :id: REQ_0804
-   :status: open
+   :status: approved
    :satisfies: FEAT_0073
 
    Integrators shall be able to install any ``log::Log`` implementation
@@ -151,7 +151,7 @@ Facade and backend-swap surface
 
 .. req:: tracing-log bridge installed at init
    :id: REQ_0805
-   :status: open
+   :status: approved
    :satisfies: FEAT_0078
 
    ``taktora-log::init()`` shall install the ``tracing-log`` bridge
@@ -182,7 +182,7 @@ DLT backend
 
 .. req:: AUTOSAR Classic DLT R20-11 encoding via dlt-core
    :id: REQ_0806
-   :status: open
+   :status: approved
    :satisfies: FEAT_0072
 
    The DLT backend shall encode every emitted record as an AUTOSAR
@@ -193,7 +193,7 @@ DLT backend
 
 .. req:: UDS (default) and TCP transports to a local dlt-daemon
    :id: REQ_0807
-   :status: open
+   :status: approved
    :satisfies: FEAT_0072
 
    The DLT backend shall support delivery to a co-located
@@ -205,7 +205,7 @@ DLT backend
 
 .. req:: 4-character DLT App ID and Context ID per emitting crate
    :id: REQ_0808
-   :status: open
+   :status: approved
    :satisfies: FEAT_0072
 
    Each taktora crate that emits log records via ``taktora-log-dlt``
@@ -230,7 +230,7 @@ DLT backend
 
 .. req:: log::kv pairs encoded as DLT verbose arguments
    :id: REQ_0809
-   :status: open
+   :status: approved
    :satisfies: FEAT_0074
 
    For each ``log::Record``, the DLT backend shall iterate
@@ -260,7 +260,7 @@ Runtime log-level control
 
 .. req:: Set-Log-Level and Set-Default-Log-Level control messages
    :id: REQ_0810
-   :status: open
+   :status: approved
    :satisfies: FEAT_0075
 
    The DLT backend's daemon-client receive half shall ingest
@@ -273,7 +273,7 @@ Runtime log-level control
 
 .. req:: Production default level is INFO
    :id: REQ_0811
-   :status: open
+   :status: approved
    :satisfies: FEAT_0075
 
    The default log level applied at ``taktora-log-dlt`` init shall be
@@ -299,7 +299,7 @@ Non-blocking hot path and offline buffering
 
 .. req:: Emission shall not block the calling thread
    :id: REQ_0812
-   :status: open
+   :status: approved
    :satisfies: FEAT_0076
 
    Emitting a log record via ``log::*`` macros shall not block the
@@ -310,7 +310,7 @@ Non-blocking hot path and offline buffering
 
 .. req:: ERROR and FATAL emission shall not heap-allocate
    :id: REQ_0813
-   :status: open
+   :status: approved
    :satisfies: FEAT_0076
 
    Emitting an ``ERROR``- or ``FATAL``-level record shall not require
@@ -322,7 +322,7 @@ Non-blocking hot path and offline buffering
 
 .. req:: Bounded in-memory ring buffers records while daemon is down
    :id: REQ_0814
-   :status: open
+   :status: approved
    :satisfies: FEAT_0076
 
    When the daemon socket is unavailable, the DLT backend shall
@@ -334,7 +334,7 @@ Non-blocking hot path and offline buffering
 
 .. req:: Drop-oldest overflow policy with summary record on reconnect
    :id: REQ_0815
-   :status: open
+   :status: approved
    :satisfies: FEAT_0076
 
    When the in-memory ring is full and a new record arrives, the
@@ -363,7 +363,7 @@ Console dev fallback
 
 .. req:: Console fallback installed when no daemon and no other logger
    :id: REQ_0816
-   :status: open
+   :status: approved
    :satisfies: FEAT_0077
 
    ``taktora-log::init()`` shall detect the absence of (a) a configured
