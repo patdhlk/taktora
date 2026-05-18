@@ -30,6 +30,8 @@ Ten crates in the workspace, layered:
 |---|---|
 | [`taktora-executor`](crates/taktora-executor) | The execution core. Items, triggers, executor, runner, channels, services, chains, graphs, signal/slot, observer + execution monitor, optional thread tuning. |
 | [`taktora-executor-tracing`](crates/taktora-executor-tracing) | `Observer` adapter forwarding executor lifecycle and user events to the global `tracing` subscriber. |
+| [`taktora-log`](crates/taktora-log) | Workspace logging facade (`log` crate facade with one-shot init, tracing-log bridge, console dev fallback). See `spec/requirements/logging.rst`. |
+| [`taktora-log-dlt`](crates/taktora-log-dlt) | Pure-Rust AUTOSAR DLT R20-11 backend for `taktora-log`. Talks to a co-located COVESA `dlt-daemon` over UDS (default) or TCP. See `spec/architecture/logging.rst`. |
 | [`taktora-bounded-alloc`](crates/taktora-bounded-alloc) | Static pre-allocated `#[global_allocator]` with hard caps on per-allocation size and total live blocks. `FEAT_0040`. |
 | [`taktora-connector-core`](crates/taktora-connector-core) | Framework-level traits and types shared by every connector — `Routing`, `ChannelDescriptor`, `PayloadCodec`, `ConnectorHealth` / `HealthEvent`, `ReconnectPolicy`, `ConnectorError`. `BB_0001`. |
 | [`taktora-connector-transport-iox`](crates/taktora-connector-transport-iox) | iceoryx2-backed `ChannelWriter` / `ChannelReader` + `ConnectorEnvelope` POD wire format + `ServiceFactory`. `BB_0002`. |
