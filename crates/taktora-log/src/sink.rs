@@ -9,7 +9,7 @@ use log::Record;
 /// Implementations encode a `log::Record` to whatever wire format the
 /// backend speaks and ship it. The trait is object-safe so that the
 /// facade can hold a `Box<dyn LogSink>` selected at runtime by the
-/// [`crate::Builder`].
+/// facade's builder (introduced in a later task).
 ///
 /// # Backend responsibilities
 ///
