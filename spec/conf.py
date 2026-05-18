@@ -70,6 +70,10 @@ html_title = project
 # Override theme + sphinx-needs CSS variables to match the taktora.eu palette.
 html_css_files = ["taktora.css"]
 
+# Mark light mode explicitly on <html> so mermaid's theme detector doesn't
+# fall through to prefers-color-scheme when the OS is dark.
+html_js_files = ["taktora-theme-sync.js"]
+
 # Copy CNAME verbatim into the build output so GitHub Pages serves the apex domain.
 html_extra_path = ["CNAME"]
 
