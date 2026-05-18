@@ -7,6 +7,24 @@ license.workspace      = true
 repository.workspace   = true
 homepage.workspace     = true
 authors.workspace      = true
-description          = "DLT backend for taktora-log (stub — implementation in Task 8)."
+readme               = "README.md"
+keywords             = ["dlt", "diagnostic", "log", "trace", "autosar"]
+categories           = ["development-tools::debugging"]
+description          = "Pure-Rust AUTOSAR Diagnostic Log and Trace backend for taktora-log. Talks to a co-located COVESA dlt-daemon over Unix-domain socket (default) or TCP."
 
 [dependencies]
+taktora-log       = { workspace = true }
+log               = { workspace = true }
+dlt-core          = { workspace = true }
+crossbeam-channel = { workspace = true }
+thiserror         = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = "3"
+
+[features]
+default       = []
+# Enables tests that require a real `dlt-daemon` listening on a known
+# socket. CI runs these in a dedicated job; default `cargo test` skips them.
+system-tests  = []
