@@ -10,7 +10,7 @@ license = { text = "Apache-2.0 OR MIT" }
 dependencies = [
     "sphinx>=7,<9",
     "sphinx-needs==8.0.0",
-    "sphinx-hextra>=0.1.0.dev0",
+    "sphinx-hextra>=0.1.1",
     "myst-parser>=2",
     "sphinxcontrib-mermaid>=0.9",
 ]

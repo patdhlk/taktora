@@ -459,27 +459,6 @@ wheels = [
 ]
 
 [[package]]
-name = "taktora-spec"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "myst-parser" },
-    { name = "sphinx" },
-    { name = "sphinx-hextra" },
-    { name = "sphinx-needs" },
-    { name = "sphinxcontrib-mermaid" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "myst-parser", specifier = ">=2" },
-    { name = "sphinx", specifier = ">=7,<9" },
-    { name = "sphinx-hextra", specifier = ">=0.1.0.dev0" },
-    { name = "sphinx-needs", specifier = "==8.0.0" },
-    { name = "sphinxcontrib-mermaid", specifier = ">=0.9" },
-]
-
-[[package]]
 name = "sphinx"
 version = "8.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -521,15 +500,15 @@ wheels = [
 
 [[package]]
 name = "sphinx-hextra"
-version = "0.1.0.dev0"
+version = "0.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "docutils" },
     { name = "sphinx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/65/89/49e6aa500c4aea11a5c30e05da9697d38161c2ba5176fa7566c0b516dddc/sphinx_hextra-0.1.0.dev0.tar.gz", hash = "sha256:7d28a00ca3d7ba899951c7e2243f2be4c82cb12c1a1949b67195e08ffa07d1e0", size = 17305, upload-time = "2026-05-09T10:24:42.639Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/44/8a30e2246396f4e90b1d611dd714e84211d1dca9f75a07e89eb46856a4ac/sphinx_hextra-0.1.1.tar.gz", hash = "sha256:8c086b35d92afb45708b11c8d318a0a38b7292313e7a1e4ea348ddc1aa62c61d", size = 17460, upload-time = "2026-05-18T18:31:22.032Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/70/172d229e09be89775509f5112a80181aff722cd3d6a4cc4c91f40dc93249/sphinx_hextra-0.1.0.dev0-py3-none-any.whl", hash = "sha256:abee28c153b34de5962c6aea031606f7391596c2a9f534481e751fb39363288b", size = 25780, upload-time = "2026-05-09T10:24:41.488Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/f3/699fc413c5ad62dcdb48e28391073a7a70388f63fd1d0f7cf46f3e999ec7/sphinx_hextra-0.1.1-py3-none-any.whl", hash = "sha256:df0bd1723aa1899902145d0a29455f6efa35d9de8f91debbca05f9285ecff5f3", size = 25821, upload-time = "2026-05-18T18:31:19.665Z" },
 ]
 
 [[package]]
@@ -629,6 +608,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/3b/44/6716b257b0aa6bfd51a1b31665d1c205fb12cb5ad56de752dfa15657de2f/sphinxcontrib_serializinghtml-2.0.0.tar.gz", hash = "sha256:e9d912827f872c029017a53f0ef2180b327c3f7fd23c87229f7a8e8b70031d4d", size = 16080, upload-time = "2024-07-29T01:10:09.332Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/52/a7/d2782e4e3f77c8450f727ba74a8f12756d5ba823d81b941f1b04da9d033a/sphinxcontrib_serializinghtml-2.0.0-py3-none-any.whl", hash = "sha256:6e2cb0eef194e10c27ec0023bfeb25badbbb5868244cf5bc5bdc04e4464bf331", size = 92072, upload-time = "2024-07-29T01:10:08.203Z" },
+]
+
+[[package]]
+name = "taktora-spec"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "myst-parser" },
+    { name = "sphinx" },
+    { name = "sphinx-hextra" },
+    { name = "sphinx-needs" },
+    { name = "sphinxcontrib-mermaid" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "myst-parser", specifier = ">=2" },
+    { name = "sphinx", specifier = ">=7,<9" },
+    { name = "sphinx-hextra", specifier = ">=0.1.1" },
+    { name = "sphinx-needs", specifier = "==8.0.0" },
+    { name = "sphinxcontrib-mermaid", specifier = ">=0.9" },
 ]
 
 [[package]]
