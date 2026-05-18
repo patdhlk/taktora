@@ -1,8 +1,15 @@
 //! One-shot init builder.
 //!
 //! See REQ_0803 (settable exactly once), REQ_0804 (pre-existing logger
-//! wins), REQ_0805 (tracing-log bridge installed at init), and REQ_0816
-//! (console fallback when no sink supplied and nothing else installed).
+//! wins), and REQ_0816 (console fallback when no sink supplied and
+//! nothing else installed).
+//!
+//! The `tracing -> log` bridge required by REQ_0805 is provided
+//! passively at compile time via the `tracing/log` cargo feature
+//! (declared in this crate's `[dependencies]`). When no tracing
+//! Subscriber is active, `tracing::info!` etc. fall back to
+//! `log::logger().log(...)`, which routes through the installed
+//! `LogSinkLogger`. There is no runtime call to install a bridge.
 
 use std::sync::{Arc, OnceLock};
 
@@ -31,7 +38,6 @@ pub enum InitError {
 pub struct Builder {
     sink: Option<Arc<dyn LogSink>>,
     max_level: LevelFilter,
-    install_tracing_bridge: bool,
 }
 
 impl Builder {
@@ -49,14 +55,7 @@ impl Builder {
         self
     }
 
-    /// Skip installing the `tracing-log` bridge. Default is `true`.
-    pub fn with_tracing_bridge(mut self, enable: bool) -> Self {
-        self.install_tracing_bridge = enable;
-        self
-    }
-
-    /// Install the configured sink as the global `log::Log` and (by
-    /// default) install the `tracing-log` bridge.
+    /// Install the configured sink as the global `log::Log`.
     ///
     /// Returns an [`InitError`] if another logger is already installed
     /// or `init` has been called in this process before.
@@ -76,13 +75,6 @@ impl Builder {
             return Err(InitError::PreExistingLogger);
         }
         log::set_max_level(self.max_level);
-
-        if self.install_tracing_bridge {
-            // tracing-log's LogTracer captures tracing::Events as
-            // log::Records. Install only if not already installed; the
-            // `init_with_filter` helper internally guards against double-init.
-            let _ = tracing_log::LogTracer::init_with_filter(self.max_level);
-        }
 
         // Mark installed *after* `set_boxed_logger` succeeded so a
         // second init() detects the AlreadyInitialized case. We can't
@@ -117,6 +109,5 @@ pub fn init() -> Builder {
     Builder {
         sink: None,
         max_level: LevelFilter::Info,
-        install_tracing_bridge: true,
     }
 }

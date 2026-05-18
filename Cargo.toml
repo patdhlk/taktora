@@ -50,9 +50,8 @@ bitflags          = "2"
 crossbeam-channel = "0.5"
 crossbeam-utils   = "0.8"
 num_cpus          = "1"
-log               = { version = "0.4.21", features = ["kv"] }
+log               = { version = "0.4.21", features = ["kv", "std"] }
 tracing           = "0.1"
-tracing-log       = { version = "0.2", default-features = false, features = ["log-tracer", "std"] }
 dlt-core          = { version = "0.20" }
 core_affinity     = "0.8"
 serde             = { version = "1", default-features = false }
