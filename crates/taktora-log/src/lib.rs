@@ -13,6 +13,8 @@
 mod sink;
 pub use sink::LogSink;
 
+pub mod console;
+
 pub use log;
 pub use log::{Level, LevelFilter, Record};
 pub use log::{debug, error, info, trace, warn};
