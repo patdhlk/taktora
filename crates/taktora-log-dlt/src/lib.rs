@@ -9,3 +9,5 @@
 // is no path that legitimately needs `unsafe`.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+
+pub mod ids;
