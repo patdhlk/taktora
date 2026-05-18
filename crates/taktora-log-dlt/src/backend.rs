@@ -19,7 +19,7 @@ use thiserror::Error;
 use taktora_log::LogSink;
 
 use crate::encode::Encoder;
-use crate::flusher::{FlusherConfig, FlusherHandle, spawn_flusher};
+use crate::flusher::{FlusherConfig, FlusherHandle, SummaryBuilder, spawn_flusher};
 use crate::ids::{AppId, CtxId};
 use crate::level_table::LevelTable;
 use crate::ring::OfflineRing;
@@ -104,6 +104,18 @@ impl DltBackend {
     /// inside [`LogSink::enabled`] and does not require touching this.
     pub fn level_table(&self) -> Arc<LevelTable> {
         Arc::clone(&self.level_table)
+    }
+
+    /// Borrow the offline ring for **test and diagnostic use only**.
+    ///
+    /// Production code never pushes into the ring directly — [`LogSink::emit`]
+    /// routes overflow there via the `try_send` fall-through path in
+    /// accordance with REQ_0814. The accessor is exposed so integration
+    /// tests can populate the ring with pre-encoded records and exercise
+    /// the reconnect-drain / drop-summary code paths (REQ_0815) without
+    /// requiring a real daemon outage.
+    pub fn ring(&self) -> Arc<OfflineRing> {
+        Arc::clone(&self.ring)
     }
 
     /// Allocate the next standard-header timestamp tick.
@@ -299,12 +311,38 @@ impl DltBackendBuilder {
         let encoder = Arc::new(Encoder::new(app, default_ctx, ecu_id));
         let level_table = Arc::new(LevelTable::new(log::Level::Info));
         let ring = Arc::new(OfflineRing::with_capacity(capacity));
+
+        // REQ_0815: synthesise a `taktora.log.dropped count=N` warn-level
+        // record on every reconnect that follows an overflow. We hand
+        // the flusher a clone of the encoder so the bytes look
+        // indistinguishable from any other DLT record on the wire.
+        let encoder_for_summary = Arc::clone(&encoder);
+        let summary_builder: SummaryBuilder = Arc::new(move |count: u64| {
+            // `body` owns the formatted string; `args` borrows from it.
+            // Both live until `encoder.encode` returns the encoded bytes
+            // at the end of the closure, so no lifetime extension trickery
+            // is required.
+            let body = format!("taktora.log.dropped count={count}");
+            let args = format_args!("{body}");
+            let rec = log::Record::builder()
+                .level(log::Level::Warn)
+                .target("taktora.log.diag")
+                .args(args)
+                .build();
+            // Timestamp tick = 0 for synthesised summary records. The
+            // dlt-daemon's monotonicity expectation is per connection
+            // window; the summary leads every post-reconnect drain, so a
+            // fresh-from-zero counter does not violate that.
+            encoder_for_summary.encode(&rec, 0)
+        });
+
         let (handle, tx) = spawn_flusher(FlusherConfig {
             transport,
             ring: Arc::clone(&ring),
             level_table: Arc::clone(&level_table),
             reconnect_initial_backoff: DEFAULT_RECONNECT_INITIAL_BACKOFF,
             reconnect_max_backoff: DEFAULT_RECONNECT_MAX_BACKOFF,
+            summary_builder: Some(summary_builder),
         });
 
         Ok(DltBackend {

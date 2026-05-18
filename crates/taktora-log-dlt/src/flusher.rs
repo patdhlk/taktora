@@ -3,12 +3,16 @@
 //!
 //! REQ_0812: producer does not block — the flusher does the I/O.
 //! REQ_0814: the offline ring is drained FIFO on reconnect.
-//! REQ_0815: the drop-summary record (synthesised by the caller from
-//! [`OfflineRing::drops_since_last_drain`]) is emitted at the head of
-//! the drain after an overflow event. The flusher itself does not
-//! synthesise that record — Task 17 (the public [`log::Log`] adapter)
-//! is responsible for prepending it to the producer queue before any
-//! buffered records.
+//! REQ_0815: the drop-summary record is emitted at the head of the
+//! drain after an overflow event. The flusher itself does not author
+//! the record; the caller supplies a [`SummaryBuilder`] callback that
+//! synthesises the encoded bytes from
+//! [`OfflineRing::drops_since_last_drain`]. The flusher snapshots the
+//! drop count immediately before draining the ring, writes the
+//! synthesised summary first, then writes the drained records. If no
+//! `summary_builder` is configured, the leading summary is skipped —
+//! useful for unit tests that drive the flusher with raw byte
+//! payloads and have no notion of a `log::Record`.
 //!
 //! ## Concurrency model
 //!
@@ -45,6 +49,11 @@ const SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(100);
 /// [`SOCKET_READ_TIMEOUT`] — bounds shutdown latency.
 const CHANNEL_RECV_TIMEOUT: Duration = Duration::from_millis(100);
 
+/// Type alias for the optional summary-record builder callback held on
+/// [`FlusherConfig::summary_builder`]. Takes the snapshot drop count
+/// and returns the already-encoded DLT bytes to emit.
+pub type SummaryBuilder = Arc<dyn Fn(u64) -> Vec<u8> + Send + Sync>;
+
 /// Configuration for [`spawn_flusher`].
 pub struct FlusherConfig {
     /// How to reach `dlt-daemon` (UDS path or `host:port`).
@@ -58,6 +67,33 @@ pub struct FlusherConfig {
     pub reconnect_initial_backoff: Duration,
     /// Upper bound for the exponential reconnect backoff.
     pub reconnect_max_backoff: Duration,
+    /// Optional callback that synthesises a drop-summary record
+    /// (REQ_0815) from the snapshot of
+    /// [`OfflineRing::drops_since_last_drain`].
+    ///
+    /// Invoked on every successful reconnect where the snapshot is
+    /// non-zero. The returned byte buffer is written to the new
+    /// connection **before** the buffered ring contents so the summary
+    /// always sits at the leading position of the post-reconnect drain.
+    ///
+    /// If the builder is `None`, no summary is emitted — useful for
+    /// callers (e.g. unit tests) that drive the flusher with raw bytes
+    /// rather than encoded `log::Record`s and have no concept of a
+    /// summary message.
+    ///
+    /// Contract for the callback:
+    ///
+    /// * It must produce a fully-encoded DLT record (storage header +
+    ///   standard header + payload) — the flusher writes the buffer
+    ///   verbatim, exactly as it does for entries drained from the ring.
+    /// * It is called from the flusher thread; the closure must be
+    ///   `Send + Sync` and should avoid blocking I/O.
+    ///
+    /// Recovery semantics on summary-write failure: the flusher writes
+    /// the summary *before* calling [`OfflineRing::drain_all`], so a
+    /// failed write leaves the drop counter intact. The next reconnect
+    /// observes the same drop count and re-attempts the summary.
+    pub summary_builder: Option<SummaryBuilder>,
 }
 
 /// Handle to a running flusher thread.
@@ -127,10 +163,37 @@ fn run(cfg: FlusherConfig, rx: Receiver<Vec<u8>>, stop: Arc<AtomicBool>) {
                         backoff = (backoff * 2).min(cfg.reconnect_max_backoff);
                         continue;
                     }
+
+                    // REQ_0815: snapshot the drop count BEFORE draining
+                    // (drain_all resets it). If a summary_builder is
+                    // wired in, the synthesised record is the first byte
+                    // written on the new connection — leading the
+                    // buffered records out of the ring.
+                    let drops = cfg.ring.drops_since_last_drain();
+                    let summary_bytes = if drops > 0 {
+                        cfg.summary_builder.as_ref().map(|b| b(drops))
+                    } else {
+                        None
+                    };
+
+                    // Write the summary first. On failure we drop the
+                    // transport and retry on the next outer loop. The
+                    // drop counter is left intact (drain_all has not
+                    // run yet) so the next reconnect re-attempts the
+                    // summary with the same count.
+                    if let Some(s) = summary_bytes {
+                        if t.write_all(&s).is_err() {
+                            backoff = (backoff * 2).min(cfg.reconnect_max_backoff);
+                            continue;
+                        }
+                    }
+
                     transport = Some(t);
                     backoff = cfg.reconnect_initial_backoff;
 
-                    // On reconnect, drain the offline ring FIFO (REQ_0814).
+                    // Summary write (if any) has succeeded — now drain
+                    // the offline ring FIFO (REQ_0814). drain_all also
+                    // resets drops_since_last_drain to 0.
                     if let Some(t) = transport.as_mut() {
                         let drained = cfg.ring.drain_all();
                         let mut iter = drained.into_iter();

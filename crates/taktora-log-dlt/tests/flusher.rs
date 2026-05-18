@@ -32,6 +32,7 @@ fn producer_pushes_bytes_to_listening_daemon() {
         level_table: Arc::clone(&level_table),
         reconnect_initial_backoff: Duration::from_millis(10),
         reconnect_max_backoff: Duration::from_millis(50),
+        summary_builder: None,
     });
 
     let t0 = Instant::now();
@@ -103,6 +104,7 @@ fn mid_drain_write_failure_rebuffers_remainder() {
         level_table: Arc::clone(&level_table),
         reconnect_initial_backoff: Duration::from_millis(10),
         reconnect_max_backoff: Duration::from_millis(100),
+        summary_builder: None,
     });
 
     let first_tag = server.join().unwrap();
