@@ -67,6 +67,9 @@ html_theme = "sphinx_hextra"
 html_static_path = ["_static"]
 html_title = project
 
+# Override theme + sphinx-needs CSS variables to match the taktora.eu palette.
+html_css_files = ["taktora.css"]
+
 # Copy CNAME verbatim into the build output so GitHub Pages serves the apex domain.
 html_extra_path = ["CNAME"]
 

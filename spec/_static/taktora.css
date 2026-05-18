@@ -1,0 +1,58 @@
+/* Align sphinx-hextra + sphinx-needs colors with taktora.eu design tokens.
+   Source of truth: taktora-eu/src/styles/tokens.css. Keep in sync if those
+   tokens change. */
+
+/* --- sphinx-hextra theme tokens ------------------------------------------- */
+
+:root {
+  /* Light mode: keep the industrial-orange accent on light neutrals so the
+     brand survives the toggle. Neutrals come from GitHub Primer's light scale
+     (which is the same family taktora.eu's dark scale belongs to). */
+  --hx-bg:     #ffffff;
+  --hx-fg:     #1c2128;
+  --hx-border: #d0d7de;
+  --hx-muted:  #57606a;
+  --hx-accent: #ff7a18;
+}
+
+html.dark {
+  /* Dark mode: exact taktora.eu palette. */
+  --hx-bg:     #0d1117; /* --bg-base */
+  --hx-fg:     #c9d1d9; /* --fg-secondary (body text) */
+  --hx-border: #30363d; /* --border */
+  --hx-muted:  #8b949e; /* --fg-muted */
+  --hx-accent: #ff7a18; /* --accent */
+}
+
+/* Headings use --fg-primary on taktora.eu, brighter than body text. */
+html.dark .hx-content h1,
+html.dark .hx-content h2,
+html.dark .hx-content h3,
+html.dark .hx-content h4,
+html.dark .hx-content h5,
+html.dark .hx-content h6 {
+  color: #f0f6fc;
+}
+
+/* --- sphinx-needs directive boxes ----------------------------------------- */
+
+/* sphinx-hextra-needs.css declares these vars but has no dark-mode block,
+   so we set them for both modes here. */
+
+:root {
+  --sn-color-need-bg:         #ffffff;
+  --sn-color-need-bg-head:    #f6f8fa;
+  --sn-color-need-border:     #d0d7de;
+  --sn-color-need-row-border: #eaeef2;
+  --sn-color-bg-gray:         #f6f8fa;
+  --sn-color-bg-lightgray:    #ffffff;
+}
+
+html.dark {
+  --sn-color-need-bg:         #161b22; /* --bg-elevated */
+  --sn-color-need-bg-head:    #1c2128; /* --bg-overlay */
+  --sn-color-need-border:     #30363d; /* --border */
+  --sn-color-need-row-border: #21262d;
+  --sn-color-bg-gray:         #161b22;
+  --sn-color-bg-lightgray:    #1c2128;
+}
