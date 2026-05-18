@@ -1,0 +1,12 @@
+[package]
+name        = "taktora-log-dlt"
+version     = "0.1.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+authors.workspace      = true
+description          = "DLT backend for taktora-log (stub — implementation in Task 8)."
+
+[dependencies]

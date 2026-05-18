@@ -1,0 +1,21 @@
+[package]
+name        = "taktora-log"
+version     = "0.1.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+authors.workspace      = true
+readme               = "README.md"
+keywords             = ["log", "logging", "dlt", "taktora"]
+categories           = ["development-tools::debugging"]
+description          = "Workspace-wide log-crate facade for taktora. The default backend is taktora-log-dlt; integrators may swap in log4rs / env_logger / a bespoke logger via log::set_logger before calling init()."
+
+[dependencies]
+log         = { workspace = true }
+tracing-log = { workspace = true }
+thiserror   = { workspace = true }
+
+[dev-dependencies]
+tracing = { workspace = true }
