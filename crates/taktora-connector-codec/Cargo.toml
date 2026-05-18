@@ -6,6 +6,10 @@ rust-version = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
 description  = "PayloadCodec implementations for the taktora-connector framework. Realises BB_0003 (JsonCodec behind default-on `json` feature)."
 
 [features]
@@ -15,7 +19,7 @@ default = ["json"]
 json    = ["dep:serde_json"]
 
 [dependencies]
-taktora-connector-core = { path = "../taktora-connector-core" }
+taktora-connector-core = { workspace = true }
 serde                = { workspace = true, features = ["std"] }
 serde_json           = { workspace = true, optional = true, features = ["std"] }
 

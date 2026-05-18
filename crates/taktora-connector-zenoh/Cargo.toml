@@ -6,6 +6,10 @@ rust-version = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
 description  = "Zenoh reference connector for the taktora-connector framework. Implements BB_0040 (FEAT_0042)."
 
 [features]
@@ -21,10 +25,10 @@ default = []
 zenoh-integration = ["dep:zenoh", "zenoh/transport_tcp"]
 
 [dependencies]
-taktora-connector-core           = { path = "../taktora-connector-core" }
-taktora-connector-transport-iox  = { path = "../taktora-connector-transport-iox" }
-taktora-connector-host           = { path = "../taktora-connector-host" }
-taktora-executor                 = { path = "../taktora-executor" }
+taktora-connector-core           = { workspace = true }
+taktora-connector-transport-iox  = { workspace = true }
+taktora-connector-host           = { workspace = true }
+taktora-executor                 = { workspace = true }
 iceoryx2                       = { workspace = true }
 crossbeam-channel              = { workspace = true }
 tokio                          = { workspace = true }
@@ -34,8 +38,8 @@ tracing                        = { workspace = true }
 zenoh                          = { version = "1", optional = true, default-features = false }
 
 [dev-dependencies]
-taktora-connector-codec = { path = "../taktora-connector-codec" }
-taktora-bounded-alloc   = { path = "../taktora-bounded-alloc" }
+taktora-connector-codec = { workspace = true }
+taktora-bounded-alloc   = { workspace = true }
 proptest              = { workspace = true }
 serde_json            = { workspace = true, features = ["std"] }
 

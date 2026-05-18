@@ -6,6 +6,10 @@ rust-version = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
 description  = "Execution framework for iceoryx2-based Rust applications."
 
 [dependencies]
@@ -21,7 +25,7 @@ core_affinity = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest            = { workspace = true }
-taktora-bounded-alloc = { path = "../taktora-bounded-alloc" }
+taktora-bounded-alloc = { workspace = true }
 
 [features]
 default      = []

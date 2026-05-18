@@ -6,10 +6,14 @@ rust-version = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
 description  = "iceoryx2-backed envelope and channel transport for the taktora-connector framework. Implements BB_0002."
 
 [dependencies]
-taktora-connector-core = { path = "../taktora-connector-core" }
+taktora-connector-core = { workspace = true }
 iceoryx2             = { workspace = true }
 serde                = { workspace = true, features = ["std"] }
 

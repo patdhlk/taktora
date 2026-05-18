@@ -20,9 +20,24 @@ edition      = "2024"
 rust-version = "1.85"
 license      = "Apache-2.0 OR MIT"
 repository   = "https://github.com/patdhlk/taktora"
+homepage     = "https://github.com/patdhlk/taktora"
 authors      = ["Patrick Dahlke"]
+readme       = "README.md"
+keywords     = ["iceoryx2", "ipc", "realtime", "robotics", "ethercat"]
+categories   = ["embedded", "concurrency", "network-programming"]
 
 [workspace.dependencies]
+# Internal crates — declared with both `path` (for local builds) and `version`
+# (so `cargo publish` strips the path and resolves against crates.io).
+taktora-bounded-alloc            = { path = "crates/taktora-bounded-alloc",            version = "0.1.0" }
+taktora-connector-codec          = { path = "crates/taktora-connector-codec",          version = "0.1.0" }
+taktora-connector-core           = { path = "crates/taktora-connector-core",           version = "0.1.0" }
+taktora-connector-host           = { path = "crates/taktora-connector-host",           version = "0.1.0" }
+taktora-connector-transport-iox  = { path = "crates/taktora-connector-transport-iox",  version = "0.1.0" }
+taktora-executor                 = { path = "crates/taktora-executor",                 version = "0.1.0" }
+taktora-executor-tracing         = { path = "crates/taktora-executor-tracing",         version = "0.1.0" }
+
+# External crates
 iceoryx2          = "0.8"
 thiserror         = "1"
 bitflags          = "2"

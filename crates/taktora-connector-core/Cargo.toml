@@ -6,6 +6,10 @@ rust-version = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
 description  = "Connector framework core: traits, error/health/reconnect types, and channel descriptors shared by every taktora-connector protocol crate. Implements BB_0001 (taktora-connector-core)."
 
 [dependencies]
