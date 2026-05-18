@@ -281,7 +281,7 @@ impl DltBackendBuilder {
 
     /// Set the offline-ring capacity (in records).
     ///
-    /// `0` is treated as "use the default" ([`DEFAULT_RING_CAPACITY`]).
+    /// `0` is treated as "use the default" (512).
     pub fn ring_capacity(mut self, n: usize) -> Self {
         self.ring_capacity = n;
         self

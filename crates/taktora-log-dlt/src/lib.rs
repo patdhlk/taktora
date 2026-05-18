@@ -1,4 +1,4 @@
-//! Pure-Rust AUTOSAR DLT backend for [`taktora-log`].
+//! Pure-Rust AUTOSAR DLT backend for `taktora-log`.
 //!
 //! See the crate-level README and `spec/requirements/logging.rst` in
 //! the taktora repository for the full specification.
