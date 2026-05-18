@@ -26,10 +26,11 @@ impl Write for CapturedWriter {
 fn console_emits_level_target_and_message() {
     let writer = CapturedWriter::default();
     let console = Console::with_writer(writer.clone(), log::LevelFilter::Trace);
+    let args = format_args!("hello {}", 42);
     let record = log::Record::builder()
         .level(log::Level::Info)
         .target("tk.test")
-        .args(format_args!("hello {}", 42))
+        .args(args)
         .build();
     console.emit(&record);
 
