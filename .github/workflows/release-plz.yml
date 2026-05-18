@@ -1,0 +1,108 @@
+# release-plz — automated crates.io publishing for the taktora workspace.
+#
+# How it works:
+#   1. `release-plz-pr` runs on every push to `main`. It opens (or updates)
+#      a single "Release PR" containing per-crate version bumps and
+#      CHANGELOG entries derived from Conventional Commits.
+#   2. `release-plz-release` runs on every push to `main`. When the release
+#      PR is merged (i.e. the bump commits appear on `main`), it tags each
+#      crate, creates GitHub Releases, and `cargo publish`es them to
+#      crates.io in correct topological order.
+#
+# Required setup (one-time):
+#   - Secret  CARGO_REGISTRY_TOKEN  - crates.io API token with publish-update
+#     (and publish-new on first publish) scope. Generate at
+#     https://crates.io/me. Scope it to the `taktora-*` namespace once all
+#     crates exist on the registry.
+#   - Repo settings -> Actions -> General:
+#       * "Read and write permissions" enabled for GITHUB_TOKEN.
+#       * "Allow GitHub Actions to create and approve pull requests" enabled
+#         (otherwise release-plz cannot open the release PR).
+#   - First publish of each crate must happen MANUALLY from a workstation
+#     (see README) so crates.io claims the name before the scoped token is
+#     used. After that, this workflow handles every subsequent release.
+#
+# Optional:
+#   - To trigger CI runs on commits made by release-plz (the default
+#     GITHUB_TOKEN cannot trigger other workflows), swap `GITHUB_TOKEN` for
+#     a GitHub App installation token or a fine-grained PAT with
+#     `contents:write` + `pull_requests:write`. See release-plz docs:
+#     https://release-plz.dev/docs/github/trigger
+#
+# Reference: https://release-plz.dev/docs/github/quickstart
+
+name: release-plz
+
+on:
+  push:
+    branches: [main]
+
+# Cancel stale release-plz runs on the same branch (a new push supersedes the
+# old PR-update job). The `release` job is also serialized so two merges in
+# quick succession don't try to `cargo publish` the same crate in parallel.
+concurrency:
+  group: release-plz-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1 - open / update the Release PR.
+  # ---------------------------------------------------------------------------
+  release-plz-pr:
+    name: Release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write           # commit bumps & CHANGELOGs to the release branch
+      pull-requests: write      # open / update the release PR
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # full history needed for changelog generation
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run release-plz (open release PR)
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Job 2 - publish to crates.io once bumps land on main.
+  # ---------------------------------------------------------------------------
+  release-plz-release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60         # generous - 10 crates with verify builds
+    permissions:
+      contents: write           # create git tags and GitHub Releases
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run release-plz (publish to crates.io)
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

@@ -1,0 +1,86 @@
+# release-plz workspace config.
+#
+# Docs: https://release-plz.dev/docs/config
+#
+# Behaviour:
+#   - On every push to `main`, release-plz opens (or updates) a single
+#     "Release PR" containing the per-crate version bumps and CHANGELOG.md
+#     diffs for every crate whose source changed since its last release.
+#   - When that PR is merged, the `release` job tags each crate, creates a
+#     GitHub Release per crate, and publishes them to crates.io in the
+#     correct topological order (waiting for index propagation).
+#
+# Conventional Commits drive the version bumps:
+#   - feat:  -> minor
+#   - fix:   -> patch
+#   - feat!: or `BREAKING CHANGE:` footer -> major
+#   - chore:/docs:/refactor:/test:/ci: -> no bump (configurable below)
+
+[workspace]
+# Open the release PR even when only the changelog changes (e.g. a fix that
+# doesn't warrant a version bump). Set to `false` to suppress those PRs.
+allow_dirty            = false
+changelog_update       = true
+git_release_enable     = true                 # create a GitHub Release per crate
+git_release_type       = "auto"               # `prod` until 1.0, then `prod` (no prerelease auto-routing)
+git_tag_enable         = true
+git_tag_name           = "{{ package }}-v{{ version }}"   # e.g. `taktora-executor-v0.2.0`
+pr_branch_prefix       = "release-plz/"
+pr_name                = "chore: release {{ package }} v{{ version }}{% if multiple_packages %} (+ others){% endif %}"
+publish                = true
+publish_allow_dirty    = false
+publish_no_verify      = false                # full `cargo publish` verify build
+publish_timeout        = "30m"                # per-crate timeout
+release_always         = true                 # release when version changes (default)
+semver_check           = true                 # cargo-semver-checks gate on bumps
+dependencies_update    = false                # don't bulk-bump deps; rely on cargo update via PRs
+
+# Changelog rendering — keepachangelog-style sections grouped by commit type.
+[changelog]
+header = """\
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+body = """
+
+## [{{ version }}]\
+{%- if release_link -%}({{ release_link }}){%- endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+{% if commit.breaking %}[**breaking**] {% endif %}\
+{{ commit.message | upper_first }}\
+{%- endfor %}
+{% endfor %}
+"""
+commit_parsers = [
+  { message = "^feat",       group = "Added"      },
+  { message = "^fix",        group = "Fixed"      },
+  { message = "^perf",       group = "Performance"},
+  { message = "^refactor",   group = "Changed"    },
+  { message = "^docs",       group = "Documentation", skip = false },
+  { message = "^test",       skip = true },
+  { message = "^chore",      skip = true },
+  { message = "^ci",         skip = true },
+  { message = "^build",      skip = true },
+  { message = "^revert",     group = "Reverted"   },
+  { body    = ".*security",  group = "Security"   },
+]
+
+# --- Per-crate overrides -----------------------------------------------------
+#
+# `taktora-replay` is a placeholder crate marked `publish = false`. release-plz
+# auto-skips publishing it, but we also disable changelog/PR/release noise.
+[[package]]
+name                  = "taktora-replay"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
