@@ -1,5 +1,10 @@
 //! End-to-end smoke: backend encodes a record and the mock daemon
 //! receives valid DLT bytes.
+//!
+//! Uses a UDS-bound mock daemon, so the file is Unix-only. A future
+//! TCP variant would extend coverage to Windows.
+
+#![cfg(unix)]
 
 use std::io::Read;
 use std::os::unix::net::UnixListener;

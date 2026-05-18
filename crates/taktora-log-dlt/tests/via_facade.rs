@@ -1,4 +1,10 @@
 //! End-to-end via the facade — REQ_0800 + REQ_0801 + REQ_0806.
+//!
+//! Uses a UDS-bound mock daemon and `DltBackendBuilder::uds`, so the
+//! file is Unix-only. A future TCP variant would extend coverage to
+//! Windows.
+
+#![cfg(unix)]
 
 use std::io::Read;
 use std::os::unix::net::UnixListener;

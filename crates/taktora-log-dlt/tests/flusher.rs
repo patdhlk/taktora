@@ -1,4 +1,10 @@
 //! REQ_0812 + REQ_0814: producer doesn't block; reconnect drains the ring.
+//!
+//! Both tests rely on `UnixListener` to model a co-located `dlt-daemon`;
+//! they are Unix-only. A future TCP-based variant would extend coverage
+//! to Windows.
+
+#![cfg(unix)]
 
 use std::io::Read;
 use std::os::unix::net::UnixListener;

@@ -28,6 +28,11 @@
 //! The `--test-threads=1` flag is mandatory: all tests in this binary
 //! share the process-global allocator counters; parallel execution
 //! would intermix counts.
+//!
+//! Uses `DltBackendBuilder::uds`, so the file is Unix-only. A future
+//! TCP variant would extend coverage to Windows.
+
+#![cfg(unix)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::Arc;

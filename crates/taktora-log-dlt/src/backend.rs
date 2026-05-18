@@ -8,7 +8,8 @@
 //! REQ_0811, REQ_0812, REQ_0814, REQ_0815) for the contract this type
 //! is required to satisfy.
 
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -267,7 +268,9 @@ impl DltBackendBuilder {
     /// Configure the backend to talk to `dlt-daemon` over a
     /// Unix-domain socket at `path`. Mutually exclusive with [`Self::tcp`]
     /// — calling either replaces any previous transport setting.
-    pub fn uds(mut self, path: &Path) -> Self {
+    /// Unix-only; on Windows use [`Self::tcp`] instead.
+    #[cfg(unix)]
+    pub fn uds(mut self, path: &std::path::Path) -> Self {
         self.transport = Some(TransportConfig::Uds(PathBuf::from(path)));
         self
     }

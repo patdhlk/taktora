@@ -1,4 +1,9 @@
 //! REQ_0815: drop-oldest emits one summary record on reconnect drain.
+//!
+//! Uses a UDS-bound mock daemon, so the file is Unix-only. A future
+//! TCP variant would extend coverage to Windows.
+
+#![cfg(unix)]
 
 use std::io::Read;
 use std::os::unix::net::UnixListener;

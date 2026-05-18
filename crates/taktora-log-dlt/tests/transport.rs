@@ -1,14 +1,15 @@
 //! REQ_0807: UDS and TCP transports both connect+write+read.
+//! UDS test is Unix-only; TCP test runs on every supported platform.
 
-use std::io::Read;
-use std::os::unix::net::UnixListener;
-use std::thread;
-use std::time::Duration;
-
-use taktora_log_dlt::transport::{Transport, TransportConfig};
-
+#[cfg(unix)]
 #[test]
 fn uds_connect_and_write() {
+    use std::io::Read;
+    use std::os::unix::net::UnixListener;
+    use std::thread;
+
+    use taktora_log_dlt::transport::{Transport, TransportConfig};
+
     let dir = tempfile::tempdir().unwrap();
     let sock = dir.path().join("dlt-test.sock");
     let listener = UnixListener::bind(&sock).unwrap();
@@ -30,7 +31,12 @@ fn uds_connect_and_write() {
 
 #[test]
 fn tcp_connect_and_write() {
+    use std::io::Read;
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+    use std::thread;
+    use std::time::Duration;
+
+    use taktora_log_dlt::transport::{Transport, TransportConfig};
 
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
