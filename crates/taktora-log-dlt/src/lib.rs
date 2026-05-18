@@ -12,6 +12,7 @@
 
 pub mod control;
 pub mod encode;
+pub mod flusher;
 pub mod ids;
 mod kv;
 pub mod level_table;

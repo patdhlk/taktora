@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -73,5 +74,25 @@ impl Transport {
             Transport::Uds(s) => s.read(buf)?,
             Transport::Tcp(s) => s.read(buf)?,
         })
+    }
+
+    /// Set the read timeout on the underlying socket.
+    ///
+    /// When set, [`Transport::read`] returns an error of kind
+    /// [`std::io::ErrorKind::WouldBlock`] or [`std::io::ErrorKind::TimedOut`]
+    /// (platform-dependent) if no data arrives within `dur`. Callers must
+    /// treat that as "no data, try again later" rather than as a fatal I/O
+    /// failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Io`] if the underlying `setsockopt` call
+    /// fails.
+    pub fn set_read_timeout(&mut self, dur: Duration) -> Result<(), TransportError> {
+        match self {
+            Transport::Uds(s) => s.set_read_timeout(Some(dur))?,
+            Transport::Tcp(s) => s.set_read_timeout(Some(dur))?,
+        }
+        Ok(())
     }
 }
