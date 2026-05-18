@@ -13,6 +13,9 @@
 mod sink;
 pub use sink::LogSink;
 
+mod adapter;
+pub use adapter::LogSinkLogger;
+
 pub mod console;
 
 pub use log;
