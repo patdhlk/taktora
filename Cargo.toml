@@ -11,6 +11,8 @@ members = [
     "crates/taktora-connector-zenoh",
     "crates/taktora-executor",
     "crates/taktora-executor-tracing",
+    "crates/taktora-log",
+    "crates/taktora-log-dlt",
     "crates/taktora-replay",
 ]
 
@@ -38,6 +40,8 @@ taktora-connector-host           = { path = "crates/taktora-connector-host",    
 taktora-connector-transport-iox  = { path = "crates/taktora-connector-transport-iox",  version = "0.1.0" }
 taktora-executor                 = { path = "crates/taktora-executor",                 version = "0.1.0" }
 taktora-executor-tracing         = { path = "crates/taktora-executor-tracing",         version = "0.1.0" }
+taktora-log                      = { path = "crates/taktora-log",                      version = "0.1.0" }
+taktora-log-dlt                  = { path = "crates/taktora-log-dlt",                  version = "0.1.0" }
 
 # External crates
 iceoryx2          = "0.8"
@@ -46,7 +50,10 @@ bitflags          = "2"
 crossbeam-channel = "0.5"
 crossbeam-utils   = "0.8"
 num_cpus          = "1"
+log               = { version = "0.4.21", features = ["kv"] }
 tracing           = "0.1"
+tracing-log       = { version = "0.2", default-features = false, features = ["log-tracer", "std"] }
+dlt-core          = { version = "0.20" }
 core_affinity     = "0.8"
 serde             = { version = "1", default-features = false }
 serde_json        = { version = "1", default-features = false }
