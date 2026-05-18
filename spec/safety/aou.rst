@@ -102,3 +102,93 @@ item.
    Taktora does not qualify these — they sit below taktora in the stack.
 
    :Validates: Whole stack
+
+Logging (taktora-log / taktora-log-dlt)
+---------------------------------------
+
+These AoUs cover the workspace logging surface (see
+:doc:`../requirements/logging` and :doc:`../architecture/logging`).
+Logging is QM (per :need:`CON_0027`); every safety-relevant property of
+the log stream depends on the integrator's deployment, so taktora
+carries the responsibility as AoUs rather than as TSRs.
+
+.. aou:: Integrator provides a DLT daemon
+   :id: AOU_0010
+   :status: open
+
+   The integrator provides a COVESA ``dlt-daemon`` (or compatible)
+   listening on the Unix-domain socket or TCP endpoint configured at
+   ``taktora-log-dlt`` init. ``taktora-log-dlt`` does not start,
+   supervise, restart, or reconfigure the daemon.
+
+   :Validates: :need:`REQ_0807`
+
+.. aou:: Integrator owns FFI freedom-from-interference
+   :id: AOU_0011
+   :status: open
+
+   If the integrator swaps the pure-Rust DLT backend for any backend
+   that crosses an FFI boundary — including ``libdlt`` adapters
+   (``dlt_log``, ``dlt-rs``, ``tracing-dlt``) or vendor logger SDKs
+   — the integrator owns the freedom-from-interference argument
+   (separate process, memory partitioning, supervised lifecycle).
+   taktora's spec only covers the pure-Rust DLT backend at
+   :need:`BB_0091`.
+
+   :Validates: :need:`CON_0025`, :need:`FEAT_0073`
+
+.. aou:: Safety-relevant hot paths do not log
+   :id: AOU_0012
+   :status: open
+
+   Integrator code on safety-relevant hot paths (ASIL-rated loops,
+   the executor's deadline-critical sections, the
+   ``HealthEvent::Faulted`` emit path) shall not log inside the
+   tightest loops. ``taktora-log`` is best-effort, lossy under
+   overload (per :need:`REQ_0815`), and not certified. Logging from
+   a safety path is acceptable only when the path can absorb a
+   dropped record without changing its safety behaviour.
+
+   :Validates: :need:`CON_0027`, :need:`QG_0020`
+
+.. aou:: DLT App ID uniqueness on the ECU
+   :id: AOU_0013
+   :status: open
+
+   The integrator ensures DLT App IDs are unique across all processes
+   on the same ECU. The 4-character DLT App ID namespace is flat;
+   colliding IDs make DLT Viewer / dlt-tui filtering ambiguous.
+   taktora reserves the ``TK*`` prefix for its own crates (per
+   :need:`REQ_0808`); integrators shall pick non-``TK*`` IDs for
+   their own applications.
+
+   :Validates: :need:`REQ_0808`
+
+.. aou:: Integrator sizes ring capacity and runtime log level
+   :id: AOU_0014
+   :status: open
+
+   The integrator chooses the bounded ring capacity (per
+   :need:`REQ_0814`), the runtime production log level (per
+   :need:`REQ_0811`), and any non-default reconnect-backoff
+   parameters, based on the ECU's memory and bandwidth budget.
+   taktora ships safe defaults but does not size them for any
+   specific ECU. The default ring capacity should be re-evaluated
+   for high-volume integrations (e.g. ADAS perception pipelines)
+   where overflow under sustained daemon outage would otherwise
+   drop forensically important records.
+
+   :Validates: :need:`REQ_0814`, :need:`REQ_0815`
+
+.. aou:: Reboot persistence is daemon-side
+   :id: AOU_0015
+   :status: open
+
+   If post-mortem recovery of FATAL events is required after a
+   reboot, the integrator configures the ``dlt-daemon``
+   offline-trace storage (``dlt.conf`` ``OfflineTraceDirectory``
+   / size limits) — that is the AUTOSAR-spec'd persistence path.
+   ``taktora-log-dlt``'s in-memory ring (per :need:`REQ_0814`)
+   covers daemon-down windows only and is lost on process restart.
+
+   :Validates: :need:`REQ_0814`

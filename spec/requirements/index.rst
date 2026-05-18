@@ -23,6 +23,10 @@ top-level features:
   files into strongly-typed Rust device drivers, with a shared
   ``fieldbus-od-core`` OD IR co-owned by the EtherCAT toolchain.
   See :doc:`canopen-codegen`.
+* :need:`FEAT_0070` "Shared logging base library" — a workspace-wide
+  logging facade (``taktora-log``) with a default AUTOSAR DLT
+  backend (``taktora-log-dlt``) and a clean swap path for
+  ``log4rs`` / ``env_logger`` / bespoke loggers. See :doc:`logging`.
 
 Each ``req`` directive ``:satisfies:`` one ``feat`` parent; each
 capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
@@ -35,6 +39,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    bounded-alloc
    device-codegen
    canopen-codegen
+   logging
 
 Requirements at a glance
 ------------------------

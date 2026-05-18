@@ -16,6 +16,7 @@ detailed-design notes that predate the arc42 adoption.
    bounded-alloc
    device-codegen
    canopen-codegen
+   logging
    safety
 
 Building blocks
