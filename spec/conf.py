@@ -67,6 +67,9 @@ html_theme = "sphinx_hextra"
 html_static_path = ["_static"]
 html_title = project
 
-# Canonical URL for the published site (GitHub Pages → patdhlk.com/taktora/).
+# Copy CNAME verbatim into the build output so GitHub Pages serves the apex domain.
+html_extra_path = ["CNAME"]
+
+# Canonical URL for the published site (GitHub Pages → taktora.dev).
 # Affects only metadata (sitemaps, canonical links); does not change asset paths.
-html_baseurl = "https://patdhlk.com/taktora/"
+html_baseurl = "https://taktora.dev/"

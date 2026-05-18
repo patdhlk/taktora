@@ -20,7 +20,7 @@ Two layered pieces:
 > independently audited, and there is no SLA, support, or backwards-compatibility
 > guarantee. Use it to learn from, fork, or vendor in — not to ship.
 
-**Specification:** [https://patdhlk.com/taktora/](https://patdhlk.com/taktora/) — built from `spec/` on every push to `main`.
+**Specification:** [https://taktora.dev/](https://taktora.dev/) — built from `spec/` on every push to `main`.
 
 ## What's here
 
