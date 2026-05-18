@@ -26,7 +26,11 @@ git_release_type       = "auto"               # `prod` until 1.0, then `prod` (n
 git_tag_enable         = true
 git_tag_name           = "{{ package }}-v{{ version }}"   # e.g. `taktora-executor-v0.2.0`
 pr_branch_prefix       = "release-plz/"
-pr_name                = "chore: release {{ package }} v{{ version }}{% if multiple_packages %} (+ others){% endif %}"
+# `pr_name` has a multi-package context with no `{{ package }}` /
+# `{{ version }}` variables (those don't exist when one PR spans many
+# crates), so keep it static. release-plz fills the PR body with the
+# per-crate version bump table automatically.
+pr_name                = "chore: release"
 publish                = true
 publish_allow_dirty    = false
 publish_no_verify      = false                # full `cargo publish` verify build
