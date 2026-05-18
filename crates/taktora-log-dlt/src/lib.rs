@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod control;
 pub mod encode;
 pub mod ids;
 mod kv;
