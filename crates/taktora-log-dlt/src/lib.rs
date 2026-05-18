@@ -10,4 +10,6 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod encode;
 pub mod ids;
+mod kv;
