@@ -106,7 +106,6 @@ fn string_argument(s: &str) -> Argument {
     }
 }
 
-#[allow(dead_code)] // consumed by `kv.rs` in Task 11
 pub(crate) fn unsigned_argument(v: u32) -> Argument {
     Argument {
         type_info: TypeInfo {
@@ -122,7 +121,6 @@ pub(crate) fn unsigned_argument(v: u32) -> Argument {
     }
 }
 
-#[allow(dead_code)] // consumed by `kv.rs` in Task 11
 pub(crate) fn signed_argument(v: i32) -> Argument {
     Argument {
         type_info: TypeInfo {
@@ -138,7 +136,6 @@ pub(crate) fn signed_argument(v: i32) -> Argument {
     }
 }
 
-#[allow(dead_code)] // consumed by `kv.rs` in Task 11
 pub(crate) fn float_argument(v: f64) -> Argument {
     Argument {
         type_info: TypeInfo {
@@ -154,7 +151,6 @@ pub(crate) fn float_argument(v: f64) -> Argument {
     }
 }
 
-#[allow(dead_code)] // consumed by `kv.rs` in Task 11
 pub(crate) fn bool_argument(v: bool) -> Argument {
     Argument {
         type_info: TypeInfo {
@@ -170,7 +166,6 @@ pub(crate) fn bool_argument(v: bool) -> Argument {
     }
 }
 
-#[allow(dead_code)] // consumed by `kv.rs` in Task 11
 pub(crate) fn display_string_argument(s: &str) -> Argument {
     string_argument(s)
 }
