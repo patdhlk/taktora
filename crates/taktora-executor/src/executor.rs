@@ -250,7 +250,7 @@ impl Executor {
     /// **ignored** — the handler dispatches on the main item's triggers
     /// while the task is in `Faulted` state and runs in place of the main
     /// item's `execute()`. The pre-built handler dispatch closure is
-    /// stashed on the same [`TaskEntry`] as the main item's `job`,
+    /// stashed on the same task entry as the main item's `job`,
     /// satisfying `REQ_0072`.
     ///
     /// # Errors

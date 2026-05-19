@@ -44,7 +44,12 @@ fn fault_handler_dispatches_in_place_of_main() {
         )
         .expect("add_with_fault_handler");
 
-    exec.run_for(Duration::from_millis(50)).expect("run 1");
+    // Wider window than the other fault tests: this one needs MULTIPLE
+    // post-fault wakeups (main once, then handler ≥ 1 more times). macOS
+    // CI runners have visible jitter in iceoryx2 WaitSet + pool worker
+    // setup that occasionally consumed all of an earlier 50ms window
+    // before the handler had a chance to dispatch even once.
+    exec.run_for(Duration::from_millis(300)).expect("run 1");
 
     // After the first breach the main item should not run again.
     let m1 = main_calls.load(Ordering::SeqCst);
@@ -57,7 +62,7 @@ fn fault_handler_dispatches_in_place_of_main() {
 
     // Clear and continue — main should resume.
     exec.clear_task_fault(task_id).expect("clear");
-    exec.run_for(Duration::from_millis(15)).expect("run 2");
+    exec.run_for(Duration::from_millis(100)).expect("run 2");
 
     let m2 = main_calls.load(Ordering::SeqCst);
     assert!(

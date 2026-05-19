@@ -884,7 +884,7 @@ Tests verifying the cycle-overrun fault primitive sub-feature
 
 .. test:: Budget breach faults task and halts dispatch
    :id: TEST_0815
-   :status: open
+   :status: implemented
    :verifies: REQ_0070, REQ_0102
 
    Item with :code:`interval(5ms); budget(1ms);` sleeps 3ms in
@@ -895,7 +895,7 @@ Tests verifying the cycle-overrun fault primitive sub-feature
 
 .. test:: Clear task fault resumes dispatch
    :id: TEST_0816
-   :status: open
+   :status: implemented
    :verifies: REQ_0070
 
    After the task is Faulted (per :need:`TEST_0815`),
@@ -906,7 +906,7 @@ Tests verifying the cycle-overrun fault primitive sub-feature
 
 .. test:: Iteration budget faults executor with silent cascade
    :id: TEST_0817
-   :status: open
+   :status: implemented
    :verifies: REQ_0071, REQ_0073
 
    Executor with :code:`iteration_budget(10ms)`. Two items registered:
@@ -921,7 +921,7 @@ Tests verifying the cycle-overrun fault primitive sub-feature
 
 .. test:: Fault handler dispatches in place of main item
    :id: TEST_0818
-   :status: open
+   :status: implemented
    :verifies: REQ_0072
 
    Item registered via
@@ -932,7 +932,7 @@ Tests verifying the cycle-overrun fault primitive sub-feature
 
 .. test:: Overrun count persists across clears
    :id: TEST_0819
-   :status: open
+   :status: implemented
    :verifies: REQ_0102
 
    Force a breach, clear, force another breach.
@@ -941,7 +941,7 @@ Tests verifying the cycle-overrun fault primitive sub-feature
 
 .. test:: Fault state set from worker visible from main
    :id: TEST_0820
-   :status: open
+   :status: implemented
    :verifies: REQ_0073
 
    Multi-worker setup; per-task fault state and
@@ -950,7 +950,7 @@ Tests verifying the cycle-overrun fault primitive sub-feature
 
 .. test:: Overrun post-execute path zero allocations
    :id: TEST_0821
-   :status: open
+   :status: implemented
    :verifies: REQ_0060, REQ_0104
 
    :code:`CountingAllocator` tracks the steady-state overrun post-execute
@@ -959,7 +959,7 @@ Tests verifying the cycle-overrun fault primitive sub-feature
 
 .. test:: Fault callbacks forwarded to tracing
    :id: TEST_0822
-   :status: open
+   :status: implemented
    :verifies: REQ_0073
 
    :code:`taktora-executor-tracing`'s :code:`TracingObserver` forwards

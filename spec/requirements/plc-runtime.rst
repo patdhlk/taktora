@@ -351,7 +351,7 @@ Cycle-overrun fault primitive
 
 .. req:: Per-task overrun fault transition
    :id: REQ_0070
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0018
    :links: BB_0093, IMPL_0081, TEST_0815, TEST_0816, TEST_0819, TEST_0820, TEST_0821
 
@@ -361,7 +361,7 @@ Cycle-overrun fault primitive
 
 .. req:: Executor-wide overrun fault transition
    :id: REQ_0071
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0018
    :links: BB_0093, IMPL_0082, TEST_0817
 
@@ -371,7 +371,7 @@ Cycle-overrun fault primitive
 
 .. req:: Fault-handler item dispatch
    :id: REQ_0072
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0018
    :links: BB_0093, IMPL_0084, TEST_0818
 
@@ -384,7 +384,7 @@ Cycle-overrun fault primitive
 
 .. req:: Fault state observability
    :id: REQ_0073
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0018
    :links: BB_0093, IMPL_0083, TEST_0822, TEST_0820
 
@@ -523,7 +523,7 @@ Scan-cycle observability
 
 .. req:: Per-task overrun counter
    :id: REQ_0102
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0021
    :refines: REQ_0070
    :links: BB_0093, IMPL_0081, TEST_0815, TEST_0819

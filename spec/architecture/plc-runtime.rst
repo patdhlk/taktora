@@ -612,7 +612,7 @@ Cycle-overrun fault primitive (FEAT_0018)
 
 .. building-block:: Cycle-overrun fault primitive surface
    :id: BB_0093
-   :status: open
+   :status: implemented
    :implements: FEAT_0018
 
    New module :code:`crates/taktora-executor/src/fault.rs` owning
@@ -622,7 +622,7 @@ Cycle-overrun fault primitive (FEAT_0018)
 
 .. impl:: Per-task fault state machine
    :id: IMPL_0081
-   :status: open
+   :status: implemented
    :implements: REQ_0070, REQ_0102
 
    Implementation in :code:`crates/taktora-executor/src/fault.rs`
@@ -631,7 +631,7 @@ Cycle-overrun fault primitive (FEAT_0018)
 
 .. impl:: Executor-wide fault state machine
    :id: IMPL_0082
-   :status: open
+   :status: implemented
    :implements: REQ_0071
 
    Implementation in :code:`crates/taktora-executor/src/fault.rs`
@@ -642,7 +642,7 @@ Cycle-overrun fault primitive (FEAT_0018)
 
 .. impl:: Fault state Observer callbacks
    :id: IMPL_0083
-   :status: open
+   :status: implemented
    :implements: REQ_0073
 
    Four new :code:`Observer` methods in
@@ -651,7 +651,7 @@ Cycle-overrun fault primitive (FEAT_0018)
 
 .. impl:: Fault handler dispatch path
    :id: IMPL_0084
-   :status: open
+   :status: implemented
    :implements: REQ_0072
 
    New :code:`Executor::add_with_fault_handler` registration path and
