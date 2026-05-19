@@ -43,6 +43,9 @@ pub(crate) enum TriggerDecl {
 pub struct TriggerDeclarer<'a> {
     _marker: core::marker::PhantomData<&'a mut ()>,
     pub(crate) decls: Vec<TriggerDecl>,
+    /// Optional per-task budget (`REQ_0070`). `None` means no per-task
+    /// budget; the executor-wide iteration budget (if set) still applies.
+    pub(crate) budget: Option<Duration>,
 }
 
 impl TriggerDeclarer<'_> {
@@ -53,6 +56,7 @@ impl TriggerDeclarer<'_> {
         Self {
             _marker: core::marker::PhantomData,
             decls: Vec::new(),
+            budget: None,
         }
     }
 
@@ -87,6 +91,15 @@ impl TriggerDeclarer<'_> {
             deadline: deadline.into(),
         });
         self
+    }
+
+    /// Declare that this item's `execute()` must finish within `dur`.
+    /// Exceeding it transitions the task to `Faulted` state (`REQ_0070`).
+    /// Calling `budget` more than once on the same declarer keeps the
+    /// last value (consistent with how other trigger declarations would
+    /// behave if repeated).
+    pub const fn budget(&mut self, dur: Duration) {
+        self.budget = Some(dur);
     }
 
     /// Escape hatch — attach a raw iceoryx2 listener directly.
@@ -207,5 +220,20 @@ mod tests {
         d.subscriber(&sub).interval(Duration::from_millis(10));
         assert_eq!(d.decls.len(), 2);
         Ok(())
+    }
+
+    #[test]
+    fn declares_budget() {
+        let mut d = TriggerDeclarer::new_test();
+        d.budget(Duration::from_millis(8));
+        assert_eq!(d.budget, Some(Duration::from_millis(8)));
+    }
+
+    #[test]
+    fn budget_overwrites_previous() {
+        let mut d = TriggerDeclarer::new_test();
+        d.budget(Duration::from_millis(8));
+        d.budget(Duration::from_millis(4));
+        assert_eq!(d.budget, Some(Duration::from_millis(4)));
     }
 }
