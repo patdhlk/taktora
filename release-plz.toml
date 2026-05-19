@@ -96,3 +96,27 @@ changelog_update      = false
 git_release_enable    = false
 git_tag_enable        = false
 publish               = false
+
+[[package]]
+name                  = "taktora-connector-can-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-connector-ethercat-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-connector-zenoh-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false

@@ -34,8 +34,6 @@ thiserror                      = { workspace = true }
 ethercrab                      = { workspace = true, optional = true }
 
 [dev-dependencies]
-taktora-connector-codec = { workspace = true }
-taktora-bounded-alloc   = { workspace = true }
 proptest              = { workspace = true }
 serde_json            = { workspace = true, features = ["std"] }
 
