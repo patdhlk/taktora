@@ -327,6 +327,69 @@ impl Executor {
         Ok(task_id)
     }
 
+    /// Clear a per-task fault. Returns the previous `FaultState`.
+    /// Fires `Observer::on_task_clear` if the state changed from
+    /// `Faulted` to `Running`. `REQ_0070`.
+    ///
+    /// # Errors
+    ///
+    /// * [`ExecutorError::TaskNotFound`] if `task` is unknown.
+    /// * [`ExecutorError::TaskNotFaulted`] if `task` is already `Running`.
+    pub fn clear_task_fault(&self, task: TaskId) -> Result<FaultState, ExecutorError> {
+        let entry = self
+            .tasks
+            .iter()
+            .find(|t| t.id == task)
+            .ok_or_else(|| ExecutorError::TaskNotFound(task.clone()))?;
+        let budget_ms = entry.budget.map_or(0_u32, crate::fault::duration_to_ms_sat);
+        let prev = entry.fault.swap(FaultState::Running, budget_ms);
+        match prev {
+            FaultState::Running => Err(ExecutorError::TaskNotFaulted(task)),
+            FaultState::Faulted { .. } => {
+                self.observer.on_task_clear(task);
+                Ok(prev)
+            }
+        }
+    }
+
+    /// Clear the executor-wide fault and cascade-clear every task whose
+    /// state is `Faulted{ExecutorFaulted}`. Tasks whose state is
+    /// `Faulted{BudgetExceeded}` are NOT cleared (their own contract
+    /// breach is independent). Fires `Observer::on_executor_clear` and
+    /// one `Observer::on_task_clear` per cascade-cleared task.
+    /// `REQ_0071`.
+    ///
+    /// # Errors
+    ///
+    /// * [`ExecutorError::ExecutorNotFaulted`] if the executor is `Running`.
+    pub fn clear_executor_fault(&self) -> Result<ExecutorFaultState, ExecutorError> {
+        let task_idx = self.exec_fault_task_idx.load(Ordering::Acquire);
+        let budget_ms = self.exec_fault_budget_ms.load(Ordering::Acquire);
+        let prev = self
+            .exec_fault
+            .swap(ExecutorFaultState::Running, task_idx, budget_ms);
+        match prev {
+            ExecutorFaultState::Running => Err(ExecutorError::ExecutorNotFaulted),
+            ExecutorFaultState::Faulted { .. } => {
+                // Cascade-clear tasks whose reason is ExecutorFaulted.
+                for entry in &self.tasks {
+                    let task_budget_ms =
+                        entry.budget.map_or(0_u32, crate::fault::duration_to_ms_sat);
+                    if let FaultState::Faulted {
+                        reason: FaultReason::ExecutorFaulted,
+                        ..
+                    } = entry.fault.load(task_budget_ms)
+                    {
+                        let _ = entry.fault.swap(FaultState::Running, task_budget_ms);
+                        self.observer.on_task_clear(entry.id.clone());
+                    }
+                }
+                self.observer.on_executor_clear();
+                Ok(prev)
+            }
+        }
+    }
+
     /// Add a sequential chain of items. Only the head item's
     /// `declare_triggers` is consulted; non-head triggers are ignored with a
     /// tracing warn.
@@ -1647,5 +1710,30 @@ mod tests {
         let mut exec = Executor::builder().worker_threads(0).build().unwrap();
         exec.add(it).unwrap();
         assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn clear_task_fault_errors_on_running_task() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let task_id = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(10));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .unwrap();
+        // Task starts in Running state — clearing should error.
+        let err = exec.clear_task_fault(task_id).expect_err("not faulted");
+        assert!(matches!(err, ExecutorError::TaskNotFaulted(_)));
+    }
+
+    #[test]
+    fn clear_executor_fault_errors_on_running_executor() {
+        let exec = Executor::builder().worker_threads(0).build().unwrap();
+        let err = exec.clear_executor_fault().expect_err("not faulted");
+        assert!(matches!(err, ExecutorError::ExecutorNotFaulted));
     }
 }
