@@ -60,6 +60,23 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  examples:
+    name: Examples (compile + mock-run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples/zenoh-pubsub-mock
+            examples/zenoh-pubsub-real
+      - name: Check examples
+        run: ./scripts/check-examples.sh
+
   spec:
     name: Build specification
     runs-on: ubuntu-latest
