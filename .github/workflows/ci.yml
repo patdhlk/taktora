@@ -74,6 +74,7 @@ jobs:
             .
             examples/zenoh-pubsub-mock
             examples/zenoh-pubsub-real
+            examples/ethercat-mock-loop
       - name: Check examples
         run: ./scripts/check-examples.sh
 
