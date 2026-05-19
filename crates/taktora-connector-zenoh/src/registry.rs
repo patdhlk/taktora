@@ -232,7 +232,7 @@ impl ChannelRegistry {
             .iter()
             .any(|e| e.descriptor_name == name && e.direction == direction)
         {
-            return Err(ConnectorError::InvalidDescriptor(format!(
+            return Err(ConnectorError::Configuration(format!(
                 "channel '{name}' already registered with direction {direction:?}",
             )));
         }

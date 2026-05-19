@@ -37,14 +37,14 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`ConnectorError::InvalidDescriptor`] when `name` is
+    /// Returns [`ConnectorError::Configuration`] when `name` is
     /// empty. Other validations (length cap, character set) live in
     /// `taktora-connector-transport-iox` because they are tied to
     /// iceoryx2's service-name constraints.
     pub fn new(name: impl Into<Cow<'static, str>>, routing: R) -> Result<Self, ConnectorError> {
         let name = name.into();
         if name.is_empty() {
-            return Err(ConnectorError::InvalidDescriptor(
+            return Err(ConnectorError::Configuration(
                 "channel name must not be empty".into(),
             ));
         }

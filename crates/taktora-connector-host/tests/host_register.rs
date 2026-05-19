@@ -91,7 +91,7 @@ impl Connector for EchoConnector {
     where
         T: serde::Serialize,
     {
-        Err(ConnectorError::InvalidDescriptor(
+        Err(ConnectorError::Configuration(
             "EchoConnector::create_writer not implemented in this test fixture".into(),
         ))
     }
@@ -103,7 +103,7 @@ impl Connector for EchoConnector {
     where
         T: serde::de::DeserializeOwned,
     {
-        Err(ConnectorError::InvalidDescriptor(
+        Err(ConnectorError::Configuration(
             "EchoConnector::create_reader not implemented in this test fixture".into(),
         ))
     }

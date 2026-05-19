@@ -87,7 +87,7 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize>
     ///
     /// # Errors
     ///
-    /// Returns [`ConnectorError::InvalidDescriptor`] if
+    /// Returns [`ConnectorError::Configuration`] if
     /// `options.network_interface()` is `None` — the gateway needs an
     /// interface name to open the raw socket on (`REQ_0325`).
     pub fn new(
@@ -97,7 +97,7 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize>
         let interface = options
             .network_interface()
             .ok_or_else(|| {
-                ConnectorError::InvalidDescriptor(
+                ConnectorError::Configuration(
                     "EthercatConnectorOptions::network_interface is required for \
                      EthercrabBusDriver"
                         .into(),
@@ -128,7 +128,7 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
 {
     async fn bring_up(&mut self) -> Result<BringUp, ConnectorError> {
         if matches!(self.state, State::Operational(_)) {
-            return Err(ConnectorError::InvalidDescriptor(
+            return Err(ConnectorError::Configuration(
                 "EthercrabBusDriver::bring_up called twice".into(),
             ));
         }
@@ -137,7 +137,7 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
         // gateway"). PduStorage's `try_split` enforces this at the
         // ethercrab layer; we surface it as our error type.
         let (pdu_tx, pdu_rx, pdu_loop) = self.storage.try_split().map_err(|()| {
-            ConnectorError::InvalidDescriptor(
+            ConnectorError::Configuration(
                 "EthercatPduStorage already split — declare a fresh storage per gateway".into(),
             )
         })?;
@@ -303,7 +303,7 @@ async fn apply_pdo_mapping_for_subdevice<const MAX_SUBDEVICES: usize, const MAX_
     }
 
     if !found {
-        return Err(ConnectorError::InvalidDescriptor(format!(
+        return Err(ConnectorError::Configuration(format!(
             "SubDevice {:#06x} declared in pdo_map but not present on the bus",
             map.address
         )));

@@ -130,7 +130,7 @@ impl<'n> ServiceFactory<'n> {
     > {
         let service_name = name
             .try_into()
-            .map_err(|e| ConnectorError::InvalidDescriptor(format!("iceoryx2 name: {e:?}")))?;
+            .map_err(|e| ConnectorError::Configuration(format!("iceoryx2 name: {e:?}")))?;
         self.node
             .service_builder(&service_name)
             .publish_subscribe::<ConnectorEnvelope<N>>()

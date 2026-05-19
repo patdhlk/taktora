@@ -275,7 +275,7 @@ where
     {
         let routing = *descriptor.routing();
         if routing.direction != PdoDirection::Rx {
-            return Err(ConnectorError::InvalidDescriptor(format!(
+            return Err(ConnectorError::Configuration(format!(
                 "create_writer requires an RxPDO routing (MainDevice → SubDevice), got {:?}",
                 routing.direction
             )));
@@ -311,7 +311,7 @@ where
     {
         let routing = *descriptor.routing();
         if routing.direction != PdoDirection::Tx {
-            return Err(ConnectorError::InvalidDescriptor(format!(
+            return Err(ConnectorError::Configuration(format!(
                 "create_reader requires a TxPDO routing (SubDevice → MainDevice), got {:?}",
                 routing.direction
             )));

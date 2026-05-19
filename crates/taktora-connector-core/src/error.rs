@@ -37,7 +37,7 @@ pub enum ConnectorError {
 
     /// Channel descriptor failed validation (e.g. empty name).
     #[error("invalid descriptor: {0}")]
-    InvalidDescriptor(String),
+    Configuration(String),
 
     /// The connector is in [`crate::ConnectorHealth::Down`]; the caller
     /// must wait for recovery before retrying. The framework never

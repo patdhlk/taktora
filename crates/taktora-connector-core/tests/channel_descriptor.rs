@@ -25,7 +25,7 @@ fn empty_name_fails_with_invalid_descriptor() {
     let err = ChannelDescriptor::<TestRouting, 64>::new("", TestRouting { tag: 0 })
         .expect_err("empty name must fail validation");
     match err {
-        ConnectorError::InvalidDescriptor(msg) => {
+        ConnectorError::Configuration(msg) => {
             assert!(msg.contains("empty"), "unexpected message: {msg}");
         }
         other => panic!("unexpected error variant: {other:?}"),

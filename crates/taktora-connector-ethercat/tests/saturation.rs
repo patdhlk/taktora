@@ -1,4 +1,4 @@
-//! Inbound-saturation coverage for the EtherCAT connector (`REQ_0324`).
+//! Inbound-saturation coverage for the `EtherCAT` connector (`REQ_0324`).
 //!
 //! The bridge-unit contract lives next to the type (see
 //! `tests/bridge.rs` for the bounded `InboundBridge` semantics); these

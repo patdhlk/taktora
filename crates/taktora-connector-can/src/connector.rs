@@ -127,11 +127,11 @@ where
     ///
     /// Returns [`ConnectorError::Stack`] wrapping any iceoryx2 node
     /// creation failure or tokio runtime construction failure.
-    /// Returns [`ConnectorError::InvalidDescriptor`] when
+    /// Returns [`ConnectorError::Configuration`] when
     /// `drivers.len() != options.ifaces().len()`.
     pub fn new(state: Arc<CanState>, drivers: Vec<I>, codec: C) -> Result<Self, ConnectorError> {
         if drivers.len() != state.options().ifaces().len() {
-            return Err(ConnectorError::InvalidDescriptor(format!(
+            return Err(ConnectorError::Configuration(format!(
                 "CanConnector: drivers.len() {} does not match ifaces.len() {}",
                 drivers.len(),
                 state.options().ifaces().len()
@@ -312,14 +312,14 @@ fn validate_routing<const N: usize>(
     connector: &CanConnector<impl CanInterfaceLike, impl Send>,
 ) -> Result<(), ConnectorError> {
     if !connector.iface_is_configured(&routing.iface) {
-        return Err(ConnectorError::InvalidDescriptor(format!(
+        return Err(ConnectorError::Configuration(format!(
             "CanRouting::iface {} not in CanConnectorOptions::ifaces",
             routing.iface
         )));
     }
     let expected = routing.kind.max_payload();
     if N != expected {
-        return Err(ConnectorError::InvalidDescriptor(format!(
+        return Err(ConnectorError::Configuration(format!(
             "ChannelDescriptor max_payload_size {N} does not match CanFrameKind::{:?}.max_payload() = {expected}",
             routing.kind
         )));

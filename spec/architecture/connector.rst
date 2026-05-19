@@ -1882,7 +1882,7 @@ spec text that needed amendment during implementation.
      (``REQ_0210``). Used as a generic-parameter constraint by
      concrete connectors.
    * ``ConnectorError`` — ``Codec`` / ``BackPressure`` /
-     ``PayloadOverflow`` / ``InvalidDescriptor`` / ``Down`` /
+     ``PayloadOverflow`` / ``Configuration`` / ``Down`` /
      ``Stack`` (``REQ_0213``, ``REQ_0214``).
    * ``ConnectorHealth`` + ``ConnectorHealthKind`` + ``HealthEvent``
      + ``HealthMonitor`` + ``IllegalTransition`` — enforces the
