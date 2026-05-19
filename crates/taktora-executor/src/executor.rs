@@ -167,6 +167,7 @@ impl Executor {
         let id = item.task_id().map_or(id_arg, TaskId::new);
         let mut declarer = TriggerDeclarer::new_internal();
         item.declare_triggers(&mut declarer)?;
+        let budget = declarer.budget;
         let decls = declarer.into_decls();
 
         let mut item_box: Box<dyn ExecutableItem> = Box::new(item);
@@ -198,7 +199,7 @@ impl Executor {
             kind: TaskKind::Single(item_box),
             decls,
             job: Some(job),
-            budget: None,
+            budget,
             fault: FaultAtomic::new(),
             overrun_count: AtomicU64::new(0),
             handler_job: None,
@@ -303,6 +304,7 @@ impl Executor {
             kind: TaskKind::Chain(items),
             decls,
             job: None, // populated in the rebuild step below
+            // TODO(post-Task-10): chain budgets carried separately; for now None.
             budget: None,
             fault: FaultAtomic::new(),
             overrun_count: AtomicU64::new(0),
@@ -1153,6 +1155,7 @@ impl ExecutorGraphBuilder<'_> {
             // stored inside the `Graph`; the per-task `job` slot
             // is unused for graphs.
             job: None,
+            // TODO(post-Task-10): graph budgets carried separately; for now None.
             budget: None,
             fault: FaultAtomic::new(),
             overrun_count: AtomicU64::new(0),
@@ -1184,6 +1187,28 @@ mod tests {
             .add_with_id("my-task", item(|_| Ok(ControlFlow::Continue)))
             .unwrap();
         assert_eq!(id.as_str(), "my-task");
+    }
+
+    #[test]
+    fn add_persists_declared_budget() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let task_id = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(10));
+                    d.budget(Duration::from_millis(5));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .unwrap();
+        let entry = exec
+            .tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .expect("task present");
+        assert_eq!(entry.budget, Some(Duration::from_millis(5)));
     }
 
     #[test]
