@@ -38,8 +38,9 @@ Requirements
 
 .. req:: Pre-allocated fixed-block arena
    :id: REQ_0300
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0040
+   :links: BB_0024, TEST_0180, TEST_0181
 
    The allocator shall serve every allocation from a single
    statically-sized arena whose total capacity is
@@ -52,8 +53,9 @@ Requirements
 
 .. req:: Fail-closed on cap overrun
    :id: REQ_0301
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0040
+   :links: BB_0024, TEST_0180
 
    When an allocation request cannot be satisfied — because
    ``layout.size() > BLOCK_SIZE``, ``layout.align() > BLOCK_SIZE``
@@ -66,8 +68,9 @@ Requirements
 
 .. req:: Lock-after-init panic mode
    :id: REQ_0302
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0040
+   :links: BB_0024, TEST_0182
 
    The allocator shall expose a ``lock(&self)`` method that flips an
    internal ``AtomicBool`` (Release ordering). After ``lock`` returns,
@@ -80,8 +83,9 @@ Requirements
 
 .. req:: Allocation accounting API
    :id: REQ_0303
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0040
+   :links: BB_0024, TEST_0183
 
    The allocator shall expose public methods returning live counts:
    total successful ``alloc`` calls since process start, total
@@ -94,8 +98,9 @@ Requirements
 
 .. req:: Thread-safe allocation
    :id: REQ_0304
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0040
+   :links: BB_0024, TEST_0184
 
    Concurrent ``alloc`` and ``dealloc`` calls from multiple threads
    shall be safe (no torn state, no double-allocation of a block,
