@@ -90,5 +90,11 @@ fn build_runtime(worker_threads: usize) -> std::io::Result<Runtime> {
     let mut builder = RtBuilder::new_multi_thread();
     builder.worker_threads(worker_threads.max(1));
     builder.thread_name("taktora-ethercat");
+    // The dispatcher loop calls `tokio::time::sleep` between cycles
+    // (`dispatcher::dispatcher_loop`); without the timer driver
+    // enabled the runtime panics with "timers are disabled" the
+    // first time the dispatcher tries to pace itself. Mirrors the
+    // zenoh gateway's `enable_all()` (same rationale).
+    builder.enable_all();
     builder.build()
 }
