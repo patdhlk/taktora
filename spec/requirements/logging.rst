@@ -66,8 +66,9 @@ Facade and backend-swap surface
 
 .. req:: Single facade for all taktora crates
    :id: REQ_0800
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0071
+   :links: BB_0090, TEST_0800
 
    Every taktora workspace crate shall emit log records via the ``log``
    crate facade only. No business crate (executor, ``connector-*``,
@@ -77,8 +78,9 @@ Facade and backend-swap surface
 
 .. req:: taktora-log re-exports log macros
    :id: REQ_0801
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0071
+   :links: BB_0090, TEST_0801
 
    ``taktora-log`` shall re-export the ``log`` crate's macros
    (``info!``, ``warn!``, ``error!``, ``debug!``, ``trace!``, plus
@@ -88,8 +90,9 @@ Facade and backend-swap surface
 
 .. req:: LogSink trait defines backend extension surface
    :id: REQ_0802
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0071
+   :links: BB_0090, TEST_0802
 
    ``taktora-log`` shall define a ``LogSink`` trait that captures the
    backend's responsibilities: emit a ``log::Record``, register an
@@ -101,8 +104,9 @@ Facade and backend-swap surface
 
 .. req:: One-shot init builder selects the backend
    :id: REQ_0803
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0071
+   :links: BB_0090, TEST_0803
 
    ``taktora-log`` shall expose a builder API that selects the active
    ``LogSink`` implementation at process init and registers it as the
@@ -126,8 +130,9 @@ Facade and backend-swap surface
 
 .. req:: Integrator may install any log::Log implementation
    :id: REQ_0804
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0073
+   :links: BB_0090, TEST_0804
 
    Integrators shall be able to install any ``log::Log`` implementation
    — including ``log4rs``, ``env_logger``, ``tracing-subscriber`` (via
@@ -151,8 +156,9 @@ Facade and backend-swap surface
 
 .. req:: tracing-log bridge installed at init
    :id: REQ_0805
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0078
+   :links: BB_0090, TEST_0805
 
    ``taktora-log::init()`` shall install the ``tracing-log`` bridge
    (``LogTracer::init()`` or equivalent) so events emitted via
@@ -182,8 +188,9 @@ DLT backend
 
 .. req:: AUTOSAR Classic DLT R20-11 encoding via dlt-core
    :id: REQ_0806
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0072
+   :links: BB_0091, TEST_0806
 
    The DLT backend shall encode every emitted record as an AUTOSAR
    Classic DLT R20-11 message — Storage Header + Standard Header +
@@ -193,8 +200,9 @@ DLT backend
 
 .. req:: UDS (default) and TCP transports to a local dlt-daemon
    :id: REQ_0807
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0072
+   :links: BB_0092, TEST_0807
 
    The DLT backend shall support delivery to a co-located
    ``dlt-daemon`` via a Unix-domain socket (default) and via TCP
@@ -205,8 +213,9 @@ DLT backend
 
 .. req:: 4-character DLT App ID and Context ID per emitting crate
    :id: REQ_0808
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0072
+   :links: BB_0091, TEST_0808
 
    Each taktora crate that emits log records via ``taktora-log-dlt``
    shall declare a 4-character DLT App ID and one or more 4-character
@@ -230,8 +239,9 @@ DLT backend
 
 .. req:: log::kv pairs encoded as DLT verbose arguments
    :id: REQ_0809
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0074
+   :links: BB_0091, TEST_0809
 
    For each ``log::Record``, the DLT backend shall iterate
    ``record.key_values()`` and emit one DLT verbose argument per
@@ -260,8 +270,9 @@ Runtime log-level control
 
 .. req:: Set-Log-Level and Set-Default-Log-Level control messages
    :id: REQ_0810
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0075
+   :links: BB_0091, TEST_0810
 
    The DLT backend's daemon-client receive half shall ingest
    AUTOSAR DLT Set-Log-Level and Set-Default-Log-Level control
@@ -273,8 +284,9 @@ Runtime log-level control
 
 .. req:: Production default level is INFO
    :id: REQ_0811
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0075
+   :links: BB_0091, TEST_0811
 
    The default log level applied at ``taktora-log-dlt`` init shall be
    ``INFO``. ``DEBUG`` and ``TRACE`` shall be reachable only by
@@ -299,8 +311,9 @@ Non-blocking hot path and offline buffering
 
 .. req:: Emission shall not block the calling thread
    :id: REQ_0812
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0076
+   :links: BB_0091, TEST_0812
 
    Emitting a log record via ``log::*`` macros shall not block the
    calling thread. The producer side of ``taktora-log-dlt`` shall be
@@ -322,8 +335,9 @@ Non-blocking hot path and offline buffering
 
 .. req:: Bounded in-memory ring buffers records while daemon is down
    :id: REQ_0814
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0076
+   :links: BB_0091, TEST_0814
 
    When the daemon socket is unavailable, the DLT backend shall
    buffer records in a bounded in-memory ring (capacity configurable

@@ -13,6 +13,7 @@ Test cases verifying requirements. Each ``test`` directive
    bounded-alloc
    device-codegen
    canopen-codegen
+   logging
 
 .. needtable::
    :types: test
