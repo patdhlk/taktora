@@ -88,3 +88,11 @@ changelog_update      = false
 git_release_enable    = false
 git_tag_enable        = false
 publish               = false
+
+[[package]]
+name                  = "taktora-connector-host-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
