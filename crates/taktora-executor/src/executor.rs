@@ -70,6 +70,9 @@ pub struct Executor {
     /// the per-iteration heap allocation that the previous design incurred.
     /// Required for `REQ_0060`.
     pub(crate) iter_err: Arc<std::sync::Mutex<Option<ExecutorError>>>,
+    /// Executor-wide iteration budget from `ExecutorBuilder::iteration_budget`.
+    /// `None` means no executor-wide check.
+    pub(crate) iteration_budget: Option<Duration>,
 }
 
 // SAFETY: `IxListener<ipc::Service>` is `!Send` for the same Rc-based
@@ -323,6 +326,9 @@ pub struct ExecutorBuilder {
     observer: Option<Arc<dyn Observer>>,
     monitor: Option<Arc<dyn ExecutionMonitor>>,
     worker_attrs: ThreadAttributes,
+    /// Executor-wide iteration budget (`REQ_0071`). `None` means no
+    /// executor-wide check.
+    iteration_budget: Option<Duration>,
 }
 
 impl Default for ExecutorBuilder {
@@ -332,6 +338,7 @@ impl Default for ExecutorBuilder {
             observer: None,
             monitor: None,
             worker_attrs: ThreadAttributes::new(),
+            iteration_budget: None,
         }
     }
 }
@@ -356,6 +363,15 @@ impl ExecutorBuilder {
     #[must_use]
     pub fn monitor(mut self, mon: Arc<dyn ExecutionMonitor>) -> Self {
         self.monitor = Some(mon);
+        self
+    }
+
+    /// Configure the executor-wide iteration budget. Any task whose
+    /// `execute()` exceeds `dur` transitions the executor to `Faulted`
+    /// (`REQ_0071`). Default: unset (no executor-wide check).
+    #[must_use]
+    pub const fn iteration_budget(mut self, dur: Duration) -> Self {
+        self.iteration_budget = Some(dur);
         self
     }
 
@@ -437,6 +453,7 @@ impl ExecutorBuilder {
             observer,
             monitor,
             iter_err: Arc::new(std::sync::Mutex::new(None)),
+            iteration_budget: self.iteration_budget,
         };
 
         Ok(exec)
