@@ -8,6 +8,7 @@
 use crate::Channel;
 use crate::context::Stoppable;
 use crate::error::ExecutorError;
+use crate::fault::{ExecutorFaultAtomic, FaultAtomic};
 use crate::item::ExecutableItem;
 use crate::monitor::{ExecutionMonitor, NoopMonitor};
 use crate::observer::{NoopObserver, Observer};
@@ -17,12 +18,14 @@ use crate::task_id::TaskId;
 use crate::task_kind::TaskKind;
 use crate::thread_attrs::ThreadAttributes;
 use crate::trigger::{TriggerDecl, TriggerDeclarer};
+use core::sync::atomic::AtomicU32;
 use iceoryx2::node::Node;
 use iceoryx2::port::listener::Listener as IxListener;
 use iceoryx2::prelude::ipc;
 use iceoryx2::prelude::*;
 use iceoryx2::waitset::WaitSetRunResult;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -46,6 +49,25 @@ pub(crate) struct TaskEntry {
     /// `TaskKind::Graph`, which dispatches its vertices via a separate
     /// path and is handled by `REQ_0062` / `REQ_0063` follow-on work.
     pub(crate) job: Option<Box<dyn FnMut() + Send + 'static>>,
+
+    /// Per-task budget declared via `TriggerDeclarer::budget`. `None`
+    /// means no per-task check; the executor-wide iteration budget
+    /// still applies. `REQ_0070`.
+    pub(crate) budget: Option<Duration>,
+
+    /// Per-task fault state. Wait-free read on the dispatch hot path.
+    /// `REQ_0070`.
+    pub(crate) fault: FaultAtomic,
+
+    /// Monotonic per-task overrun counter. Increments on EVERY budget
+    /// breach, including breaches while already `Faulted`. Never reset
+    /// by clearing the fault. `REQ_0102`.
+    pub(crate) overrun_count: AtomicU64,
+
+    /// Pre-built dispatch closure for the fault-handler item. Mirrors
+    /// `job`. `None` means no handler — the task is simply skipped
+    /// during fault. `REQ_0072`.
+    pub(crate) handler_job: Option<Box<dyn FnMut() + Send + 'static>>,
 }
 
 /// Top-level executor. One per process is the typical case.
@@ -73,6 +95,20 @@ pub struct Executor {
     /// Executor-wide iteration budget from `ExecutorBuilder::iteration_budget`.
     /// `None` means no executor-wide check.
     pub(crate) iteration_budget: Option<Duration>,
+    /// Executor-wide fault state. `REQ_0071`.
+    pub(crate) exec_fault: ExecutorFaultAtomic,
+
+    /// Index of the task whose `execute()` overran when the executor
+    /// transitioned to `Faulted`. Read alongside `exec_fault`.
+    pub(crate) exec_fault_task_idx: AtomicU32,
+
+    /// Budget that was breached when the executor transitioned to
+    /// `Faulted`, in ms (saturated). Read alongside `exec_fault`.
+    pub(crate) exec_fault_budget_ms: AtomicU32,
+
+    /// Executor start time, set on first dispatch. Used to compute
+    /// `since_ms` for faults relative to `Executor::run` entry.
+    pub(crate) start_time: OnceLock<Instant>,
 }
 
 // SAFETY: `IxListener<ipc::Service>` is `!Send` for the same Rc-based
@@ -162,6 +198,10 @@ impl Executor {
             kind: TaskKind::Single(item_box),
             decls,
             job: Some(job),
+            budget: None,
+            fault: FaultAtomic::new(),
+            overrun_count: AtomicU64::new(0),
+            handler_job: None,
         });
         Ok(id)
     }
@@ -263,6 +303,10 @@ impl Executor {
             kind: TaskKind::Chain(items),
             decls,
             job: None, // populated in the rebuild step below
+            budget: None,
+            fault: FaultAtomic::new(),
+            overrun_count: AtomicU64::new(0),
+            handler_job: None,
         });
 
         // After the push, the TaskEntry lives at a stable position in
@@ -454,6 +498,10 @@ impl ExecutorBuilder {
             monitor,
             iter_err: Arc::new(std::sync::Mutex::new(None)),
             iteration_budget: self.iteration_budget,
+            exec_fault: ExecutorFaultAtomic::new(),
+            exec_fault_task_idx: AtomicU32::new(0),
+            exec_fault_budget_ms: AtomicU32::new(0),
+            start_time: OnceLock::new(),
         };
 
         Ok(exec)
@@ -1105,6 +1153,10 @@ impl ExecutorGraphBuilder<'_> {
             // stored inside the `Graph`; the per-task `job` slot
             // is unused for graphs.
             job: None,
+            budget: None,
+            fault: FaultAtomic::new(),
+            overrun_count: AtomicU64::new(0),
+            handler_job: None,
         });
         Ok(id)
     }
