@@ -1,0 +1,27 @@
+[package]
+name         = "taktora-connector-host-tests"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Integration tests for taktora-connector-host that exercise the host against in-tree connector crates. Not published; holds dev-deps on sibling workspace crates so taktora-connector-host's published manifest stays free of internal-crate dev-deps that would race release-plz's topological-sort during publish."
+publish      = false
+
+[lib]
+# Empty stub — the crate exists solely to host integration tests under
+# `tests/`. A `src/lib.rs` is required so Cargo treats this as a package.
+
+[dev-dependencies]
+taktora-connector-codec          = { workspace = true }
+taktora-connector-core           = { workspace = true }
+taktora-connector-host           = { workspace = true }
+taktora-connector-transport-iox  = { workspace = true }
+taktora-executor                 = { workspace = true }
+crossbeam-channel                = { workspace = true }
+serde                            = { workspace = true, features = ["std", "derive"] }

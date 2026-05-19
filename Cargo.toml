@@ -8,6 +8,7 @@ members = [
     "crates/taktora-connector-core",
     "crates/taktora-connector-ethercat",
     "crates/taktora-connector-host",
+    "crates/taktora-connector-host-tests",
     "crates/taktora-connector-transport-iox",
     "crates/taktora-connector-zenoh",
     "crates/taktora-executor",

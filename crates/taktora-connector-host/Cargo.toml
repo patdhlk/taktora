@@ -31,9 +31,6 @@ serde                         = { workspace = true, features = ["std"] }
 thiserror                     = { workspace = true }
 tracing                       = { workspace = true, optional = true }
 
-[dev-dependencies]
-taktora-connector-codec = { workspace = true }
-
 [lints.rust]
 unsafe_code  = "deny"
 missing_docs = "warn"
