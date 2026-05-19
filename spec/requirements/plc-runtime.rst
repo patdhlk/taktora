@@ -60,24 +60,27 @@ Cyclic scan execution
 
 .. req:: Configurable scan period
    :id: REQ_0001
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0011
+   :links: BB_0025, TEST_0104
 
    The runtime shall allow each cyclic item to declare a scan period as a
    ``Duration`` via ``TriggerDeclarer::interval(period)``.
 
 .. req:: One execution per scan period
    :id: REQ_0002
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0011
+   :links: BB_0025, TEST_0105
 
    Under nominal load (no item exceeding its scan period), the runtime
    shall invoke each cyclic item exactly once per declared period.
 
 .. req:: Scan-cycle execution observability
    :id: REQ_0003
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0011
+   :links: BB_0025, TEST_0106
 
    The runtime shall emit pre-execute and post-execute timestamps for
    every scan-cycle invocation through the ``ExecutionMonitor`` trait.
@@ -95,24 +98,27 @@ Event-driven I/O dispatch
 
 .. req:: Subscriber-triggered ingestion
    :id: REQ_0010
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0012
+   :links: BB_0026, TEST_0107
 
    The runtime shall trigger an item's ``execute`` whenever a declared
    ``Subscriber<T>`` receives a new sample.
 
 .. req:: Publisher-driven emission
    :id: REQ_0011
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0012
+   :links: BB_0026, TEST_0108
 
    The runtime shall expose ``Publisher<T>`` send paths (``send_copy``,
    ``loan_send``, ``loan``) for emitting outputs to other processes.
 
 .. req:: Zero-copy IPC transport
    :id: REQ_0012
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0012
+   :links: BB_0026, TEST_0109
 
    Pub/sub data transfer between processes shall be zero-copy across
    shared memory via iceoryx2; receivers shall obtain a borrowed view of
@@ -120,8 +126,9 @@ Event-driven I/O dispatch
 
 .. req:: Notification-drop visibility
    :id: REQ_0013
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0012
+   :links: BB_0026, TEST_0113
 
    The runtime shall surface dropped event-service notifications to the
    sender as a non-error counter (``NotifyOutcome::listeners_notified``)
@@ -140,16 +147,18 @@ Deterministic logic sequencing
 
 .. req:: Sequential chain execution
    :id: REQ_0020
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0013
+   :links: BB_0027, TEST_0114
 
    The runtime shall execute the items of a chain in declared order on a
    single dispatch slot per chain invocation.
 
 .. req:: Parallel DAG execution
    :id: REQ_0021
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0013
+   :links: BB_0027, TEST_0115
 
    The runtime shall execute the vertices of a DAG concurrently when their
    in-edges are all satisfied, and shall block downstream vertices until
@@ -157,8 +166,9 @@ Deterministic logic sequencing
 
 .. req:: Abort propagation
    :id: REQ_0022
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0013
+   :links: BB_0027, TEST_0116
 
    An item returning ``Ok(ControlFlow::StopChain)`` or ``Err`` shall
    prevent any downstream items in its enclosing chain or DAG from being
@@ -166,8 +176,9 @@ Deterministic logic sequencing
 
 .. req:: Conditional inclusion
    :id: REQ_0023
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0013
+   :links: BB_0027, TEST_0117
 
    The runtime shall provide a ``wrap_with_condition(item, predicate)``
    helper that gates an item's execution on a runtime-evaluated predicate.
@@ -184,8 +195,9 @@ Cycle-time watchdog
 
 .. req:: Subscriber deadline detection
    :id: REQ_0030
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0014
+   :links: BB_0028, TEST_0118
 
    The runtime shall provide a ``TriggerDeclarer::deadline(subscriber,
    deadline)`` declaration that fires the item if no event arrives at the
@@ -193,8 +205,9 @@ Cycle-time watchdog
 
 .. req:: Per-execute timing visibility
    :id: REQ_0031
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0014
+   :links: BB_0028, TEST_0119
 
    The runtime shall report each item's actual execute duration through
    ``ExecutionMonitor::post_execute(task, started_at, took, ok)``.
@@ -212,16 +225,18 @@ Real-time scheduling
 
 .. req:: Core-affinity assignment
    :id: REQ_0040
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0015
+   :links: BB_0029, TEST_0127
 
    The runtime shall, behind the ``thread_attrs`` feature, allow worker
    threads to be pinned to a specified set of CPU cores.
 
 .. req:: SCHED_FIFO priority on Linux
    :id: REQ_0041
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0015
+   :links: BB_0029, TEST_0128
 
    The runtime shall, behind the ``thread_attrs`` feature on Linux, allow
    worker threads to run under ``SCHED_FIFO`` at a configured priority,
@@ -249,8 +264,9 @@ Cooperative shutdown
 
 .. req:: Programmatic shutdown wakeup
    :id: REQ_0051
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0016
+   :links: BB_0035, TEST_0129
 
    The runtime shall expose a clonable ``Stoppable`` handle whose
    ``stop()`` method wakes the WaitSet thread within a bounded time even
@@ -313,8 +329,9 @@ Bounded-time dispatch
 
 .. req:: Pre-allocated error slot
    :id: REQ_0062
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0017
+   :links: BB_0023, IMPL_0001, TEST_0141
 
    The runtime shall capture per-iteration item errors in a pre-allocated
    bounded slot rather than constructing an ``Arc<Mutex<Option<...>>>``

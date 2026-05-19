@@ -331,3 +331,545 @@ runtime's own telemetry).
    **Expected outcome.** Push and pull paths agree on the same data.
 
    Lives under ``xtask/preempt-rt/tests/push_pull_agreement.rs``.
+
+----
+
+Cyclic scan execution
+---------------------
+
+Test cases verifying the cyclic scan execution sub-feature
+(:need:`FEAT_0011`).
+
+.. test:: Interval trigger fires the configured number of times
+   :id: TEST_0104
+   :status: implemented
+   :verifies: REQ_0001
+
+   **Goal.** Confirm a cyclic item registered with
+   ``TriggerDeclarer::interval(Duration::from_millis(20))`` is
+   dispatched exactly ``n`` times by ``Executor::run_n(n)``.
+
+   **Fixture.** ``crates/taktora-executor/tests/run_loop.rs`` —
+   ``interval_trigger_fires_run_n_times`` (lines 15-36). An
+   inline-pool ``Executor`` (``worker_threads(0)``) with one
+   item declaring a 20 ms interval and an ``AtomicU32`` counter.
+
+   **Steps.**
+
+   1. Build the executor; register the item.
+   2. Call ``exec.run_n(3)``.
+   3. Read the counter.
+
+   **Expected outcome.** ``counter == 3``. The interval declaration
+   is honoured by the dispatch loop.
+
+.. test:: Interval cardinality matches run_n on the threaded pool
+   :id: TEST_0105
+   :status: implemented
+   :verifies: REQ_0002
+
+   **Goal.** Under nominal load the interval-driven dispatch fires
+   exactly once per declared period — verified by asserting the
+   per-cycle count after ``run_n(N)`` equals ``N`` on the threaded
+   pool, where contention could otherwise cause coalesced or
+   skipped fires.
+
+   **Fixture.** ``crates/taktora-executor/tests/run_loop.rs`` —
+   ``threaded_pool_executes_items_correctly`` (lines 122-149). A
+   two-worker ``Executor`` with one cyclic item at 20 ms period
+   and an ``AtomicU32`` counter.
+
+   **Steps.**
+
+   1. Build with ``worker_threads(2)``; register the item.
+   2. Call ``exec.run_n(5)``.
+   3. Read the counter.
+
+   **Expected outcome.** ``counter == 5`` — exactly one execute
+   per fired interval, no duplicates and no drops.
+
+.. test:: ExecutionMonitor brackets every dispatch
+   :id: TEST_0106
+   :status: implemented
+   :verifies: REQ_0003
+
+   **Goal.** ``ExecutionMonitor::pre_execute`` is invoked once and
+   ``post_execute`` is invoked once per scan-cycle dispatch, in
+   matched pairs.
+
+   **Fixture.** ``crates/taktora-executor/tests/monitor.rs`` —
+   ``monitor_brackets_each_execute`` (lines 26-48). A
+   ``RecordingMonitor`` (``AtomicU32`` for ``pre`` and ``post``,
+   plus a ``Mutex<Vec<(TaskId, Duration, bool)>>`` of recorded
+   timings) attached to an inline-pool executor with a single
+   cyclic item at 10 ms period.
+
+   **Steps.**
+
+   1. Build the executor with the monitor; register the cyclic
+      item returning ``Ok(Continue)``.
+   2. Call ``exec.run_n(3)``.
+   3. Read ``mon.pre``, ``mon.post``, and ``mon.times``.
+
+   **Expected outcome.** ``pre == 3``, ``post == 3``, and every
+   recorded triple has ``ok == true``.
+
+----
+
+Event-driven I/O dispatch
+-------------------------
+
+Test cases verifying the event-driven I/O dispatch sub-feature
+(:need:`FEAT_0012`).
+
+.. test:: Subscriber-triggered ingestion wakes the item
+   :id: TEST_0107
+   :status: implemented
+   :verifies: REQ_0010
+
+   **Goal.** A ``Subscriber<T>`` declared as a trigger via
+   ``TriggerDeclarer::subscriber`` causes the executor to dispatch
+   the item whenever the matching ``Publisher<T>`` sends a sample.
+
+   **Fixture.** ``crates/taktora-executor/tests/run_loop.rs`` —
+   ``subscriber_trigger_dispatches_task`` (lines 83-120). An
+   inline-pool executor; a unique-named iceoryx2 channel; one
+   item that declares the subscriber and increments a counter
+   per dispatch. A background thread publishes five
+   ``Tick(u64)`` samples 20 ms apart.
+
+   **Steps.**
+
+   1. Open the channel; build publisher and subscriber handles.
+   2. Register the item; spawn the publisher thread.
+   3. Call ``exec.run()``; the item calls ``stop_executor`` after
+      three fires.
+
+   **Expected outcome.** ``counter >= 3`` — subscriber-driven
+   dispatch fires at least once per delivered sample (modulo the
+   stop-after-three early exit).
+
+.. test:: Publisher API send paths deliver to attached subscribers
+   :id: TEST_0108
+   :status: implemented
+   :verifies: REQ_0011
+
+   **Goal.** All three ``Publisher`` send paths (``send_copy``,
+   ``loan_send``, ``loan``) are present, callable, and deliver the
+   payload to an attached ``Subscriber``.
+
+   **Fixture.** ``crates/taktora-executor/tests/channel.rs`` —
+   three test functions covering the three send paths:
+   ``publisher_send_notifies_subscriber_listener`` (lines 17-41,
+   ``send_copy``), ``publisher_loan_zero_copy_round_trip``
+   (lines 52-76, ``loan``), and ``publisher_loan_skip_returns_false``
+   (lines 78-101, ``loan`` skip-publish path). Each opens a
+   unique-named iceoryx2 channel, constructs a ``Publisher`` and
+   ``Subscriber``, and round-trips a ``Msg(u64)`` payload.
+
+   **Steps.**
+
+   1. ``send_copy(Msg(42))`` — read back via
+      ``Subscriber::take``; assert payload value.
+   2. ``loan(|slot| { slot.write(Msg(99)); true })`` — read back
+      via ``Subscriber::take``; assert payload value.
+   3. ``loan(|_| false)`` — assert ``outcome.sent == false`` and
+      ``Subscriber::take`` returns ``None``.
+
+   **Expected outcome.** All three send paths compile, run, and
+   deliver (or correctly skip) the configured payload.
+
+.. test:: Publisher::loan round-trips without serialisation
+   :id: TEST_0109
+   :status: implemented
+   :verifies: REQ_0012
+
+   **Goal.** ``Publisher::loan(|slot: &mut MaybeUninit<T>| ...)``
+   writes the payload directly into the iceoryx2 shared-memory
+   slot, and ``Subscriber::take`` returns an
+   ``iceoryx2::sample::Sample`` whose ``payload()`` is a borrowed
+   view of the same bytes — no copy, no deserialisation.
+
+   **Fixture.** ``crates/taktora-executor/tests/channel.rs`` —
+   ``publisher_loan_zero_copy_round_trip`` (lines 52-76). Single
+   iceoryx2 channel; one publisher, one subscriber.
+
+   **Steps.**
+
+   1. ``publisher.loan(|slot| { slot.write(Msg(99)); true })``.
+   2. ``subscriber.take().unwrap().expect("payload")`` returns a
+      ``Sample``.
+   3. Assert ``sample.payload().0 == 99``.
+
+   **Expected outcome.** The loan path delivers the producer's
+   in-place write to the consumer as a borrowed view.
+
+.. test:: NotifyOutcome surfaces listeners-notified count
+   :id: TEST_0113
+   :status: implemented
+   :verifies: REQ_0013
+
+   **Goal.** Every send path on ``Publisher`` returns a
+   ``NotifyOutcome { sent, listeners_notified }`` whose
+   ``listeners_notified`` field reports the number of attached
+   subscribers actually notified — distinguishing back-pressure
+   ("no listener attached") from delivery error.
+
+   **Fixture.** ``crates/taktora-executor/tests/channel.rs`` —
+   ``publisher_send_notifies_subscriber_listener`` (lines 17-41).
+   One publisher, one subscriber; a single ``send_copy``.
+
+   **Steps.**
+
+   1. Build channel, publisher, and subscriber.
+   2. Call ``publisher.send_copy(Msg(42))``.
+   3. Read ``outcome.sent`` and ``outcome.listeners_notified``.
+
+   **Expected outcome.** ``outcome.sent == true`` and
+   ``outcome.listeners_notified == 1`` — the field surfaces
+   delivery accounting as a non-error counter.
+
+----
+
+Deterministic logic sequencing
+------------------------------
+
+Test cases verifying the deterministic logic sequencing sub-feature
+(:need:`FEAT_0013`).
+
+.. test:: Chain runs its items in declared order
+   :id: TEST_0114
+   :status: implemented
+   :verifies: REQ_0020
+
+   **Goal.** ``Executor::add_chain([head, mid, tail])`` invokes the
+   three items strictly in declared order on a single dispatch
+   slot per chain invocation.
+
+   **Fixture.** ``crates/taktora-executor/tests/chain.rs`` —
+   ``chain_runs_items_in_order`` (lines 8-43). A two-worker
+   executor; three items that each push their position number
+   (1, 2, 3) into a shared ``Mutex<Vec<u32>>``; the head item
+   carries a 10 ms interval trigger so the chain fires once.
+
+   **Steps.**
+
+   1. Register the three items as one chain.
+   2. Call ``exec.run_n(1)``.
+   3. Read the log vector.
+
+   **Expected outcome.** ``log == vec![1, 2, 3]`` — order is
+   preserved across the chain.
+
+.. test:: Diamond DAG runs every vertex exactly once
+   :id: TEST_0115
+   :status: implemented
+   :verifies: REQ_0021
+
+   **Goal.** A four-vertex diamond
+   (root → {left, right} → merge) under
+   ``Executor::add_graph`` runs each vertex concurrently when its
+   in-edges are satisfied and exactly once per triggering cycle.
+
+   **Fixture.** ``crates/taktora-executor/tests/graph.rs`` —
+   ``diamond_runs_all_vertices_once`` (lines 8-47). A two-worker
+   executor; four vertices, each incrementing its own
+   ``AtomicU32``; edges ``r→l``, ``r→rt``, ``l→m``, ``rt→m``;
+   root ``r`` carries a 10 ms interval trigger.
+
+   **Steps.**
+
+   1. Build the graph via ``g.vertex(...).edge(r, l).edge(...).root(r)``.
+   2. Call ``exec.run_n(1)``.
+   3. Read each counter.
+
+   **Expected outcome.** Every counter equals ``1`` — concurrent
+   dispatch when in-edges are satisfied, gating until upstream
+   vertices have completed.
+
+.. test:: StopChain and Err propagate to downstream items
+   :id: TEST_0116
+   :status: implemented
+   :verifies: REQ_0022
+
+   **Goal.** An item returning ``Ok(ControlFlow::StopChain)`` or
+   ``Err`` prevents downstream items in its enclosing chain or
+   DAG from being dispatched within the same triggering cycle.
+
+   **Fixture.** Three Rust tests cover the variants:
+   ``crates/taktora-executor/tests/chain.rs`` —
+   ``stop_chain_aborts_remaining_items`` (lines 45-77) and
+   ``err_in_middle_propagates_and_stops`` (lines 79-104); plus
+   ``crates/taktora-executor/tests/graph.rs`` —
+   ``root_stop_chain_skips_dependents`` (lines 49-72).
+
+   **Steps.**
+
+   1. ``stop_chain_aborts_remaining_items``: head returns
+      ``StopChain``; tail increments a counter. After
+      ``run_n(1)`` assert ``counter == 1`` (tail did not run).
+   2. ``err_in_middle_propagates_and_stops``: mid returns
+      ``Err``; tail increments a counter. After ``run_n(1)``
+      assert ``tail_seen == 0`` and ``run_n`` returns an error
+      whose ``Display`` contains the original ``mid-err`` text.
+   3. ``root_stop_chain_skips_dependents``: graph root returns
+      ``StopChain``; leaf increments a counter. After
+      ``run_n(1)`` assert ``leaf == 0``.
+
+   **Expected outcome.** All three assertions hold — abort
+   semantics propagate identically across the chain and graph
+   dispatch paths.
+
+.. test:: wrap_with_condition gates execution on the predicate
+   :id: TEST_0117
+   :status: implemented
+   :verifies: REQ_0023
+
+   **Goal.** ``wrap_with_condition(item, predicate)`` runs the
+   wrapped item when ``predicate()`` is true and short-circuits
+   when it is false.
+
+   **Fixture.** In-source tests in
+   ``crates/taktora-executor/src/condition.rs`` —
+   ``condition_true_runs_inner`` (lines 67-73) and
+   ``condition_false_stops_chain`` (lines 75-81). Each wraps an
+   inner ``item`` returning ``Ok(Continue)`` and drives the
+   wrapper through a ``ContextHarness``.
+
+   **Steps.**
+
+   1. ``condition_true_runs_inner``: wrap with ``|| true``;
+      execute; assert the result is ``ControlFlow::Continue``.
+   2. ``condition_false_stops_chain``: wrap with ``|| false``;
+      execute; assert the result is ``ControlFlow::StopChain``.
+
+   **Expected outcome.** Both branches behave as documented.
+   Note that the false branch surfaces as ``StopChain`` and thus
+   also short-circuits the surrounding chain — see the audit
+   comment on REQ_0023.
+
+----
+
+Cycle-time watchdog
+-------------------
+
+Test cases verifying the cycle-time watchdog sub-feature
+(:need:`FEAT_0014`).
+
+.. test:: TriggerDeclarer::deadline stores the (listener, deadline) pair
+   :id: TEST_0118
+   :status: implemented
+   :verifies: REQ_0030
+
+   **Goal.** ``TriggerDeclarer::deadline(subscriber, deadline)``
+   records a ``TriggerDecl::Deadline { listener, deadline }`` so
+   that the dispatch path can later attach a deadline guard and
+   surface the missed-deadline condition.
+
+   **Fixture.** In-source test in
+   ``crates/taktora-executor/src/trigger.rs`` —
+   ``collects_deadline_decl`` (lines 176-187). A
+   ``TriggerDeclarer`` constructed via ``new_test()``; a
+   ``Subscriber`` built over a unique iceoryx2 service.
+
+   **Steps.**
+
+   1. Create the subscriber and capture its
+      ``listener_handle``.
+   2. Call ``d.deadline(&sub, Duration::from_millis(50))``.
+   3. Pattern-match the first declaration as
+      ``TriggerDecl::Deadline { listener, deadline }``.
+   4. Assert the stored ``listener`` is ``Arc::ptr_eq`` to the
+      expected handle and the stored ``deadline`` equals
+      ``Duration::from_millis(50)``.
+
+   **Expected outcome.** The declaration is recorded with both
+   fields intact, which is the boundary the executor's
+   ``WaitSet::attach_deadline`` consumes.
+
+.. test:: ExecutionMonitor::post_execute reports per-execute duration
+   :id: TEST_0119
+   :status: implemented
+   :verifies: REQ_0031
+
+   **Goal.** ``ExecutionMonitor::post_execute(task, started_at,
+   took, ok)`` is called once per dispatch with a non-zero
+   ``took`` and the matching ``TaskId``.
+
+   **Fixture.** ``crates/taktora-executor/tests/monitor.rs`` —
+   ``monitor_brackets_each_execute`` (lines 26-48). The
+   ``RecordingMonitor`` records each ``post_execute`` invocation
+   as ``(TaskId, Duration, bool)`` in a ``Mutex<Vec<...>>``.
+
+   **Steps.**
+
+   1. Attach the monitor; register a cyclic item at 10 ms
+      period.
+   2. Call ``exec.run_n(3)``.
+   3. Read the recorded vector.
+
+   **Expected outcome.** Three ``(task, took, ok)`` triples are
+   captured, all with ``ok == true``; the post-execute timing
+   signature is wired through to every dispatch path.
+
+----
+
+Real-time scheduling
+--------------------
+
+Test cases verifying the real-time worker scheduling sub-feature
+(:need:`FEAT_0015`).
+
+.. test:: ThreadAttributes affinity_mask compiles and runs
+   :id: TEST_0127
+   :status: implemented
+   :verifies: REQ_0040
+
+   **Goal.** Under the ``thread_attrs`` cargo feature, a
+   ``ThreadAttributes`` carrying an ``affinity_mask(vec![0])``
+   passes through ``ExecutorBuilder::worker_attrs`` and the pool
+   workers apply it via ``core_affinity::set_for_current``
+   without panicking or failing to dispatch.
+
+   **Fixture.** ``crates/taktora-executor/tests/thread_attrs.rs``
+   — ``worker_attrs_compiles_and_runs`` (lines 7-29). A
+   two-worker executor with attributes
+   ``name_prefix("taktora-test")`` and
+   ``affinity_mask(vec![0])``; one cyclic item at 10 ms period.
+
+   **Steps.**
+
+   1. Build the attributes; build the executor with
+      ``worker_attrs(attrs)``.
+   2. Register the cyclic item.
+   3. Call ``exec.run_n(1)``.
+
+   **Expected outcome.** The run completes without error; the
+   affinity application path is exercised end-to-end on the
+   feature-gated build.
+
+.. test:: ThreadAttributes priority setter compiles into the worker thread body
+   :id: TEST_0128
+   :status: implemented
+   :verifies: REQ_0041
+
+   **Goal.** Under the ``thread_attrs`` cargo feature on
+   ``target_os = "linux"``, the ``ThreadAttributes::priority``
+   setter and the worker thread's ``set_sched_fifo`` call site
+   compile and run as part of the worker startup path. Behavioural
+   verification of the ``SCHED_FIFO`` policy actually taking
+   effect requires ``CAP_SYS_NICE``, which the test host typically
+   lacks; ``set_sched_fifo`` swallows the ``EPERM`` and the worker
+   continues under ``SCHED_OTHER`` — see the audit note on
+   REQ_0041.
+
+   **Fixture.** ``crates/taktora-executor/tests/thread_attrs.rs``
+   — ``worker_attrs_compiles_and_runs`` (lines 7-29) exercises
+   the ``worker_attrs`` path on which ``set_sched_fifo`` is
+   conditionally called.
+
+   **Steps.**
+
+   1. Build a ``ThreadAttributes`` value (the type carries the
+      ``priority`` field even when the test does not set it).
+   2. Build the executor with the attributes; register one
+      cyclic item.
+   3. Call ``exec.run_n(1)``.
+
+   **Expected outcome.** The build, executor construction, and
+   dispatch all succeed — exercising the compile-time presence
+   of the ``priority`` field and the
+   ``set_sched_fifo`` call site. Mechanical verification that
+   the policy is honoured requires running the host with
+   ``CAP_SYS_NICE`` (out of scope for unprivileged CI).
+
+----
+
+Cooperative shutdown
+--------------------
+
+Test cases verifying the cooperative shutdown sub-feature
+(:need:`FEAT_0016`).
+
+.. test:: Stoppable::stop wakes an idle WaitSet from another thread
+   :id: TEST_0129
+   :status: implemented
+   :verifies: REQ_0051
+
+   **Goal.** A ``Stoppable`` handle cloned *before* ``run()`` —
+   which is wired to the executor's notifier at ``build()`` time
+   — wakes the WaitSet within a bounded time when ``stop()`` is
+   called from another thread, even when the only registered
+   trigger is a 60-second interval.
+
+   **Fixture.** ``crates/taktora-executor/tests/stoppable.rs`` —
+   ``stop_from_other_thread_wakes_idle_executor`` (lines 12-45).
+   An inline-pool executor with one item carrying a 60-second
+   interval trigger; a ``Stoppable`` clone obtained before
+   ``run()``; a helper thread that sleeps 50 ms then calls
+   ``stop()``.
+
+   **Steps.**
+
+   1. Build the executor and register the long-interval item.
+   2. Clone ``exec.stoppable()``.
+   3. Spawn the helper thread that calls ``stop()`` after
+      50 ms.
+   4. Call ``exec.run()`` and measure the elapsed time.
+
+   **Expected outcome.** ``run()`` returns in under 2 s — the
+   stop notifier wakes the WaitSet promptly rather than
+   blocking on the 60-second interval. Quantifies "bounded
+   time" empirically at the 2 s ceiling.
+
+----
+
+Bounded-time dispatch (pre-allocated error slot)
+------------------------------------------------
+
+Additional verification under the bounded-time dispatch sub-feature
+(:need:`FEAT_0017`) — the pre-allocated per-iteration error slot
+that :need:`REQ_0062` mandates.
+
+.. test:: Per-iteration error slot is pre-allocated, not Arc-Mutex-allocated per cycle
+   :id: TEST_0141
+   :status: implemented
+   :verifies: REQ_0062
+
+   **Goal.** Confirm the dispatch loop does not construct a fresh
+   ``Arc<Mutex<Option<ExecutorError>>>`` per iteration — the
+   anti-pattern :need:`REQ_0062` forbids. Verified indirectly: any
+   per-iteration ``Arc`` construction would surface as a non-zero
+   ``per_iter`` allocation count under the differential measurement
+   in :need:`TEST_0170`.
+
+   **Fixture.** ``crates/taktora-executor/tests/no_alloc_dispatch.rs``
+   — ``dispatch_is_zero_allocation`` (lines 76-166). Uses the
+   process-wide ``CountingAllocator`` as the ``#[global_allocator]``
+   to count allocations on every thread (WaitSet plus pool workers)
+   inside a bracketed measurement window. The differential
+   ``per_iter = ceil((alloc(run_n(100)) - alloc(run_n(10))) / 90)``
+   isolates per-iteration allocations from one-shot setup.
+
+   **Steps.**
+
+   1. Build any of the four fixture executors
+      (single-threaded chain, two-worker chain, two-worker
+      diamond graph, single-threaded single item).
+   2. Warm up with an untracked ``run_n(10)``.
+   3. Bracket ``run_n(10)`` and ``run_n(100)`` with the counting
+      allocator.
+   4. Compute the differential ``per_iter`` and assert it equals
+      ``0``.
+
+   **Negative case.** A deliberate ``vec![1, 2, 3]`` allocation
+   inside an item body surfaces as ``allocs >= 10`` over 10
+   iterations, proving the harness catches per-iteration
+   allocations (which is what would happen if the error slot
+   were Arc-Mutex-allocated per cycle).
+
+   **Expected outcome.** ``per_iter == 0`` across all four
+   fixture configurations — the executor's pre-allocated
+   ``iter_err: Arc<Mutex<Option<ExecutorError>>>`` (built once
+   in ``Executor::build``) is reused, not re-allocated, on
+   every dispatch iteration.
