@@ -84,16 +84,22 @@ state, with the convention:
 
 .. tsr:: Bounded health-event latency
    :id: TSR_0006
-   :status: implemented
+   :status: approved
    :asil: B(D)
    :refines: AFSR_0004
 
    ``ConnectorHealth`` events shall be emitted within FTTI/2 (at most
-   50 ms) of a connector state transition
-   (Healthy → Degraded → Faulted).
+   50 ms) of a connector state transition between the
+   ``Up``, ``Connecting``, ``Degraded``, and ``Down`` states tracked
+   by ``ConnectorHealth`` (see
+   ``crates/taktora-connector-core/src/health.rs``).
 
    :Allocates to: ``taktora-connector-host``, ``taktora-connector-zenoh``
-   :Today: Satisfied by REQ_0440..REQ_0444.
+   :Today: Health-state emission lives in
+       ``taktora-connector-zenoh`` (REQ_0442 and friends), but no
+       regression test currently asserts the 50 ms FTTI/2 upper bound
+       on transition latency. Demoted to ``approved`` until that
+       bound is measured and a covering ``test::`` is added.
 
 .. tsr:: Single-publisher iceoryx2 topology for safety-critical channels
    :id: TSR_0007
