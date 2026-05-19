@@ -321,12 +321,9 @@ user would write:
 
 | Example | What it shows |
 |---|---|
-| [`zenoh-pubsub-mock`](examples/zenoh-pubsub-mock)  | executor + zenoh connector (`MockZenohSession`), in-process pub/sub |
-| [`zenoh-pubsub-real`](examples/zenoh-pubsub-real)  | same shape over a real `zenoh::Session`; two-terminal peer-to-peer |
-
-A third integration example (`ethercat-mock-loop` — a 1 kHz control
-loop over the EtherCAT connector with `MockBusDriver` loopback) is
-deferred pending the next publish of `taktora-connector-ethercat`.
+| [`zenoh-pubsub-mock`](examples/zenoh-pubsub-mock)   | executor + zenoh connector (`MockZenohSession`), in-process pub/sub |
+| [`zenoh-pubsub-real`](examples/zenoh-pubsub-real)   | same shape over a real `zenoh::Session`; two-terminal peer-to-peer |
+| [`ethercat-mock-loop`](examples/ethercat-mock-loop) | 1 kHz control loop over the EtherCAT connector with PDI bit-slice routing through `MockBusDriver` |
 
 See [`examples/README.md`](examples/README.md) for the full index and
 the local-paths toggle (debugging an in-tree change against an

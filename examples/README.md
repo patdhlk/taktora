@@ -10,13 +10,9 @@ write, with no workspace-relative paths active by default.
 
 | Example | Backend | CI | What it shows |
 |---|---|---|---|
-| [`zenoh-pubsub-mock`](zenoh-pubsub-mock) | `MockZenohSession` | build + run | end-to-end pub/sub through the zenoh connector, no router needed |
-| [`zenoh-pubsub-real`](zenoh-pubsub-real) | `RealZenohSession` | build only  | same shape, but over the real `zenoh::Session` (two-terminal recipe) |
-
-**Coming soon:** `ethercat-mock-loop` — a 1 kHz control loop through the
-EtherCAT connector with `MockBusDriver` loopback. Deferred pending
-publication of `taktora-connector-ethercat 0.1.1` (carries a tokio
-timer-driver fix the example needs).
+| [`zenoh-pubsub-mock`](zenoh-pubsub-mock)   | `MockZenohSession`   | build + run | end-to-end pub/sub through the zenoh connector, no router needed |
+| [`zenoh-pubsub-real`](zenoh-pubsub-real)   | `RealZenohSession`   | build only  | same shape, but over the real `zenoh::Session` (two-terminal recipe) |
+| [`ethercat-mock-loop`](ethercat-mock-loop) | `MockBusDriver`      | build + run | 1 kHz control loop over the EtherCAT connector with PDI bit-slice routing |
 
 ## Quick start
 
