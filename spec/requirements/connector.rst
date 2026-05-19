@@ -77,7 +77,7 @@ Envelope transport
 
 .. req:: Per-channel max payload size
    :id: REQ_0201
-   :status: open
+   :status: approved
    :satisfies: FEAT_0031
 
    The framework shall allow each channel to declare its maximum payload
@@ -240,7 +240,7 @@ Connector trait and routing
 
 .. req:: Connector ships its own routing struct
    :id: REQ_0224
-   :status: open
+   :status: approved
    :satisfies: FEAT_0033
 
    Each connector crate (``taktora-connector-mqtt``, future
@@ -263,7 +263,7 @@ Connection lifecycle
 
 .. req:: ConnectorHealth state machine
    :id: REQ_0230
-   :status: open
+   :status: approved
    :satisfies: FEAT_0034
 
    The framework shall define ``ConnectorHealth`` as an enum with
@@ -273,7 +273,7 @@ Connection lifecycle
 
 .. req:: subscribe_health returns a Channel of HealthEvent
    :id: REQ_0231
-   :status: open
+   :status: approved
    :satisfies: FEAT_0034
 
    ``Connector::subscribe_health()`` shall return an observable handle
@@ -307,7 +307,7 @@ Connection lifecycle
 
 .. req:: HealthEvent emitted on every transition
    :id: REQ_0234
-   :status: open
+   :status: approved
    :satisfies: FEAT_0034
 
    Every transition between ``ConnectorHealth`` variants shall emit a
@@ -315,7 +315,7 @@ Connection lifecycle
 
 .. req:: Stack-internal-reconnect connectors emit health uniformly
    :id: REQ_0235
-   :status: open
+   :status: approved
    :satisfies: FEAT_0034
 
    Connectors whose underlying protocol stack manages reconnect internally
@@ -337,7 +337,7 @@ Process boundary
 
 .. req:: Same envelope contract for both deployments
    :id: REQ_0240
-   :status: open
+   :status: approved
    :satisfies: FEAT_0035
 
    The framework shall use the same ``ConnectorEnvelope`` definition,
@@ -373,7 +373,7 @@ Process boundary
 
 .. req:: No app↔gateway control-plane envelopes
    :id: REQ_0244
-   :status: open
+   :status: approved
    :satisfies: FEAT_0035
 
    The framework shall not introduce envelopes carrying control-plane
@@ -518,7 +518,7 @@ EtherCAT reference connector
 
 .. req:: EthercatConnector implements Connector
    :id: REQ_0310
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    The connector crate shall expose ``EthercatConnector<C: PayloadCodec>``
@@ -537,7 +537,7 @@ EtherCAT reference connector
 
 .. req:: Single MainDevice per gateway instance
    :id: REQ_0312
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    A single ``EthercatGateway`` instance shall own at most one ethercrab
@@ -546,7 +546,7 @@ EtherCAT reference connector
 
 .. req:: Bus reaches OP before serving traffic
    :id: REQ_0313
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    The gateway shall transition the EtherCAT bus to the OP state before
@@ -554,7 +554,7 @@ EtherCAT reference connector
 
 .. req:: Static PDO mapping per SubDevice
    :id: REQ_0314
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    The connector shall accept a static PDO-mapping description per
@@ -589,7 +589,7 @@ EtherCAT reference connector
 
 .. req:: Distributed Clocks bring-up is opt-in
    :id: REQ_0318
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    The connector shall perform Distributed Clocks bring-up only when
@@ -607,7 +607,7 @@ EtherCAT reference connector
 
 .. req:: Working-counter mismatch degrades health
    :id: REQ_0320
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    When the working counter on a completed cycle is below the expected
@@ -616,7 +616,7 @@ EtherCAT reference connector
 
 .. req:: Tokio sidecar contained inside the connector crate
    :id: REQ_0321
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    The EtherCAT gateway shall host the ethercrab TX/RX task on a tokio
@@ -625,7 +625,7 @@ EtherCAT reference connector
 
 .. req:: Bridge channels are bounded
    :id: REQ_0322
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    The outbound (taktora-executor → tokio) and inbound (tokio →
@@ -635,7 +635,7 @@ EtherCAT reference connector
 
 .. req:: Outbound bridge saturation surfaces as BackPressure
    :id: REQ_0323
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    When the outbound bridge channel is full, ``ChannelWriter::send`` shall
@@ -653,7 +653,7 @@ EtherCAT reference connector
 
 .. req:: Linux raw socket required on gateway host
    :id: REQ_0325
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    The gateway shall open the EtherCAT network interface via a Linux raw
@@ -697,7 +697,7 @@ EtherCAT reference connector
 
 .. req:: Per-channel routing registry on the gateway
    :id: REQ_0328
-   :status: open
+   :status: approved
    :satisfies: FEAT_0041
 
    The gateway shall maintain a registry mapping each open
@@ -725,7 +725,7 @@ Host wiring
 
 .. req:: ConnectorHost builder API
    :id: REQ_0270
-   :status: open
+   :status: approved
    :satisfies: FEAT_0037
 
    ``taktora-connector-host`` shall expose
@@ -734,7 +734,7 @@ Host wiring
 
 .. req:: ConnectorGateway builder API
    :id: REQ_0271
-   :status: open
+   :status: approved
    :satisfies: FEAT_0037
 
    ``taktora-connector-host`` shall expose a parallel
@@ -743,7 +743,7 @@ Host wiring
 
 .. req:: Host registers connector items with the executor
    :id: REQ_0272
-   :status: open
+   :status: approved
    :satisfies: FEAT_0037
 
    ``ConnectorHost::build()`` shall call ``Executor::add`` for every
@@ -793,7 +793,7 @@ Zenoh reference connector
 
 .. req:: ZenohConnector implements Connector
    :id: REQ_0400
-   :status: open
+   :status: approved
    :satisfies: FEAT_0043
 
    The connector crate shall expose ``ZenohConnector<C: PayloadCodec>``
@@ -818,7 +818,7 @@ Zenoh reference connector
 
 .. req:: JsonCodec is the default codec for Zenoh
    :id: REQ_0402
-   :status: open
+   :status: approved
    :satisfies: FEAT_0043
 
    The Zenoh connector shall accept any ``PayloadCodec`` via its
@@ -840,7 +840,7 @@ Zenoh reference connector
 
 .. req:: Zenoh bridge channels are bounded
    :id: REQ_0404
-   :status: open
+   :status: approved
    :satisfies: FEAT_0043
 
    The outbound (taktora-executor → tokio) and inbound (tokio →
@@ -851,7 +851,7 @@ Zenoh reference connector
 
 .. req:: Outbound bridge saturation surfaces as BackPressure
    :id: REQ_0405
-   :status: open
+   :status: approved
    :satisfies: FEAT_0043
 
    When the outbound bridge channel is full, ``ChannelWriter::send``
@@ -870,7 +870,7 @@ Zenoh reference connector
 
 .. req:: Zenoh zero-copy publish via iceoryx2 loan
    :id: REQ_0407
-   :status: open
+   :status: approved
    :satisfies: FEAT_0043
 
    ``ChannelWriter::send`` on a Zenoh channel shall publish
@@ -879,7 +879,7 @@ Zenoh reference connector
 
 .. req:: Zenoh gateway is byte-only on the inbound publish path
    :id: REQ_0408
-   :status: open
+   :status: approved
    :satisfies: FEAT_0043
 
    On the inbound leg (Zenoh peer → plugin), the gateway shall
@@ -918,7 +918,7 @@ Zenoh reference connector
 
 .. req:: ZenohQuerier maps QueryId to envelope correlation_id
    :id: REQ_0421
-   :status: open
+   :status: approved
    :satisfies: FEAT_0044
 
    ``ZenohQuerier::send(q: Q)`` shall mint a fresh ``QueryId`` for
@@ -954,7 +954,7 @@ Zenoh reference connector
 
 .. req:: Reply stream end-of-stream framed in payload
    :id: REQ_0424
-   :status: open
+   :status: approved
    :satisfies: FEAT_0044
 
    The end of a reply stream shall be signalled by a one-byte
@@ -969,7 +969,7 @@ Zenoh reference connector
 
 .. req:: Query timeout sourced from options, overridable per-querier
    :id: REQ_0425
-   :status: open
+   :status: approved
    :satisfies: FEAT_0044
 
    The default per-query timeout shall be sourced from
@@ -994,7 +994,7 @@ Zenoh reference connector
 
 .. req:: Codec applied to Q on send and to R on reply
    :id: REQ_0427
-   :status: open
+   :status: approved
    :satisfies: FEAT_0044
 
    ``ZenohQuerier::send`` shall encode ``Q`` via the connector's
@@ -1171,7 +1171,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: CanConnector implements Connector
    :id: REQ_0600
-   :status: open
+   :status: approved
    :satisfies: FEAT_0046
 
    The connector crate shall expose ``CanConnector<C: PayloadCodec>``
@@ -1180,7 +1180,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: CanRouting carries iface, can_id, mask, kind, fd_flags
    :id: REQ_0601
-   :status: open
+   :status: approved
    :satisfies: FEAT_0046
 
    The ``CanRouting`` struct shall identify one channel by Linux
@@ -1207,7 +1207,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: socketcan-integration cargo feature gates the real socketcan dep
    :id: REQ_0603
-   :status: open
+   :status: approved
    :satisfies: FEAT_0046
 
    The ``socketcan`` crate shall be an optional dependency of
@@ -1218,7 +1218,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: MockCanInterface ships unfeature-gated
    :id: REQ_0604
-   :status: open
+   :status: approved
    :satisfies: FEAT_0046
 
    ``MockCanInterface`` — an in-process loopback implementation of
@@ -1231,7 +1231,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Tokio sidecar contained inside the CAN connector crate
    :id: REQ_0605
-   :status: open
+   :status: approved
    :satisfies: FEAT_0046
 
    The CAN gateway shall host its RX/TX tasks on a tokio runtime
@@ -1241,7 +1241,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: CAN bridge channels are bounded
    :id: REQ_0606
-   :status: open
+   :status: approved
    :satisfies: FEAT_0046
 
    The outbound (taktora-executor → tokio) and inbound (tokio →
@@ -1252,7 +1252,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Outbound bridge saturation surfaces as BackPressure
    :id: REQ_0607
-   :status: open
+   :status: approved
    :satisfies: FEAT_0046
 
    When the outbound bridge channel is full, ``ChannelWriter::send``
@@ -1270,7 +1270,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Classical CAN frames supported
    :id: REQ_0610
-   :status: open
+   :status: approved
    :satisfies: FEAT_0047
 
    For channels declared with ``CanFrameKind::Classical``, the
@@ -1282,7 +1282,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: CAN-FD frames supported
    :id: REQ_0611
-   :status: open
+   :status: approved
    :satisfies: FEAT_0047
 
    For channels declared with ``CanFrameKind::Fd``, the connector
@@ -1305,7 +1305,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Outbound payload serialised to socketcan frame
    :id: REQ_0613
-   :status: open
+   :status: approved
    :satisfies: FEAT_0047
 
    When a plugin publishes a value through ``ChannelWriter::send``,
@@ -1321,7 +1321,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Inbound gateway is byte-only on the publish path
    :id: REQ_0614
-   :status: open
+   :status: approved
    :satisfies: FEAT_0047
 
    On the inbound leg (CAN bus → plugin), the gateway shall
@@ -1334,7 +1334,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: CAN ID extended flag preserved end-to-end
    :id: REQ_0615
-   :status: open
+   :status: approved
    :satisfies: FEAT_0047
 
    The ``CanRouting::can_id.extended`` boolean shall be preserved
@@ -1347,7 +1347,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Multiple interfaces per gateway
    :id: REQ_0620
-   :status: open
+   :status: approved
    :satisfies: FEAT_0048
 
    A single ``CanGateway`` instance shall be capable of owning
@@ -1374,7 +1374,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Per-interface filter is the union of channel masks
    :id: REQ_0622
-   :status: open
+   :status: approved
    :satisfies: FEAT_0048
 
    For each owned interface, the gateway shall compute the union
@@ -1387,7 +1387,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Filter recomputed on channel add/remove
    :id: REQ_0623
-   :status: open
+   :status: approved
    :satisfies: FEAT_0048
 
    The per-interface filter (per :need:`REQ_0622`) shall be
@@ -1398,7 +1398,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Inbound demux to all matching readers
    :id: REQ_0624
-   :status: open
+   :status: approved
    :satisfies: FEAT_0048
 
    When a CAN frame arrives on an interface, the gateway shall
@@ -1411,7 +1411,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Per-iface routing registry has stable iteration order
    :id: REQ_0625
-   :status: open
+   :status: approved
    :satisfies: FEAT_0048
 
    The gateway shall maintain a per-interface routing registry
@@ -1424,7 +1424,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: ConnectorHealth aggregates per-iface state via worst-of
    :id: REQ_0630
-   :status: open
+   :status: approved
    :satisfies: FEAT_0049
 
    The single externally-visible ``ConnectorHealth`` reported by
@@ -1438,7 +1438,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Error frames consumed internally
    :id: REQ_0631
-   :status: open
+   :status: approved
    :satisfies: FEAT_0049
 
    The gateway shall enable the ``CAN_ERR_FLAG`` error-frame
@@ -1451,7 +1451,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: error-passive transitions to Degraded
    :id: REQ_0632
-   :status: open
+   :status: approved
    :satisfies: FEAT_0049
 
    When an interface reports an error-passive or error-warning
@@ -1462,7 +1462,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: bus-off transitions to Down and triggers reconnect
    :id: REQ_0633
-   :status: open
+   :status: approved
    :satisfies: FEAT_0049
 
    When an interface reports a bus-off condition via an error
@@ -1476,7 +1476,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: ReconnectPolicy reused; ExponentialBackoff default
    :id: REQ_0634
-   :status: open
+   :status: approved
    :satisfies: FEAT_0049
 
    The CAN connector shall use the framework-level
@@ -1490,7 +1490,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: HealthEvent emitted on every transition
    :id: REQ_0635
-   :status: open
+   :status: approved
    :satisfies: FEAT_0049
 
    Every transition between ``ConnectorHealth`` variants —
@@ -1501,7 +1501,7 @@ CAN (SocketCAN) reference connector
 
 .. req:: Error frames not exposed to plugin
    :id: REQ_0636
-   :status: open
+   :status: approved
    :satisfies: FEAT_0049
 
    No ``ChannelReader<T>`` shall ever observe a CAN error frame
