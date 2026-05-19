@@ -390,6 +390,46 @@ impl Executor {
         }
     }
 
+    /// Return the per-task overrun counter — number of times the task's
+    /// `execute()` exceeded its budget over the executor's lifetime.
+    /// Monotonic; not reset by `clear_task_fault`. `REQ_0102`.
+    ///
+    /// # Errors
+    ///
+    /// * [`ExecutorError::TaskNotFound`] if `task` is unknown.
+    pub fn overrun_count(&self, task: TaskId) -> Result<u64, ExecutorError> {
+        self.tasks
+            .iter()
+            .find(|t| t.id == task)
+            .map(|t| t.overrun_count.load(Ordering::Acquire))
+            .ok_or_else(|| ExecutorError::TaskNotFound(task))
+    }
+
+    /// Return a snapshot of the per-task `FaultState`. `REQ_0073` (pull path).
+    ///
+    /// # Errors
+    ///
+    /// * [`ExecutorError::TaskNotFound`] if `task` is unknown.
+    pub fn task_fault_state(&self, task: TaskId) -> Result<FaultState, ExecutorError> {
+        self.tasks
+            .iter()
+            .find(|t| t.id == task)
+            .map(|t| {
+                let budget_ms = t.budget.map_or(0_u32, crate::fault::duration_to_ms_sat);
+                t.fault.load(budget_ms)
+            })
+            .ok_or_else(|| ExecutorError::TaskNotFound(task))
+    }
+
+    /// Return a snapshot of the executor-wide `ExecutorFaultState`.
+    /// `REQ_0073` (pull path).
+    #[must_use]
+    pub fn executor_fault_state(&self) -> ExecutorFaultState {
+        let task_idx = self.exec_fault_task_idx.load(Ordering::Acquire);
+        let budget_ms = self.exec_fault_budget_ms.load(Ordering::Acquire);
+        self.exec_fault.load(task_idx, budget_ms)
+    }
+
     /// Add a sequential chain of items. Only the head item's
     /// `declare_triggers` is consulted; non-head triggers are ignored with a
     /// tracing warn.
@@ -1735,5 +1775,53 @@ mod tests {
         let exec = Executor::builder().worker_threads(0).build().unwrap();
         let err = exec.clear_executor_fault().expect_err("not faulted");
         assert!(matches!(err, ExecutorError::ExecutorNotFaulted));
+    }
+
+    #[test]
+    fn overrun_count_returns_zero_for_new_task() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let task_id = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(10));
+                    d.budget(Duration::from_millis(5));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .unwrap();
+        assert_eq!(exec.overrun_count(task_id).unwrap(), 0);
+    }
+
+    #[test]
+    fn overrun_count_errors_for_unknown_task() {
+        let exec = Executor::builder().worker_threads(0).build().unwrap();
+        let err = exec
+            .overrun_count(crate::TaskId::new("nope"))
+            .expect_err("unknown task");
+        assert!(matches!(err, ExecutorError::TaskNotFound(_)));
+    }
+
+    #[test]
+    fn task_fault_state_starts_running() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let task_id = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(10));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .unwrap();
+        assert_eq!(exec.task_fault_state(task_id).unwrap(), FaultState::Running);
+    }
+
+    #[test]
+    fn executor_fault_state_starts_running() {
+        let exec = Executor::builder().worker_threads(0).build().unwrap();
+        assert_eq!(exec.executor_fault_state(), ExecutorFaultState::Running);
     }
 }
