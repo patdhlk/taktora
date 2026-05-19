@@ -606,3 +606,55 @@ sole measurement path.
    * Build + smoke run — :need:`TEST_0240`.
    * NDJSON schema — :need:`TEST_0241`.
    * Push/pull agreement — :need:`TEST_0242`.
+
+Cycle-overrun fault primitive (FEAT_0018)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. building-block:: Cycle-overrun fault primitive surface
+   :id: BB_0093
+   :status: open
+   :implements: FEAT_0018
+
+   New module :code:`crates/taktora-executor/src/fault.rs` owning
+   :code:`FaultState`, :code:`ExecutorFaultState`, packed
+   :code:`AtomicU64` storage, and the post-execute detection hook
+   consumed by the executor.
+
+.. impl:: Per-task fault state machine
+   :id: IMPL_0081
+   :status: open
+   :implements: REQ_0070, REQ_0102
+
+   Implementation in :code:`crates/taktora-executor/src/fault.rs`
+   (FaultAtomic, FaultState, FaultReason) plus the post-execute hook
+   in :code:`crates/taktora-executor/src/executor.rs::post_execute_detect_fault`.
+
+.. impl:: Executor-wide fault state machine
+   :id: IMPL_0082
+   :status: open
+   :implements: REQ_0071
+
+   Implementation in :code:`crates/taktora-executor/src/fault.rs`
+   (ExecutorFaultAtomic, ExecutorFaultState, ExecutorFaultReason)
+   plus the executor-wide breach detection in
+   :code:`post_execute_detect_fault` and lazy cascade in
+   :code:`dispatch_loop`.
+
+.. impl:: Fault state Observer callbacks
+   :id: IMPL_0083
+   :status: open
+   :implements: REQ_0073
+
+   Four new :code:`Observer` methods in
+   :code:`crates/taktora-executor/src/observer.rs` plus their
+   forwards in :code:`crates/taktora-executor-tracing/src/lib.rs`.
+
+.. impl:: Fault handler dispatch path
+   :id: IMPL_0084
+   :status: open
+   :implements: REQ_0072
+
+   New :code:`Executor::add_with_fault_handler` registration path and
+   :code:`build_handler_job` closure builder in
+   :code:`crates/taktora-executor/src/executor.rs`, plus the
+   pre-dispatch routing decision in :code:`dispatch_loop`.
