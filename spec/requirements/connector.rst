@@ -87,8 +87,9 @@ Envelope transport
 
 .. req:: Sequence number monotonically increasing
    :id: REQ_0202
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0031
+   :links: BB_0010, TEST_0121
 
    For each (publisher, channel) pair, the framework shall populate
    ``ConnectorEnvelope::sequence_number`` with a strictly monotonically
@@ -96,8 +97,9 @@ Envelope transport
 
 .. req:: Timestamp recorded at send
    :id: REQ_0203
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0031
+   :links: BB_0010, TEST_0122
 
    The framework shall populate ``ConnectorEnvelope::timestamp_ns`` with
    nanoseconds since the UNIX epoch at the moment the envelope is loaned
@@ -105,8 +107,9 @@ Envelope transport
 
 .. req:: Correlation id is a passive carrier
    :id: REQ_0204
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0031
+   :links: BB_0010, TEST_0123
 
    The framework shall carry the 32-byte ``correlation_id`` field
    end-to-end from sender to receiver without inspecting it. Application
@@ -115,8 +118,9 @@ Envelope transport
 
 .. req:: Zero-copy publish via iceoryx2 loan
    :id: REQ_0205
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0031
+   :links: BB_0002, TEST_0120
 
    The framework shall publish envelopes via ``Publisher::loan`` such that
    the codec writes the payload directly into shared memory. No envelope
@@ -125,8 +129,9 @@ Envelope transport
 
 .. req:: One iceoryx2 service per channel direction
    :id: REQ_0206
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0031
+   :links: BB_0011, TEST_0126
 
    For each logical channel direction (outbound app→gateway, inbound
    gateway→app), the framework shall create a separate iceoryx2
@@ -147,8 +152,9 @@ Codec abstraction
 
 .. req:: PayloadCodec trait
    :id: REQ_0210
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0032
+   :links: BB_0003, TEST_0110
 
    The framework shall define a ``PayloadCodec`` trait carrying
    ``format_name()``, ``encode<T: Serialize>(value, &mut [u8]) -> Result<usize>``,
@@ -166,8 +172,9 @@ Codec abstraction
 
 .. req:: JsonCodec is the default codec
    :id: REQ_0212
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0032
+   :links: BB_0003, TEST_0110
 
    The framework shall ship a ``JsonCodec`` implementation in
    ``taktora-connector-codec`` behind a default-on ``json`` cargo feature.
@@ -214,8 +221,9 @@ Connector trait and routing
 
 .. req:: ChannelDescriptor carries typed routing
    :id: REQ_0221
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0033
+   :links: BB_0001, TEST_0103
 
    ``ChannelDescriptor<R: Routing>`` shall carry a logical channel name,
    the per-channel max payload size, and a typed routing struct ``R``
@@ -527,8 +535,9 @@ EtherCAT reference connector
 
 .. req:: EthercatRouting carries SubDevice and PDO addressing
    :id: REQ_0311
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: BB_0031, TEST_0201
 
    The ``EthercatRouting`` struct shall identify one process-data slice by
    SubDevice configured address, PDO direction, bit offset within the
@@ -563,8 +572,9 @@ EtherCAT reference connector
 
 .. req:: PDO mapping applied during PRE-OP to SAFE-OP transition
    :id: REQ_0315
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: BB_0033, TEST_0205
 
    The gateway shall apply the configured PDO mapping by issuing SDO writes
    to the sync-manager assignment indices ``0x1C12`` (RxPDO) and ``0x1C13``
@@ -906,8 +916,9 @@ Zenoh reference connector
 
 .. req:: ZenohConnector exposes create_querier and create_queryable
    :id: REQ_0420
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0044
+   :links: BB_0043, TEST_0303
 
    ``ZenohConnector`` shall expose, as concrete methods (NOT on the
    ``Connector`` trait), ``create_querier<Q, R, const N: usize>`` and
@@ -929,8 +940,9 @@ Zenoh reference connector
 
 .. req:: ZenohQueryable correlates replies via correlation_id
    :id: REQ_0422
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0044
+   :links: BB_0043, TEST_0303
 
    ``ZenohQueryable::try_recv`` shall surface the gateway-minted
    ``QueryId`` (= the envelope's ``correlation_id``) alongside the
@@ -943,8 +955,9 @@ Zenoh reference connector
 
 .. req:: Multi-reply per query supported
    :id: REQ_0423
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0044
+   :links: BB_0043, TEST_0303
 
    ``ZenohQueryable::reply(id, r)`` shall be callable zero or more
    times for the same ``QueryId`` before ``terminate(id)``. Each
@@ -982,8 +995,9 @@ Zenoh reference connector
 
 .. req:: terminate(id) finalizes the upstream zenoh::Query
    :id: REQ_0426
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0044
+   :links: BB_0042, TEST_0303
 
    When the gateway observes a ``0x02`` end-of-stream envelope from
    the queryable side (or synthesises a ``0x03`` timeout), it shall
@@ -1034,8 +1048,9 @@ Zenoh reference connector
 
 .. req:: Zenoh session mode is a config knob
    :id: REQ_0440
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0045
+   :links: BB_0042, TEST_0308, TEST_0312, TEST_0313
 
    ``ZenohConnectorOptions::mode`` shall accept the values
    ``SessionMode::{Peer, Client, Router}`` and shall default to
