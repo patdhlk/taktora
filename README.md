@@ -297,13 +297,40 @@ checking the return is how dropped wakeups become silent bugs.
 
 ## Examples
 
-```bash
-cargo run --example interval_loop      # one tick per second; Ctrl-C to exit
-cargo run --example pubsub_pipeline    # producer + consumer over a Channel<u64>
-cargo run --example diamond_graph      # 4-vertex DAG fired by an interval
-cargo run --example signal_slot        # signal/slot pair driven by a chain
-cargo run --example loan_demo          # zero-copy 1 KB payloads via Publisher::loan
-```
+Two kinds, depending on what you want to see.
+
+### Per-crate examples (cargo workspace)
+
+Tight, focused demos that live inside their crate's `examples/`
+directory and build from the workspace itself:
+
+| Example | What it shows |
+|---|---|
+| `cargo run -p taktora-executor --example interval_loop`   | one tick per second; Ctrl-C to exit |
+| `cargo run -p taktora-executor --example pubsub_pipeline` | producer + consumer over a `Channel<u64>` |
+| `cargo run -p taktora-executor --example diamond_graph`   | 4-vertex DAG fired by an interval |
+| `cargo run -p taktora-executor --example signal_slot`     | signal/slot pair driven by a chain |
+| `cargo run -p taktora-executor --example loan_demo`       | zero-copy 1 KB payloads via `Publisher::loan` |
+
+### Integration examples (standalone crates)
+
+Cross-crate mini-apps under [`examples/`](examples/) that depend on the
+published `taktora-*` crates from crates.io. Each is its own Cargo
+crate with its own `Cargo.lock`, so they read like what an external
+user would write:
+
+| Example | What it shows |
+|---|---|
+| [`zenoh-pubsub-mock`](examples/zenoh-pubsub-mock)  | executor + zenoh connector (`MockZenohSession`), in-process pub/sub |
+| [`zenoh-pubsub-real`](examples/zenoh-pubsub-real)  | same shape over a real `zenoh::Session`; two-terminal peer-to-peer |
+
+A third integration example (`ethercat-mock-loop` — a 1 kHz control
+loop over the EtherCAT connector with `MockBusDriver` loopback) is
+deferred pending the next publish of `taktora-connector-ethercat`.
+
+See [`examples/README.md`](examples/README.md) for the full index and
+the local-paths toggle (debugging an in-tree change against an
+example).
 
 ## Building
 
