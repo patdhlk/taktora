@@ -207,6 +207,70 @@ impl Executor {
         Ok(id)
     }
 
+    /// Register an item plus a fault-handler item.
+    ///
+    /// The main item is registered through the canonical [`add`](Self::add)
+    /// path. The handler's [`declare_triggers`](ExecutableItem::declare_triggers)
+    /// is called (so handlers that internally rely on the declarer being
+    /// invoked observe the call) but its returned trigger list is
+    /// **ignored** — the handler dispatches on the main item's triggers
+    /// while the task is in `Faulted` state and runs in place of the main
+    /// item's `execute()`. The pre-built handler dispatch closure is
+    /// stashed on the same [`TaskEntry`] as the main item's `job`,
+    /// satisfying `REQ_0072`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any error from registering the main item via `add`, or
+    /// from the handler's `declare_triggers` call.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the task entry just inserted by [`add`](Self::add) cannot
+    /// be located in `self.tasks` — this is unreachable by construction
+    /// and indicates a logic bug.
+    pub fn add_with_fault_handler<I, H>(
+        &mut self,
+        main: I,
+        handler: H,
+    ) -> Result<TaskId, ExecutorError>
+    where
+        I: ExecutableItem,
+        H: ExecutableItem,
+    {
+        let task_id = self.add(main)?;
+
+        // Drain the handler's trigger declarations — they are ignored by
+        // design (the handler runs on the main item's triggers).
+        let mut handler_box: Box<dyn ExecutableItem> = Box::new(handler);
+        let mut throwaway = TriggerDeclarer::new_internal();
+        handler_box.declare_triggers(&mut throwaway)?;
+        drop(throwaway);
+
+        let app_id = handler_box.app_id();
+        let app_inst = handler_box.app_instance_id();
+        let handler_closure = build_handler_job(
+            task_id.clone(),
+            self.stoppable.clone(),
+            Arc::clone(&self.observer),
+            Arc::clone(&self.monitor),
+            Arc::clone(&self.iter_err),
+            app_id,
+            app_inst,
+            handler_box,
+        );
+
+        // Locate the task we just added and stash the handler closure.
+        let task_idx = self
+            .tasks
+            .iter()
+            .position(|t| t.id == task_id)
+            .expect("just added; must exist");
+        self.tasks[task_idx].handler_job = Some(handler_closure);
+
+        Ok(task_id)
+    }
+
     /// Add a sequential chain of items. Only the head item's
     /// `declare_triggers` is consulted; non-head triggers are ignored with a
     /// tracing warn.
@@ -974,6 +1038,47 @@ fn build_single_job(
     })
 }
 
+/// Build the per-iteration dispatch closure for a fault-handler item.
+///
+/// Mirrors [`build_single_job`] in every detail (same monitor /
+/// observer / first-error capture wiring) but owns the
+/// `Box<dyn ExecutableItem>` directly inside the closure instead of
+/// dereferencing a raw [`SendItemPtr`]. The handler has no parallel
+/// owner inside [`TaskEntry`] — the handler closure stored in
+/// `handler_job` is the sole owner — so the simpler owning form is
+/// both sound and avoids the aliasing dance the main item needs.
+/// `REQ_0072`.
+#[allow(clippy::too_many_arguments)]
+fn build_handler_job(
+    id: TaskId,
+    stop: Stoppable,
+    obs: Arc<dyn Observer>,
+    mon: Arc<dyn ExecutionMonitor>,
+    err_slot: Arc<std::sync::Mutex<Option<ExecutorError>>>,
+    app_id: Option<u32>,
+    app_inst: Option<u32>,
+    mut handler: Box<dyn ExecutableItem>,
+) -> Box<dyn FnMut() + Send + 'static> {
+    Box::new(move || {
+        let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
+        if let Some(aid) = app_id {
+            obs.on_app_start(id.clone(), aid, app_inst);
+        }
+        let started = std::time::Instant::now();
+        mon.pre_execute(id.clone(), started);
+        let res = run_item_catch_unwind(handler.as_mut(), &mut ctx);
+        let took = started.elapsed();
+        mon.post_execute(id.clone(), started, took, res.is_ok());
+        if let Err(ref e) = res {
+            obs.on_app_error(id.clone(), e.as_ref());
+        }
+        if app_id.is_some() {
+            obs.on_app_stop(id.clone());
+        }
+        record_first_err(&err_slot, &id, res);
+    })
+}
+
 /// Build the per-iteration dispatch closure for a `TaskKind::Chain`.
 fn build_chain_job(
     id: TaskId,
@@ -1209,6 +1314,36 @@ mod tests {
             .find(|t| t.id == task_id)
             .expect("task present");
         assert_eq!(entry.budget, Some(Duration::from_millis(5)));
+    }
+
+    #[test]
+    fn add_with_fault_handler_stores_handler_job() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let task_id = exec
+            .add_with_fault_handler(
+                crate::item::item_with_triggers(
+                    |d| {
+                        d.interval(Duration::from_millis(10));
+                        d.budget(Duration::from_millis(5));
+                        Ok(())
+                    },
+                    |_| Ok(crate::ControlFlow::Continue),
+                ),
+                crate::item::item_with_triggers(|_d| Ok(()), |_| Ok(crate::ControlFlow::Continue)),
+            )
+            .unwrap();
+        let entry = exec
+            .tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .expect("task present");
+        assert!(
+            entry.handler_job.is_some(),
+            "handler_job should be Some after add_with_fault_handler"
+        );
+        // Main job should still be present.
+        assert!(entry.job.is_some(), "main job should still be present");
     }
 
     #[test]
