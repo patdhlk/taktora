@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["examples"]
 members = [
     "crates/taktora-bounded-alloc",
     "crates/taktora-connector-can",
