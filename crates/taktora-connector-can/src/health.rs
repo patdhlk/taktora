@@ -15,11 +15,13 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use taktora_connector_core::{
-    ConnectorError, ConnectorHealth, HealthEvent, HealthMonitor, IllegalTransition,
+    ConnectorError, ConnectorHealth, ConnectorHealthKind, HealthEvent, HealthMonitor,
+    IllegalTransition,
 };
 
 use crate::routing::CanIface;
@@ -51,11 +53,17 @@ struct IfaceState {
 /// Each per-iface update may emit a `HealthEvent` on the aggregated
 /// stream — only when the worst-of aggregation transitions to a new
 /// state per `ARCH_0012`.
+///
+/// Also carries the inbound-drop latch (`REQ_0608`): once cumulative
+/// drops cross the configured threshold the monitor emits a single
+/// `Up → Degraded { reason: "dropped N inbound frames" }` transition;
+/// the latch re-arms on the next stack-driven `→ Up` transition.
 #[derive(Debug)]
 pub struct CanHealthMonitor {
     inner: Mutex<Inner>,
     tx: Sender<HealthEvent>,
     rx: Receiver<HealthEvent>,
+    degraded_due_to_drops: AtomicBool,
 }
 
 #[derive(Debug)]
@@ -87,6 +95,7 @@ impl CanHealthMonitor {
             }),
             tx,
             rx,
+            degraded_due_to_drops: AtomicBool::new(false),
         }
     }
 
@@ -157,11 +166,56 @@ impl CanHealthMonitor {
             .aggregate
             .try_transition_to(target)
             .map_err(CanHealthError::Illegal)?;
+        // Recovery to Up via the iface aggregator re-arms the
+        // drops latch (`REQ_0608`).
+        if evt.to.kind() == ConnectorHealthKind::Up {
+            self.degraded_due_to_drops.store(false, Ordering::Release);
+        }
         // Broadcast — failure means no subscribers, which is fine; we
         // hold an internal Receiver so this is impossible by
         // construction.
         let _ = self.tx.send(evt.clone());
         Ok(Some(evt))
+    }
+
+    /// Record a cumulative inbound-drop count from one channel's
+    /// [`crate::InboundOutcome::Dropped`] return. When `count` crosses
+    /// the supplied `threshold` AND the drops-latch is unset AND the
+    /// aggregator is currently `Up`, emit a single
+    /// `Up → Degraded { reason: "dropped N inbound frames" }` transition
+    /// and set the latch (`REQ_0608`).
+    ///
+    /// Returns the emitted `HealthEvent` when a transition actually
+    /// fired, or `None` if the latch was already set, the threshold has
+    /// not been crossed, or the aggregator is not in `Up`.
+    pub fn record_inbound_drop(&self, count: u64, threshold: u64) -> Option<HealthEvent> {
+        if count < threshold || self.degraded_due_to_drops.load(Ordering::Acquire) {
+            return None;
+        }
+        let mut guard = self
+            .inner
+            .lock()
+            .expect("can health monitor lock not poisoned");
+        if guard.aggregate.current().kind() != ConnectorHealthKind::Up {
+            // Already Degraded / Down for another reason — the spec
+            // says "skip emitting" (Degraded state is already there).
+            // Latch so we don't re-check on every dropped frame.
+            self.degraded_due_to_drops.store(true, Ordering::Release);
+            return None;
+        }
+        let target = ConnectorHealth::Degraded {
+            reason: format!("dropped {count} inbound frames"),
+        };
+        let evt = guard.aggregate.try_transition_to(target).ok()?;
+        self.degraded_due_to_drops.store(true, Ordering::Release);
+        let _ = self.tx.send(evt.clone());
+        Some(evt)
+    }
+
+    /// Test helper: snapshot the drops-latch state.
+    #[must_use]
+    pub fn degraded_due_to_drops(&self) -> bool {
+        self.degraded_due_to_drops.load(Ordering::Acquire)
     }
 }
 
@@ -273,5 +327,47 @@ mod tests {
         let _ = m.set_iface(a, IfaceHealthKind::Up).unwrap();
         let evt = sub.try_recv().unwrap();
         assert_eq!(evt.to.kind(), ConnectorHealthKind::Up);
+    }
+
+    /// `REQ_0608`: when cumulative drops cross the threshold and the
+    /// aggregator is `Up`, a single `Up → Degraded` is emitted; the
+    /// next `→ Up` transition re-arms the latch.
+    #[test]
+    fn record_inbound_drop_emits_degraded_once() {
+        let a = iface("vcan0");
+        let m = CanHealthMonitor::new(&[a]);
+        let _ = m.set_iface(a, IfaceHealthKind::Up).unwrap();
+        let sub = m.subscribe();
+        // Drain the bring-up event so the test asserts only the drops-
+        // driven transition.
+        let _ = sub.try_recv();
+
+        // First drop crossing the threshold (1) emits Degraded.
+        let evt = m
+            .record_inbound_drop(1, 1)
+            .expect("first cross-threshold emits Degraded");
+        assert_eq!(evt.from.kind(), ConnectorHealthKind::Up);
+        assert_eq!(evt.to.kind(), ConnectorHealthKind::Degraded);
+        match &evt.to {
+            ConnectorHealth::Degraded { reason } => {
+                assert!(
+                    reason.contains("dropped") && reason.contains('1'),
+                    "reason {reason:?} must mention dropped count"
+                );
+            }
+            other => panic!("expected Degraded, got {other:?}"),
+        }
+        assert!(m.degraded_due_to_drops());
+
+        // Subsequent drops at higher counts are latched out.
+        assert!(m.record_inbound_drop(2, 1).is_none());
+        assert!(m.record_inbound_drop(3, 1).is_none());
+
+        // Recovery to Up via the iface aggregator re-arms the latch.
+        // The aggregate currently sits in `Degraded` (drops-driven), so
+        // setting the iface back to `Up` aggregates to `Up` and the
+        // legal `Degraded → Up` edge fires.
+        let _ = m.set_iface(a, IfaceHealthKind::Up).unwrap();
+        assert!(!m.degraded_due_to_drops());
     }
 }

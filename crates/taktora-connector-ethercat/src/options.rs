@@ -41,6 +41,7 @@ pub struct EthercatConnectorOptions {
     distributed_clocks: bool,
     outbound_capacity: usize,
     inbound_capacity: usize,
+    inbound_drop_threshold: u64,
     network_interface: Option<String>,
     pdo_map: &'static [SubDeviceMap],
     tokio_worker_threads: usize,
@@ -77,6 +78,16 @@ impl EthercatConnectorOptions {
         self.inbound_capacity
     }
 
+    /// Cumulative inbound-drop count that, once crossed, triggers a
+    /// single `ConnectorHealth::Degraded { reason: "dropped N inbound frames" }`
+    /// transition (`REQ_0324`). Default `1`. Emitted at most once per
+    /// `Up → Degraded` cycle; the next stack-driven `→ Up` transition
+    /// re-arms the latch.
+    #[must_use]
+    pub const fn inbound_drop_threshold(&self) -> u64 {
+        self.inbound_drop_threshold
+    }
+
     /// Network interface name the gateway will open (e.g. `"eth0"`).
     /// `None` selects the platform default.
     #[must_use]
@@ -105,6 +116,7 @@ pub struct EthercatConnectorOptionsBuilder {
     distributed_clocks: bool,
     outbound_capacity: usize,
     inbound_capacity: usize,
+    inbound_drop_threshold: u64,
     network_interface: Option<String>,
     pdo_map: &'static [SubDeviceMap],
     tokio_worker_threads: usize,
@@ -118,6 +130,7 @@ impl EthercatConnectorOptionsBuilder {
     /// * `cycle_time` — 2 ms (`REQ_0316`).
     /// * `distributed_clocks` — `false` (`REQ_0318`).
     /// * `outbound_capacity` / `inbound_capacity` — 256.
+    /// * `inbound_drop_threshold` — 1 (`REQ_0324`).
     /// * `network_interface` — `None`.
     /// * `pdo_map` — empty slice; must be set to a non-empty value
     ///   for a useful gateway.
@@ -129,6 +142,7 @@ impl EthercatConnectorOptionsBuilder {
             distributed_clocks: false,
             outbound_capacity: 256,
             inbound_capacity: 256,
+            inbound_drop_threshold: 1,
             network_interface: None,
             pdo_map: EMPTY_PDO_MAP,
             tokio_worker_threads: 1,
@@ -165,6 +179,14 @@ impl EthercatConnectorOptionsBuilder {
         self
     }
 
+    /// Cumulative inbound-drop threshold (`REQ_0324`). Values below 1
+    /// are clamped to 1 at [`Self::build`] time.
+    #[must_use]
+    pub const fn inbound_drop_threshold(mut self, n: u64) -> Self {
+        self.inbound_drop_threshold = n;
+        self
+    }
+
     /// Network interface name (e.g. `"eth0"`).
     #[must_use]
     pub fn network_interface(mut self, name: impl Into<String>) -> Self {
@@ -197,6 +219,7 @@ impl EthercatConnectorOptionsBuilder {
             distributed_clocks: self.distributed_clocks,
             outbound_capacity: self.outbound_capacity.max(1),
             inbound_capacity: self.inbound_capacity.max(1),
+            inbound_drop_threshold: self.inbound_drop_threshold.max(1),
             network_interface: self.network_interface,
             pdo_map: self.pdo_map,
             tokio_worker_threads: self.tokio_worker_threads.max(1),

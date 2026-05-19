@@ -28,6 +28,7 @@ pub mod session;
 
 pub use bridge::{InboundBridge, InboundOutcome, OutboundBridge, OutboundError};
 pub use connector::{ZenohConnector, ZenohState};
+pub use dispatcher::{BridgedCorrelatedPublish, BridgedInboundPublish};
 pub use health::ZenohHealthMonitor;
 pub use mock::MockZenohSession;
 pub use options::{
@@ -38,6 +39,7 @@ pub use querier::{QuerierEvent, ZenohQuerier, mint_query_id};
 pub use queryable::ZenohQueryable;
 #[cfg(feature = "zenoh-integration")]
 pub use real::RealZenohSession;
+pub use registry::{CorrelatedPublish, InboundPublish, QueryId};
 pub use routing::{CongestionControl, KeyExprOwned, Priority, Reliability, ZenohRouting};
 pub use session::{
     DoneCallback, FrameKind, PayloadSink, QueryReplier, QuerySink, ReplyFrame, SessionError,

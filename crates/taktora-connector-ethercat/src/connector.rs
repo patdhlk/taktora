@@ -38,7 +38,7 @@ use taktora_connector_host::{Connector, HealthSubscription};
 use taktora_connector_transport_iox::{ChannelReader, ChannelWriter, ServiceFactory};
 use taktora_executor::{ControlFlow, Executor, item_with_triggers};
 
-use crate::dispatcher::{IoxInboundPublish, IoxOutboundDrain, dispatcher_loop};
+use crate::dispatcher::{BridgedInboundPublish, IoxOutboundDrain, dispatcher_loop};
 use crate::driver::BusDriver;
 use crate::gateway::EthercatGateway;
 use crate::health::EthercatHealthMonitor;
@@ -324,7 +324,14 @@ where
         // Gateway-side raw publisher — feeds PDI inputs back to the
         // plugin each cycle.
         let raw_writer = factory.create_raw_writer_named::<N>(&svc_name)?;
-        let publish: Box<dyn crate::InboundPublish> = Box::new(IoxInboundPublish::new(raw_writer));
+        let inbound_capacity = self.state.options().inbound_capacity();
+        let inbound_drop_threshold = self.state.options().inbound_drop_threshold();
+        let publish: Box<dyn crate::InboundPublish> = Box::new(BridgedInboundPublish::<N>::new(
+            raw_writer,
+            inbound_capacity,
+            Arc::clone(&self.state.health),
+            inbound_drop_threshold,
+        ));
         self.state
             .registry()
             .lock()

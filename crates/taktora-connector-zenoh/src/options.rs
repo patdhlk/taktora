@@ -83,6 +83,12 @@ pub struct ZenohConnectorOptions {
     pub outbound_bridge_capacity: usize,
     /// Channel capacity for the inbound bridge.
     pub inbound_bridge_capacity: usize,
+    /// Cumulative inbound-drop count that, once crossed, triggers a
+    /// single `ConnectorHealth::Degraded { reason: "dropped N inbound frames" }`
+    /// transition (`REQ_0406`, `REQ_0428`). Default `1`. Emitted at
+    /// most once per `Up → Degraded` cycle; the next stack-driven
+    /// `→ Up` transition re-arms the latch.
+    pub inbound_drop_threshold: u64,
     /// Number of tokio worker threads for the runtime (clamped to at least 1).
     pub tokio_worker_threads: usize,
     /// Minimum number of peers required before the session is considered
@@ -112,6 +118,7 @@ pub struct ZenohConnectorOptionsBuilder {
     query_timeout: Duration,
     outbound_bridge_capacity: usize,
     inbound_bridge_capacity: usize,
+    inbound_drop_threshold: u64,
     tokio_worker_threads: usize,
     min_peers: Option<usize>,
     dispatcher_tick: Duration,
@@ -128,6 +135,7 @@ impl Default for ZenohConnectorOptionsBuilder {
             query_timeout: Duration::from_secs(10),
             outbound_bridge_capacity: 64,
             inbound_bridge_capacity: 64,
+            inbound_drop_threshold: 1,
             tokio_worker_threads: 1,
             min_peers: None,
             dispatcher_tick: Duration::from_millis(1),
@@ -192,6 +200,14 @@ impl ZenohConnectorOptionsBuilder {
         self
     }
 
+    /// Set the cumulative inbound-drop threshold (`REQ_0406`,
+    /// `REQ_0428`). Clamped to at least 1.
+    #[must_use]
+    pub const fn inbound_drop_threshold(mut self, n: u64) -> Self {
+        self.inbound_drop_threshold = if n == 0 { 1 } else { n };
+        self
+    }
+
     /// Set the number of tokio worker threads (clamped to at least 1).
     #[must_use]
     pub const fn tokio_worker_threads(mut self, n: usize) -> Self {
@@ -225,6 +241,7 @@ impl ZenohConnectorOptionsBuilder {
             query_timeout: self.query_timeout,
             outbound_bridge_capacity: self.outbound_bridge_capacity,
             inbound_bridge_capacity: self.inbound_bridge_capacity,
+            inbound_drop_threshold: self.inbound_drop_threshold.max(1),
             tokio_worker_threads: self.tokio_worker_threads,
             min_peers: self.min_peers,
             dispatcher_tick: self.dispatcher_tick,

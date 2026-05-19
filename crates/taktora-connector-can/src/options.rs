@@ -22,6 +22,7 @@ pub struct CanConnectorOptions {
     ifaces: Vec<CanIface>,
     outbound_capacity: usize,
     inbound_capacity: usize,
+    inbound_drop_threshold: u64,
     recovery_window: Duration,
     reconnect_policy_factory: ReconnectPolicyFactory,
     tokio_worker_threads: usize,
@@ -33,6 +34,7 @@ impl core::fmt::Debug for CanConnectorOptions {
             .field("ifaces", &self.ifaces)
             .field("outbound_capacity", &self.outbound_capacity)
             .field("inbound_capacity", &self.inbound_capacity)
+            .field("inbound_drop_threshold", &self.inbound_drop_threshold)
             .field("recovery_window", &self.recovery_window)
             .field(
                 "reconnect_policy_factory",
@@ -66,6 +68,16 @@ impl CanConnectorOptions {
     #[must_use]
     pub const fn inbound_capacity(&self) -> usize {
         self.inbound_capacity
+    }
+
+    /// Cumulative inbound-drop count that, once crossed, triggers a
+    /// `ConnectorHealth::Degraded { reason: "dropped N inbound frames" }`
+    /// transition (`REQ_0608`). Default `1`. Emitted at most once per
+    /// `Up → Degraded` cycle; the next stack-driven `→ Up` transition
+    /// re-arms the latch so a fresh burst of drops can re-emit.
+    #[must_use]
+    pub const fn inbound_drop_threshold(&self) -> u64 {
+        self.inbound_drop_threshold
     }
 
     /// Recovery debounce — time without further error frames before
@@ -103,6 +115,7 @@ pub struct CanConnectorOptionsBuilder {
     ifaces: Vec<CanIface>,
     outbound_capacity: usize,
     inbound_capacity: usize,
+    inbound_drop_threshold: u64,
     recovery_window: Duration,
     reconnect_policy_factory: Option<ReconnectPolicyFactory>,
     tokio_worker_threads: usize,
@@ -114,6 +127,7 @@ impl CanConnectorOptionsBuilder {
     /// * `ifaces` — empty; must be set to at least one entry for a
     ///   useful gateway.
     /// * `outbound_capacity` / `inbound_capacity` — 256.
+    /// * `inbound_drop_threshold` — 1 (`REQ_0608`).
     /// * `recovery_window` — 1 s.
     /// * `reconnect_policy` — [`ExponentialBackoff::default`].
     /// * `tokio_worker_threads` — 1.
@@ -123,6 +137,7 @@ impl CanConnectorOptionsBuilder {
             ifaces: Vec::new(),
             outbound_capacity: 256,
             inbound_capacity: 256,
+            inbound_drop_threshold: 1,
             recovery_window: Duration::from_secs(1),
             reconnect_policy_factory: None,
             tokio_worker_threads: 1,
@@ -155,6 +170,14 @@ impl CanConnectorOptionsBuilder {
     #[must_use]
     pub const fn inbound_capacity(mut self, n: usize) -> Self {
         self.inbound_capacity = n;
+        self
+    }
+
+    /// Override the inbound-drop threshold (`REQ_0608`). Values below
+    /// 1 are clamped to 1 at build time.
+    #[must_use]
+    pub const fn inbound_drop_threshold(mut self, n: u64) -> Self {
+        self.inbound_drop_threshold = n;
         self
     }
 
@@ -193,6 +216,7 @@ impl CanConnectorOptionsBuilder {
             ifaces: self.ifaces,
             outbound_capacity: self.outbound_capacity.max(1),
             inbound_capacity: self.inbound_capacity.max(1),
+            inbound_drop_threshold: self.inbound_drop_threshold.max(1),
             recovery_window: self.recovery_window,
             reconnect_policy_factory,
             tokio_worker_threads: self.tokio_worker_threads.max(1),
@@ -215,10 +239,12 @@ mod tests {
         let opts = CanConnectorOptions::builder()
             .outbound_capacity(0)
             .inbound_capacity(0)
+            .inbound_drop_threshold(0)
             .tokio_worker_threads(0)
             .build();
         assert_eq!(opts.outbound_capacity(), 1);
         assert_eq!(opts.inbound_capacity(), 1);
+        assert_eq!(opts.inbound_drop_threshold(), 1);
         assert_eq!(opts.tokio_worker_threads(), 1);
         assert_eq!(opts.recovery_window(), Duration::from_secs(1));
         assert!(opts.ifaces().is_empty());

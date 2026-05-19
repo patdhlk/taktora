@@ -64,8 +64,8 @@ pub mod routing;
 pub use bridge::{InboundBridge, InboundOutcome, OutboundBridge, OutboundError};
 pub use connector::CanConnector;
 pub use dispatcher::{
-    DispatcherCommand, IoxInboundPublish, IoxOutboundDrain, IterationOutcome,
-    dispatch_one_iteration, dispatcher_loop,
+    BridgedInboundPublish, DispatcherCommand, IoxInboundPublish, IoxOutboundDrain,
+    IterationOutcome, dispatch_one_iteration, dispatcher_loop,
 };
 pub use driver::{
     CanData, CanErrorKind, CanFilter, CanFrame, CanIfaceState, CanInterfaceLike, CanIoError,

@@ -15,18 +15,26 @@
 //!    more subscribers via a `crossbeam_channel::Sender`.
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use taktora_connector_core::{
-    ConnectorError, ConnectorHealth, HealthEvent, HealthMonitor, IllegalTransition,
+    ConnectorError, ConnectorHealth, ConnectorHealthKind, HealthEvent, HealthMonitor,
+    IllegalTransition,
 };
 
 /// Health monitor + broadcast channel pair.
+///
+/// Also carries the inbound-drop latch (`REQ_0324`): the gateway emits
+/// a single `Up → Degraded { reason: "dropped N inbound frames" }`
+/// transition once cumulative drops cross the configured threshold;
+/// the latch re-arms on the next stack-driven `→ Up` transition.
 #[derive(Debug)]
 pub struct EthercatHealthMonitor {
     inner: Mutex<HealthMonitor>,
     tx: Sender<HealthEvent>,
     rx: Receiver<HealthEvent>,
+    degraded_due_to_drops: AtomicBool,
 }
 
 impl EthercatHealthMonitor {
@@ -39,6 +47,7 @@ impl EthercatHealthMonitor {
             inner: Mutex::new(HealthMonitor::new()),
             tx,
             rx,
+            degraded_due_to_drops: AtomicBool::new(false),
         }
     }
 
@@ -83,6 +92,10 @@ impl EthercatHealthMonitor {
                 .try_transition_to(target)
                 .map_err(EthercatHealthError::Illegal)?
         };
+        // Recovery to Up re-arms the drops-latch (`REQ_0324`).
+        if event.to.kind() == ConnectorHealthKind::Up {
+            self.degraded_due_to_drops.store(false, Ordering::Release);
+        }
         self.tx
             .send(event.clone())
             .map_err(|_| EthercatHealthError::BroadcastClosed)?;
@@ -94,6 +107,45 @@ impl EthercatHealthMonitor {
     #[must_use]
     pub fn subscribe(&self) -> Receiver<HealthEvent> {
         self.rx.clone()
+    }
+
+    /// Record a cumulative inbound-drop count from one channel's
+    /// [`crate::InboundOutcome::Dropped`] return. Emits a single
+    /// `Up → Degraded { reason: "dropped N inbound frames" }` transition
+    /// when `count` crosses `threshold` AND the drops-latch is unset
+    /// AND the current state is `Up` (`REQ_0324`).
+    ///
+    /// Returns the emitted `HealthEvent` when a transition actually
+    /// fired.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal mutex has been poisoned by a previous
+    /// panicked transition. See [`Self::current`] for the rationale.
+    pub fn record_inbound_drop(&self, count: u64, threshold: u64) -> Option<HealthEvent> {
+        if count < threshold || self.degraded_due_to_drops.load(Ordering::Acquire) {
+            return None;
+        }
+        let event = {
+            let mut guard = self.inner.lock().expect("health monitor lock not poisoned");
+            if guard.current().kind() != ConnectorHealthKind::Up {
+                self.degraded_due_to_drops.store(true, Ordering::Release);
+                return None;
+            }
+            let target = ConnectorHealth::Degraded {
+                reason: format!("dropped {count} inbound frames"),
+            };
+            guard.try_transition_to(target).ok()?
+        };
+        self.degraded_due_to_drops.store(true, Ordering::Release);
+        let _ = self.tx.send(event.clone());
+        Some(event)
+    }
+
+    /// Test helper: snapshot the drops-latch state.
+    #[must_use]
+    pub fn degraded_due_to_drops(&self) -> bool {
+        self.degraded_due_to_drops.load(Ordering::Acquire)
     }
 }
 

@@ -498,14 +498,22 @@ MQTT reference connector
    return ``ConnectorError::BackPressure`` and the connector shall report
    ``ConnectorHealth::Degraded``.
 
-.. req:: Inbound bridge saturation surfaces as DroppedInbound HealthEvent
+.. req:: Inbound bridge saturation drops frames and signals Degraded
    :id: REQ_0261
    :status: open
    :satisfies: FEAT_0036
 
-   When the inbound bridge channel is full, the gateway shall emit
-   ``HealthEvent::DroppedInbound { count }``. For QoS 1 messages, the
-   gateway shall withhold ``PUBACK`` until bridge capacity is restored.
+   When the inbound bridge channel is full, the gateway shall
+   (1) increment the per-channel inbound-drop counter exposed via
+   ``InboundOutcome::Dropped { count }`` on the bridge's ``try_send``
+   return, (2) drop the offending message for that delivery, and
+   (3) emit a ``ConnectorHealth::Degraded { reason: "dropped N inbound frames" }``
+   health transition when the cumulative inbound-drop count crosses
+   the connector's configured ``inbound_drop_threshold`` (default 1).
+   The Degraded transition is emitted at most once until the
+   connector recovers to ``Up`` via the underlying stack's recovery
+   path; the cumulative drop count itself is observable through every
+   subsequent ``InboundOutcome::Dropped`` return.
 
 EtherCAT reference connector
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -652,14 +660,22 @@ EtherCAT reference connector
    return ``ConnectorError::BackPressure`` and the gateway shall report
    ``ConnectorHealth::Degraded``.
 
-.. req:: Inbound bridge saturation surfaces as DroppedInbound HealthEvent
+.. req:: Inbound bridge saturation drops PDUs and signals Degraded
    :id: REQ_0324
    :status: open
    :satisfies: FEAT_0041
 
-   When the inbound bridge channel is full, the gateway shall emit
-   ``HealthEvent::DroppedInbound { count }`` and drop the inbound process
-   image for that cycle.
+   When the inbound bridge channel is full, the gateway shall
+   (1) increment the per-channel inbound-drop counter exposed via
+   ``InboundOutcome::Dropped { count }`` on the bridge's ``try_send``
+   return, (2) drop the offending PDU for that cycle, and (3) emit a
+   ``ConnectorHealth::Degraded { reason: "dropped N inbound frames" }``
+   health transition when the cumulative inbound-drop count crosses
+   the connector's configured ``inbound_drop_threshold`` (default 1).
+   The Degraded transition is emitted at most once until the
+   connector recovers to ``Up`` via the underlying stack's recovery
+   path; the cumulative drop count itself is observable through every
+   subsequent ``InboundOutcome::Dropped`` return.
 
 .. req:: Linux raw socket required on gateway host
    :id: REQ_0325
@@ -869,14 +885,22 @@ Zenoh reference connector
    outbound bridge) shall return ``ConnectorError::BackPressure``
    and the gateway shall report ``ConnectorHealth::Degraded``.
 
-.. req:: Inbound bridge saturation surfaces as DroppedInbound
+.. req:: Inbound bridge saturation drops samples and signals Degraded
    :id: REQ_0406
    :status: open
    :satisfies: FEAT_0043
 
-   When the inbound bridge channel is full, the gateway shall emit
-   ``HealthEvent::DroppedInbound { count }`` and drop the offending
-   inbound Zenoh sample or reply chunk for that callback.
+   When the inbound bridge channel is full, the gateway shall
+   (1) increment the per-channel inbound-drop counter exposed via
+   ``InboundOutcome::Dropped { count }`` on the bridge's ``try_send``
+   return, (2) drop the offending sample for that callback, and
+   (3) emit a ``ConnectorHealth::Degraded { reason: "dropped N inbound frames" }``
+   health transition when the cumulative inbound-drop count crosses
+   the connector's configured ``inbound_drop_threshold`` (default 1).
+   The Degraded transition is emitted at most once until the
+   connector recovers to ``Up`` via the underlying stack's recovery
+   path; the cumulative drop count itself is observable through every
+   subsequent ``InboundOutcome::Dropped`` return.
 
 .. req:: Zenoh zero-copy publish via iceoryx2 loan
    :id: REQ_0407
@@ -1021,18 +1045,26 @@ Zenoh reference connector
    ``try_recv`` and shall surface codec failures as
    ``ConnectorError::Codec`` per :need:`REQ_0214`.
 
-.. req:: Reply-side inbound saturation emits DroppedInbound
+.. req:: Reply-side inbound saturation drops chunks and signals Degraded
    :id: REQ_0428
    :status: open
    :satisfies: FEAT_0044
 
    When the inbound bridge for the reply path (gateway → plugin
-   on a querier channel) saturates, the gateway shall emit
-   ``HealthEvent::DroppedInbound { count }`` (re-affirming
-   :need:`REQ_0406`) and drop the offending reply chunk. The
-   in-flight ``QueryId`` shall be observable on the plugin side as
-   a reply stream with fewer chunks than the upstream peer sent;
-   no separate "partial reply" error variant is added.
+   on a querier channel) is full, the gateway shall
+   (1) increment the per-channel inbound-drop counter exposed via
+   ``InboundOutcome::Dropped { count }`` on the bridge's ``try_send``
+   return, (2) drop the offending reply chunk for that callback, and
+   (3) emit a ``ConnectorHealth::Degraded { reason: "dropped N inbound frames" }``
+   health transition when the cumulative inbound-drop count crosses
+   the connector's configured ``inbound_drop_threshold`` (default 1,
+   re-affirming :need:`REQ_0406`). The Degraded transition is emitted
+   at most once until the connector recovers to ``Up`` via the
+   underlying stack's recovery path; the cumulative drop count itself
+   is observable through every subsequent ``InboundOutcome::Dropped``
+   return. The in-flight ``QueryId`` shall be observable on the
+   plugin side as a reply stream with fewer chunks than the upstream
+   peer sent; no separate "partial reply" error variant is added.
 
 .. feat:: Zenoh session topology and health
    :id: FEAT_0045
@@ -1274,14 +1306,22 @@ CAN (SocketCAN) reference connector
    shall return ``ConnectorError::BackPressure`` and the gateway
    shall report ``ConnectorHealth::Degraded``.
 
-.. req:: Inbound bridge saturation surfaces as DroppedInbound
+.. req:: Inbound bridge saturation drops frames and signals Degraded
    :id: REQ_0608
    :status: open
    :satisfies: FEAT_0046
 
-   When the inbound bridge channel is full, the gateway shall emit
-   ``HealthEvent::DroppedInbound { count }`` and drop the offending
-   inbound CAN frame for that callback.
+   When the inbound bridge channel is full, the gateway shall
+   (1) increment the per-channel inbound-drop counter exposed via
+   ``InboundOutcome::Dropped { count }`` on the bridge's ``try_send``
+   return, (2) drop the offending CAN frame for that callback, and
+   (3) emit a ``ConnectorHealth::Degraded { reason: "dropped N inbound frames" }``
+   health transition when the cumulative inbound-drop count crosses
+   the connector's configured ``inbound_drop_threshold`` (default 1).
+   The Degraded transition is emitted at most once until the
+   connector recovers to ``Up`` via the underlying stack's recovery
+   path; the cumulative drop count itself is observable through every
+   subsequent ``InboundOutcome::Dropped`` return.
 
 .. req:: Classical CAN frames supported
    :id: REQ_0610

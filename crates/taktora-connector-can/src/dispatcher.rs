@@ -33,6 +33,7 @@ use std::time::Duration;
 use taktora_connector_core::{ConnectorError, ReconnectPolicy};
 use taktora_connector_transport_iox::{RawChannelReader, RawChannelWriter};
 
+use crate::bridge::{InboundBridge, InboundOutcome};
 use crate::driver::{
     CanData, CanErrorKind, CanFrame, CanIfaceState, CanInterfaceLike, CanIoError, MAX_CAN_PAYLOAD,
 };
@@ -89,6 +90,105 @@ impl<const N: usize> IoxInboundPublish<N> {
 impl<const N: usize> InboundPublish for IoxInboundPublish<N> {
     fn publish_bytes(&self, bytes: &[u8]) -> Result<(), ConnectorError> {
         self.writer.send_raw_bytes(bytes, [0u8; 32]).map(|_| ())
+    }
+}
+
+/// Per-channel inbound publisher that gates the iceoryx2 send through
+/// an [`InboundBridge`] for drop accounting (`REQ_0608`).
+///
+/// On every inbound frame the dispatcher calls
+/// [`Self::publish_bytes`], which:
+///
+/// 1. Calls `bridge.try_send(())` to record a notional in-flight slot.
+/// 2. On [`InboundOutcome::Sent`] — publishes the bytes via iceoryx2
+///    (the actual SHM transport) and drains the slot synchronously
+///    so subsequent calls find capacity. Under normal single-threaded
+///    dispatcher operation, the bridge therefore stays near-empty.
+/// 3. On [`InboundOutcome::Dropped { count }`] — increments the
+///    bridge's running drop counter and asks the shared
+///    [`CanHealthMonitor`] to emit a `Degraded` transition once the
+///    cumulative count crosses `inbound_drop_threshold`. The frame
+///    is dropped (no iceoryx2 send) and the dispatcher returns `Ok`
+///    so the surrounding RX loop continues.
+pub struct BridgedInboundPublish<const N: usize> {
+    iox: Option<IoxInboundPublish<N>>,
+    bridge: InboundBridge<()>,
+    health: Arc<CanHealthMonitor>,
+    threshold: u64,
+}
+
+impl<const N: usize> BridgedInboundPublish<N> {
+    /// Construct a bridged publisher.
+    ///
+    /// `capacity` sizes the bridge's bounded buffer; `threshold` is the
+    /// cumulative drop count at which `health.record_inbound_drop` is
+    /// asked to emit a `Degraded` transition.
+    #[must_use]
+    pub fn new(
+        writer: RawChannelWriter<N>,
+        capacity: usize,
+        health: Arc<CanHealthMonitor>,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            iox: Some(IoxInboundPublish::new(writer)),
+            bridge: InboundBridge::new(capacity),
+            health,
+            threshold,
+        }
+    }
+
+    /// Construct a publisher with no iceoryx2 transport — used by
+    /// `tests/saturation.rs` and any other harness that wants to drive
+    /// the bridge in isolation. The drop-accounting + health-transition
+    /// logic still runs; bytes that would have been published are
+    /// silently swallowed.
+    #[must_use]
+    pub fn without_transport(
+        capacity: usize,
+        health: Arc<CanHealthMonitor>,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            iox: None,
+            bridge: InboundBridge::new(capacity),
+            health,
+            threshold,
+        }
+    }
+
+    /// Borrow the per-channel bridge — used by tests that want to
+    /// inspect the running drop count without going through the
+    /// iceoryx2 publish path.
+    #[must_use]
+    pub fn bridge(&self) -> &InboundBridge<()> {
+        &self.bridge
+    }
+}
+
+impl<const N: usize> InboundPublish for BridgedInboundPublish<N> {
+    fn publish_bytes(&self, bytes: &[u8]) -> Result<(), ConnectorError> {
+        match self.bridge.try_send(()) {
+            InboundOutcome::Sent => {
+                // Drain the slot synchronously so the bridge stays
+                // near-empty under normal operation. The actual SHM
+                // transport then carries the bytes; iceoryx2 errors
+                // surface as `ConnectorError::Stack` so the dispatcher
+                // can treat them as it would any other publish failure.
+                let _ = self.bridge.try_recv();
+                match &self.iox {
+                    Some(iox) => iox.publish_bytes(bytes),
+                    None => Ok(()),
+                }
+            }
+            InboundOutcome::Dropped { count } => {
+                // The frame is lost on purpose — the bridge buffer is
+                // full and back-pressure semantics on the inbound side
+                // are "drop and account" per `REQ_0608`.
+                let _ = self.health.record_inbound_drop(count, self.threshold);
+                Ok(())
+            }
+        }
     }
 }
 

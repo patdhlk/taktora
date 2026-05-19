@@ -30,7 +30,9 @@ use std::time::Instant;
 use taktora_connector_core::ConnectorError;
 use taktora_connector_transport_iox::{RawChannelReader, RawChannelWriter};
 
+use crate::bridge::{InboundBridge, InboundOutcome};
 use crate::driver::BusDriver;
+use crate::health::EthercatHealthMonitor;
 use crate::pdi;
 use crate::registry::{
     ChannelBinding, ChannelRegistry, InboundPublish, OutboundDrain, RegisteredChannel,
@@ -89,6 +91,86 @@ impl<const N: usize> IoxInboundPublish<N> {
 impl<const N: usize> InboundPublish for IoxInboundPublish<N> {
     fn publish_bytes(&self, bytes: &[u8]) -> Result<(), ConnectorError> {
         self.writer.send_raw_bytes(bytes, [0u8; 32]).map(|_| ())
+    }
+}
+
+/// Per-channel inbound publisher that gates the iceoryx2 send through
+/// an [`InboundBridge`] for drop accounting (`REQ_0324`).
+///
+/// Wraps [`IoxInboundPublish`] with a per-channel [`InboundBridge<()>`]
+/// and a shared [`EthercatHealthMonitor`]. When the bridge overflows,
+/// the offending PDU is dropped and the running count is folded into
+/// `health.record_inbound_drop`, which emits a single
+/// `ConnectorHealth::Degraded { reason: "dropped N inbound frames" }`
+/// transition once the cumulative count crosses
+/// `inbound_drop_threshold`.
+pub struct BridgedInboundPublish<const N: usize> {
+    iox: Option<IoxInboundPublish<N>>,
+    bridge: InboundBridge<()>,
+    health: Arc<EthercatHealthMonitor>,
+    threshold: u64,
+}
+
+impl<const N: usize> BridgedInboundPublish<N> {
+    /// Construct a bridged publisher wired to an iceoryx2
+    /// [`RawChannelWriter`].
+    #[must_use]
+    pub fn new(
+        writer: RawChannelWriter<N>,
+        capacity: usize,
+        health: Arc<EthercatHealthMonitor>,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            iox: Some(IoxInboundPublish::new(writer)),
+            bridge: InboundBridge::new(capacity),
+            health,
+            threshold,
+        }
+    }
+
+    /// Construct a publisher with no iceoryx2 transport — used by
+    /// `tests/saturation.rs`. Drop accounting + health transitions
+    /// still run; bytes are silently swallowed instead of forwarded.
+    #[must_use]
+    pub fn without_transport(
+        capacity: usize,
+        health: Arc<EthercatHealthMonitor>,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            iox: None,
+            bridge: InboundBridge::new(capacity),
+            health,
+            threshold,
+        }
+    }
+
+    /// Borrow the per-channel bridge.
+    #[must_use]
+    pub const fn bridge(&self) -> &InboundBridge<()> {
+        &self.bridge
+    }
+}
+
+impl<const N: usize> InboundPublish for BridgedInboundPublish<N> {
+    fn publish_bytes(&self, bytes: &[u8]) -> Result<(), ConnectorError> {
+        match self.bridge.try_send(()) {
+            InboundOutcome::Sent => {
+                let _ = self.bridge.try_recv();
+                self.iox
+                    .as_ref()
+                    .map_or_else(|| Ok(()), |iox| iox.publish_bytes(bytes))
+            }
+            InboundOutcome::Dropped { count } => {
+                // The PDU is dropped on purpose — bridge saturation
+                // means the consumer has fallen behind. Account the
+                // drop and let the health monitor surface it
+                // (`REQ_0324`).
+                let _ = self.health.record_inbound_drop(count, self.threshold);
+                Ok(())
+            }
+        }
     }
 }
 

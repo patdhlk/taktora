@@ -259,7 +259,9 @@ use taktora_connector_host::{Connector, HealthSubscription};
 use taktora_connector_transport_iox::{ChannelReader, ChannelWriter};
 use taktora_executor::{ControlFlow, Executor, item_with_triggers};
 
-use crate::dispatcher::{IoxInboundPublish, IoxOutboundDrain, dispatcher_loop};
+use crate::dispatcher::{
+    BridgedCorrelatedPublish, BridgedInboundPublish, IoxOutboundDrain, dispatcher_loop,
+};
 use crate::registry::{ChannelBinding, ChannelDirection, InboundPublish};
 use crate::routing::ZenohRouting;
 
@@ -445,9 +447,19 @@ where
 
         // Gateway-side raw publisher — written to from session
         // subscribe callbacks so Zenoh-delivered bytes land on the
-        // plugin's iox subscriber.
+        // plugin's iox subscriber. Wrapped in
+        // [`BridgedInboundPublish`] so saturation on the inbound path
+        // surfaces as `InboundOutcome::Dropped` + a single
+        // `ConnectorHealth::Degraded` transition (`REQ_0406`).
         let raw_writer = factory.create_raw_writer_named::<N>(&svc_name)?;
-        let inbound = Arc::new(IoxInboundPublish::<N>::new(raw_writer));
+        let inbound_capacity = self.state.options().inbound_bridge_capacity;
+        let inbound_drop_threshold = self.state.options().inbound_drop_threshold;
+        let inbound = Arc::new(BridgedInboundPublish::<N>::new(
+            raw_writer,
+            inbound_capacity,
+            self.state.health_arc(),
+            inbound_drop_threshold,
+        ));
         let inbound_for_callback = Arc::clone(&inbound);
 
         // Wire the session subscriber: bytes from Zenoh arrive in the
@@ -501,15 +513,15 @@ where
     }
 }
 
-/// Owning wrapper around `Arc<IoxInboundPublish<N>>` so the registry
-/// can hold the publisher behind `Box<dyn InboundPublish>` while the
-/// session callback also holds a clone of the same `Arc`.
+/// Owning wrapper around `Arc<BridgedInboundPublish<N>>` so the
+/// registry can hold the publisher behind `Box<dyn InboundPublish>`
+/// while the session callback also holds a clone of the same `Arc`.
 struct IoxInboundPublishOwned<const N: usize> {
-    inner: Arc<IoxInboundPublish<N>>,
+    inner: Arc<BridgedInboundPublish<N>>,
 }
 
 impl<const N: usize> IoxInboundPublishOwned<N> {
-    const fn new(inner: Arc<IoxInboundPublish<N>>) -> Self {
+    const fn new(inner: Arc<BridgedInboundPublish<N>>) -> Self {
         Self { inner }
     }
 }
@@ -526,7 +538,7 @@ impl<const N: usize> InboundPublish for IoxInboundPublishOwned<N> {
 // `Connector` trait. They're concrete methods on the Zenoh-specific
 // connector type.
 
-use crate::dispatcher::{IoxCorrelatedPublish, IoxQuerierDrain, IoxReplyDrain};
+use crate::dispatcher::{IoxQuerierDrain, IoxReplyDrain};
 use crate::querier::ZenohQuerier;
 use crate::queryable::ZenohQueryable;
 use crate::registry::{CorrelatedPublish, QuerierDrain, ReplyDrain};
@@ -581,9 +593,19 @@ where
         // binding and the sidecar map can share it. The dispatcher's
         // `QuerierOut` branch looks the publisher up in the sidecar
         // map by descriptor name and binds it into the reply-stamping
-        // callbacks for `session.query`.
-        let r_publish_arc: Arc<IoxCorrelatedPublish<N>> =
-            Arc::new(IoxCorrelatedPublish::<N>::new(r_writer_gw));
+        // callbacks for `session.query`. The publisher is wrapped in
+        // [`BridgedCorrelatedPublish`] so saturation on the reply
+        // path surfaces as `InboundOutcome::Dropped` + a single
+        // `ConnectorHealth::Degraded` transition (`REQ_0428`).
+        let inbound_capacity = self.state.options().inbound_bridge_capacity;
+        let inbound_drop_threshold = self.state.options().inbound_drop_threshold;
+        let r_publish_arc: Arc<BridgedCorrelatedPublish<N>> =
+            Arc::new(BridgedCorrelatedPublish::<N>::new(
+                r_writer_gw,
+                inbound_capacity,
+                self.state.health_arc(),
+                inbound_drop_threshold,
+            ));
 
         self.state
             .query_reply_publishers()
@@ -662,9 +684,18 @@ where
         let r_reader_gw = factory.create_raw_reader_named::<N>(&r_name)?;
 
         // Wrap the q_writer_gw in an Arc so the session callback and
-        // the registry binding can share it.
-        let q_publish: Arc<IoxCorrelatedPublish<N>> =
-            Arc::new(IoxCorrelatedPublish::<N>::new(q_writer_gw));
+        // the registry binding can share it. [`BridgedCorrelatedPublish`]
+        // applies the same drop-accounting + health-transition contract
+        // as the querier's `.reply.in` path (`REQ_0406` / `REQ_0428`).
+        let inbound_capacity = self.state.options().inbound_bridge_capacity;
+        let inbound_drop_threshold = self.state.options().inbound_drop_threshold;
+        let q_publish: Arc<BridgedCorrelatedPublish<N>> =
+            Arc::new(BridgedCorrelatedPublish::<N>::new(
+                q_writer_gw,
+                inbound_capacity,
+                self.state.health_arc(),
+                inbound_drop_threshold,
+            ));
         let q_publish_for_callback = Arc::clone(&q_publish);
         let r_drain: Arc<dyn ReplyDrain> = Arc::new(IoxReplyDrain::<N>::new(r_reader_gw));
 
@@ -752,15 +783,15 @@ where
     }
 }
 
-/// Owning wrapper around `Arc<IoxCorrelatedPublish<N>>` so the registry
-/// can hold the publisher behind `Box<dyn CorrelatedPublish>` while
-/// the session callback also holds a clone.
+/// Owning wrapper around `Arc<BridgedCorrelatedPublish<N>>` so the
+/// registry can hold the publisher behind `Box<dyn CorrelatedPublish>`
+/// while the session callback also holds a clone.
 struct IoxCorrelatedPublishOwned<const N: usize> {
-    inner: Arc<IoxCorrelatedPublish<N>>,
+    inner: Arc<BridgedCorrelatedPublish<N>>,
 }
 
 impl<const N: usize> IoxCorrelatedPublishOwned<N> {
-    const fn new(inner: Arc<IoxCorrelatedPublish<N>>) -> Self {
+    const fn new(inner: Arc<BridgedCorrelatedPublish<N>>) -> Self {
         Self { inner }
     }
 }

@@ -18,6 +18,8 @@ use taktora_connector_core::ConnectorError;
 use taktora_connector_transport_iox::{RawChannelReader, RawChannelWriter};
 use tracing::{debug, warn};
 
+use crate::bridge::{InboundBridge, InboundOutcome};
+use crate::health::ZenohHealthMonitor;
 use crate::registry::{
     ChannelBinding, ChannelRegistry, CorrelatedPublish, InboundPublish, OutboundDrain,
     QuerierDrain, QueryId, ReplyDrain,
@@ -117,6 +119,84 @@ impl<const N: usize> InboundPublish for IoxInboundPublish<N> {
             .lock()
             .expect("inbound publisher mutex poisoned");
         writer.send_raw_bytes(bytes, [0u8; 32]).map(|_| ())
+    }
+}
+
+/// Per-channel inbound publisher that gates the iceoryx2 send through
+/// an [`InboundBridge`] for drop accounting (`REQ_0406`, `REQ_0428`).
+///
+/// The wrapper wraps [`IoxInboundPublish`] with a per-channel
+/// [`InboundBridge<()>`] and a shared [`ZenohHealthMonitor`]; once the
+/// cumulative drop count reported by the bridge crosses the configured
+/// threshold, the monitor emits a single `Up → Degraded` transition.
+pub struct BridgedInboundPublish<const N: usize> {
+    iox: Option<IoxInboundPublish<N>>,
+    bridge: InboundBridge<()>,
+    health: Arc<ZenohHealthMonitor>,
+    threshold: u64,
+}
+
+impl<const N: usize> BridgedInboundPublish<N> {
+    /// Construct a bridged publisher wired to an iceoryx2
+    /// [`RawChannelWriter`] for the actual SHM transport.
+    #[must_use]
+    pub fn new(
+        writer: RawChannelWriter<N>,
+        capacity: usize,
+        health: Arc<ZenohHealthMonitor>,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            iox: Some(IoxInboundPublish::new(writer)),
+            bridge: InboundBridge::new(capacity),
+            health,
+            threshold,
+        }
+    }
+
+    /// Construct a publisher with no iceoryx2 transport — used by
+    /// `tests/saturation.rs`. Drop accounting + health transitions
+    /// still run; bytes are silently swallowed instead of forwarded.
+    #[must_use]
+    pub fn without_transport(
+        capacity: usize,
+        health: Arc<ZenohHealthMonitor>,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            iox: None,
+            bridge: InboundBridge::new(capacity),
+            health,
+            threshold,
+        }
+    }
+
+    /// Borrow the per-channel bridge — used by tests that want to
+    /// inspect the running drop count.
+    #[must_use]
+    pub const fn bridge(&self) -> &InboundBridge<()> {
+        &self.bridge
+    }
+}
+
+impl<const N: usize> InboundPublish for BridgedInboundPublish<N> {
+    fn publish_bytes(&self, bytes: &[u8]) -> Result<(), ConnectorError> {
+        match self.bridge.try_send(()) {
+            InboundOutcome::Sent => {
+                let _ = self.bridge.try_recv();
+                self.iox
+                    .as_ref()
+                    .map_or_else(|| Ok(()), |iox| iox.publish_bytes(bytes))
+            }
+            InboundOutcome::Dropped { count } => {
+                // Drop the offending sample / reply chunk and account
+                // it. `record_inbound_drop` emits a single Degraded
+                // transition once the threshold is crossed
+                // (`REQ_0406`, `REQ_0428`).
+                let _ = self.health.record_inbound_drop(count, self.threshold);
+                Ok(())
+            }
+        }
     }
 }
 
@@ -603,5 +683,77 @@ impl<const N: usize> CorrelatedPublish for IoxCorrelatedPublish<N> {
             .lock()
             .expect("correlated publisher mutex poisoned");
         writer.send_raw_bytes(bytes, id.0).map(|_| ())
+    }
+}
+
+/// Per-channel correlated publisher that gates the iceoryx2 send
+/// through an [`InboundBridge`] for drop accounting (`REQ_0428`).
+///
+/// Wraps [`IoxCorrelatedPublish`] for the gateway → plugin reply path
+/// of a querier channel. When the bridge overflows, the offending
+/// reply chunk is dropped and the running count is folded into
+/// [`ZenohHealthMonitor::record_inbound_drop`].
+pub struct BridgedCorrelatedPublish<const N: usize> {
+    iox: Option<IoxCorrelatedPublish<N>>,
+    bridge: InboundBridge<()>,
+    health: Arc<ZenohHealthMonitor>,
+    threshold: u64,
+}
+
+impl<const N: usize> BridgedCorrelatedPublish<N> {
+    /// Construct a bridged correlated publisher wired to an iceoryx2
+    /// [`RawChannelWriter`].
+    #[must_use]
+    pub fn new(
+        writer: RawChannelWriter<N>,
+        capacity: usize,
+        health: Arc<ZenohHealthMonitor>,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            iox: Some(IoxCorrelatedPublish::new(writer)),
+            bridge: InboundBridge::new(capacity),
+            health,
+            threshold,
+        }
+    }
+
+    /// Construct a publisher with no iceoryx2 transport — used by
+    /// `tests/saturation.rs`.
+    #[must_use]
+    pub fn without_transport(
+        capacity: usize,
+        health: Arc<ZenohHealthMonitor>,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            iox: None,
+            bridge: InboundBridge::new(capacity),
+            health,
+            threshold,
+        }
+    }
+
+    /// Borrow the per-channel bridge.
+    #[must_use]
+    pub const fn bridge(&self) -> &InboundBridge<()> {
+        &self.bridge
+    }
+}
+
+impl<const N: usize> CorrelatedPublish for BridgedCorrelatedPublish<N> {
+    fn publish_with_correlation(&self, id: QueryId, bytes: &[u8]) -> Result<(), ConnectorError> {
+        match self.bridge.try_send(()) {
+            InboundOutcome::Sent => {
+                let _ = self.bridge.try_recv();
+                self.iox
+                    .as_ref()
+                    .map_or_else(|| Ok(()), |iox| iox.publish_with_correlation(id, bytes))
+            }
+            InboundOutcome::Dropped { count } => {
+                let _ = self.health.record_inbound_drop(count, self.threshold);
+                Ok(())
+            }
+        }
     }
 }

@@ -4,8 +4,13 @@
 //! * [`OutboundBridge`] — plugin → gateway. Saturation surfaces as
 //!   [`OutboundError::BackPressure`] (`REQ_0322`, `REQ_0323`).
 //! * [`InboundBridge`] — gateway → plugin. Saturation surfaces as
-//!   [`InboundOutcome::Dropped`] carrying the running dropped-count
-//!   so the gateway can emit `HealthEvent::DroppedInbound { count }`
+//!   [`InboundOutcome::Dropped { count }`] carrying the running
+//!   cumulative drop count. The gateway wraps this in
+//!   [`crate::BridgedInboundPublish`], which routes the count through
+//!   [`crate::EthercatHealthMonitor::record_inbound_drop`] to emit a
+//!   single `ConnectorHealth::Degraded { reason: "dropped N inbound frames" }`
+//!   transition once the count crosses
+//!   [`crate::EthercatConnectorOptions::inbound_drop_threshold`]
 //!   (`REQ_0322`, `REQ_0324`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -102,8 +107,10 @@ pub enum InboundOutcome {
     Sent,
     /// The channel was full — the message was dropped, and the
     /// caller is given the running drop-count (`REQ_0324`). The
-    /// gateway should emit `HealthEvent::DroppedInbound { count }`
-    /// based on this value.
+    /// gateway folds this value into
+    /// [`crate::EthercatHealthMonitor::record_inbound_drop`], which
+    /// emits a `ConnectorHealth::Degraded` transition once the
+    /// cumulative count crosses the configured `inbound_drop_threshold`.
     Dropped {
         /// Cumulative count of inbound messages dropped on this
         /// bridge since construction.

@@ -59,7 +59,8 @@ pub mod wkc;
 pub use bridge::{InboundBridge, InboundOutcome, OutboundBridge, OutboundError};
 pub use connector::EthercatConnector;
 pub use dispatcher::{
-    DispatchReport, IoxInboundPublish, IoxOutboundDrain, dispatch_one_cycle, dispatcher_loop,
+    BridgedInboundPublish, DispatchReport, IoxInboundPublish, IoxOutboundDrain, dispatch_one_cycle,
+    dispatcher_loop,
 };
 pub use driver::{BringUp, BusDriver};
 #[cfg(feature = "bus-integration")]

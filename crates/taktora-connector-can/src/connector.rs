@@ -40,7 +40,9 @@ use taktora_connector_host::{Connector, HealthSubscription};
 use taktora_connector_transport_iox::{ChannelReader, ChannelWriter, ServiceFactory};
 use taktora_executor::{ControlFlow, Executor, item_with_triggers};
 
-use crate::dispatcher::{DEFAULT_TX_TICK, IoxInboundPublish, IoxOutboundDrain, dispatcher_loop};
+use crate::dispatcher::{
+    BridgedInboundPublish, DEFAULT_TX_TICK, IoxOutboundDrain, dispatcher_loop,
+};
 use crate::driver::CanInterfaceLike;
 use crate::gateway::CanGateway;
 use crate::health::CanHealthMonitor;
@@ -283,8 +285,14 @@ where
         let factory = self.factory();
         let reader = factory.create_reader::<T, _, _, N>(&plugin_desc, self.codec.clone())?;
         let raw_writer = factory.create_raw_writer_named::<N>(&svc_name)?;
-        let publish: Box<dyn crate::InboundPublish> =
-            Box::new(IoxInboundPublish::<N>::new(raw_writer));
+        let inbound_capacity = self.state.options().inbound_capacity();
+        let inbound_drop_threshold = self.state.options().inbound_drop_threshold();
+        let publish: Box<dyn crate::InboundPublish> = Box::new(BridgedInboundPublish::<N>::new(
+            raw_writer,
+            inbound_capacity,
+            Arc::clone(&self.state.health),
+            inbound_drop_threshold,
+        ));
         self.state
             .registry()
             .lock()
