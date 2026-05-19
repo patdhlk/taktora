@@ -46,6 +46,20 @@ pub enum ExecutorError {
     /// Builder API used incorrectly (e.g. missing required field).
     #[error("builder misuse: {0}")]
     Builder(String),
+
+    /// The requested task id is not registered with this executor.
+    #[error("task `{0}` not found")]
+    TaskNotFound(TaskId),
+
+    /// A `clear_task_fault` call targeted a task that was already Running.
+    /// `REQ_0070`.
+    #[error("task `{0}` is not in fault state")]
+    TaskNotFaulted(TaskId),
+
+    /// A `clear_executor_fault` call was made while the executor was already
+    /// Running. `REQ_0071`.
+    #[error("executor is not in fault state")]
+    ExecutorNotFaulted,
 }
 
 impl ExecutorError {

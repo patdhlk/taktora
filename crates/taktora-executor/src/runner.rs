@@ -136,6 +136,9 @@ fn clone_executor_error(e: &ExecutorError) -> ExecutorError {
         ExecutorError::AlreadyRunning => ExecutorError::AlreadyRunning,
         ExecutorError::RunnerJoin => ExecutorError::RunnerJoin,
         ExecutorError::Builder(s) => ExecutorError::Builder(s.clone()),
+        ExecutorError::TaskNotFound(id) => ExecutorError::TaskNotFound(id.clone()),
+        ExecutorError::TaskNotFaulted(id) => ExecutorError::TaskNotFaulted(id.clone()),
+        ExecutorError::ExecutorNotFaulted => ExecutorError::ExecutorNotFaulted,
     }
 }
 
