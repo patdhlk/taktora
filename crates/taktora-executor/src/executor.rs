@@ -8,7 +8,9 @@
 use crate::Channel;
 use crate::context::Stoppable;
 use crate::error::ExecutorError;
-use crate::fault::{ExecutorFaultAtomic, FaultAtomic};
+use crate::fault::{
+    ExecutorFaultAtomic, ExecutorFaultState, FaultAtomic, FaultState, duration_to_ms_sat,
+};
 use crate::item::ExecutableItem;
 use crate::monitor::{ExecutionMonitor, NoopMonitor};
 use crate::observer::{NoopObserver, Observer};
@@ -807,6 +809,11 @@ impl Executor {
             // SAFETY: same as stop_listener_ref above — the Arc is alive for
             // the lifetime of dispatch_loop.
             let stop_listener_ptr = self.stop_listener.as_ref() as *const IxListener<ipc::Service>;
+            // Raw pointer to the executor-wide fault state. Same safety
+            // discipline as `tasks_ptr`: `Executor` is alive for the
+            // duration of `dispatch_loop`; the WaitSet callback is the
+            // only reader. REQ_0071.
+            let exec_fault_ptr = &self.exec_fault as *const ExecutorFaultAtomic;
 
             let cb_result = waitset.wait_and_process_once(
                 |attachment_id: WaitSetAttachmentId<ipc::Service>| {
@@ -831,6 +838,47 @@ impl Executor {
                         // dispatch_loop. The pointer is valid for the
                         // duration of this closure.
                         let task = unsafe { &mut (&mut *tasks_ptr)[task_idx] };
+
+                        // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072).
+                        // Only applies to Single/Chain — Graph tasks use their
+                        // own per-vertex scheduling and are out of scope for
+                        // FEAT_0018.
+                        if matches!(task.kind, TaskKind::Single(_) | TaskKind::Chain(_)) {
+                            // SAFETY: exec_fault_ptr derefs into the Executor that
+                            // owns this dispatch_loop — alive for the callback's
+                            // lifetime.
+                            let exec_faulted = matches!(
+                                unsafe { &*exec_fault_ptr }.load(0, 0),
+                                ExecutorFaultState::Faulted { .. }
+                            );
+                            let task_budget_ms = task.budget.map_or(0_u32, duration_to_ms_sat);
+                            let task_faulted = matches!(
+                                task.fault.load(task_budget_ms),
+                                FaultState::Faulted { .. }
+                            );
+                            let route_to_handler = exec_faulted || task_faulted;
+
+                            if route_to_handler {
+                                // If a handler is registered, dispatch it.
+                                // Otherwise, skip dispatch entirely this wakeup.
+                                if let Some(handler_box) = task.handler_job.as_deref_mut() {
+                                    let job_ptr: *mut (dyn FnMut() + Send) =
+                                        handler_box as *mut (dyn FnMut() + Send);
+                                    // SAFETY: same as the main-job dispatch
+                                    // below — handler_job is owned by the
+                                    // TaskEntry; pool.barrier() awaits its
+                                    // completion before the next callback.
+                                    #[allow(unsafe_code)]
+                                    unsafe {
+                                        pool.submit_borrowed(crate::pool::BorrowedJob::new(
+                                            job_ptr,
+                                        ));
+                                    }
+                                }
+                                // No handler and not Running — skip silently.
+                                continue;
+                            }
+                        }
 
                         match &mut task.kind {
                             TaskKind::Single(_) | TaskKind::Chain(_) => {
