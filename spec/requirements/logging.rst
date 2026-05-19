@@ -20,7 +20,7 @@ Top-level umbrella
 
 .. feat:: Shared logging base library
    :id: FEAT_0070
-   :status: open
+   :status: approved
 
    A workspace-wide logging surface used by every taktora crate and by
    any downstream connector. The umbrella satisfies two competing
@@ -54,7 +54,7 @@ Facade and backend-swap surface
 
 .. feat:: taktora-log facade crate
    :id: FEAT_0071
-   :status: open
+   :status: approved
    :satisfies: FEAT_0070
 
    A thin facade crate (``taktora-log``) that re-exports the ``log``
@@ -113,7 +113,7 @@ Facade and backend-swap surface
 
 .. feat:: Backend-swap surface
    :id: FEAT_0073
-   :status: open
+   :status: approved
    :satisfies: FEAT_0071
 
    The mechanism by which an integrator replaces the DLT backend with
@@ -139,7 +139,7 @@ Facade and backend-swap surface
 
 .. feat:: tracing-log bridge for existing tracing emitters
    :id: FEAT_0078
-   :status: open
+   :status: approved
    :satisfies: FEAT_0071
 
    Existing ``tracing::*`` emitters (notably
@@ -168,7 +168,7 @@ DLT backend
 
 .. feat:: taktora-log-dlt DLT-protocol backend
    :id: FEAT_0072
-   :status: open
+   :status: approved
    :satisfies: FEAT_0070
 
    A pure-Rust DLT backend (``taktora-log-dlt``) that implements both
@@ -219,7 +219,7 @@ DLT backend
 
 .. feat:: Structured key-value fields mapped to DLT verbose args
    :id: FEAT_0074
-   :status: open
+   :status: approved
    :satisfies: FEAT_0072
 
    The ``log`` crate (v0.4.21+) supports structured key-value pairs
@@ -248,7 +248,7 @@ Runtime log-level control
 
 .. feat:: Runtime per-context log-level control
    :id: FEAT_0075
-   :status: open
+   :status: approved
    :satisfies: FEAT_0072
 
    DLT clients (``dlt-control``, DLT Viewer's injection panel) can
@@ -288,7 +288,7 @@ Non-blocking hot path and offline buffering
 
 .. feat:: Offline ring buffer with reconnect drain
    :id: FEAT_0076
-   :status: open
+   :status: approved
    :satisfies: FEAT_0072
 
    When the daemon socket is unavailable (early boot, daemon crash,
@@ -352,7 +352,7 @@ Console dev fallback
 
 .. feat:: Console dev fallback
    :id: FEAT_0077
-   :status: open
+   :status: approved
    :satisfies: FEAT_0071
 
    When no DLT daemon socket is configured and no other ``log::Log``
