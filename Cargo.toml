@@ -4,13 +4,16 @@ exclude = ["examples"]
 members = [
     "crates/taktora-bounded-alloc",
     "crates/taktora-connector-can",
+    "crates/taktora-connector-can-tests",
     "crates/taktora-connector-codec",
     "crates/taktora-connector-core",
     "crates/taktora-connector-ethercat",
+    "crates/taktora-connector-ethercat-tests",
     "crates/taktora-connector-host",
     "crates/taktora-connector-host-tests",
     "crates/taktora-connector-transport-iox",
     "crates/taktora-connector-zenoh",
+    "crates/taktora-connector-zenoh-tests",
     "crates/taktora-executor",
     "crates/taktora-executor-tracing",
     "crates/taktora-log",
@@ -36,10 +39,13 @@ categories   = ["embedded", "concurrency", "network-programming"]
 # Internal crates — declared with both `path` (for local builds) and `version`
 # (so `cargo publish` strips the path and resolves against crates.io).
 taktora-bounded-alloc            = { path = "crates/taktora-bounded-alloc", version = "0.1.2" }
+taktora-connector-can            = { path = "crates/taktora-connector-can", version = "0.1.2" }
 taktora-connector-codec          = { path = "crates/taktora-connector-codec", version = "0.1.2" }
 taktora-connector-core           = { path = "crates/taktora-connector-core", version = "0.2.1" }
+taktora-connector-ethercat       = { path = "crates/taktora-connector-ethercat", version = "0.1.2" }
 taktora-connector-host           = { path = "crates/taktora-connector-host", version = "0.1.2" }
 taktora-connector-transport-iox  = { path = "crates/taktora-connector-transport-iox", version = "0.1.2" }
+taktora-connector-zenoh          = { path = "crates/taktora-connector-zenoh", version = "0.2.1" }
 taktora-executor                 = { path = "crates/taktora-executor", version = "0.1.2" }
 taktora-executor-tracing         = { path = "crates/taktora-executor-tracing", version = "0.1.2" }
 taktora-log                      = { path = "crates/taktora-log",                      version = "0.1.0" }
