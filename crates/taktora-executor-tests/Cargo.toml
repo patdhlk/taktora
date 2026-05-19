@@ -1,0 +1,25 @@
+[package]
+name         = "taktora-executor-tests"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Integration tests for taktora-executor that exercise the executor against other in-tree crates. Not published; holds dev-deps on sibling workspace crates so taktora-executor's published manifest stays free of internal-crate dev-deps that would race release-plz's topological-sort during publish."
+publish      = false
+
+[lib]
+# Empty stub — the crate exists solely to host integration tests under
+# `tests/`. A `src/lib.rs` is required so Cargo treats this as a package.
+
+[dev-dependencies]
+taktora-bounded-alloc           = { workspace = true }
+taktora-executor                = { workspace = true }
+
+iceoryx2 = { workspace = true }
+serde    = { workspace = true, features = ["std", "derive"] }

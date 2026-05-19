@@ -1,6 +1,7 @@
 //! `Observer` trait — lifecycle hooks invoked by the executor.
 
 use crate::error::ExecutorError;
+use crate::fault::{ExecutorFaultReason, FaultReason};
 use crate::task_id::TaskId;
 
 /// Generic user event carried by [`Observer::on_send_event`].
@@ -60,6 +61,24 @@ pub trait Observer: Send + Sync {
 
     /// Called when an item invokes `Context::send_event`.
     fn on_send_event(&self, _task: TaskId, _ev: UserEvent) {}
+
+    /// Called once when a task transitions from `Running` to `Faulted`
+    /// (per-task budget overrun, `REQ_0070`). The cascade transition
+    /// triggered by an executor-wide fault does NOT fire this hook —
+    /// see [`Observer::on_executor_fault`]. `REQ_0073`.
+    fn on_task_fault(&self, _task: TaskId, _reason: FaultReason) {}
+
+    /// Called once when a task transitions from `Faulted` back to
+    /// `Running` (manual clear via `Executor::clear_task_fault`).
+    fn on_task_clear(&self, _task: TaskId) {}
+
+    /// Called once when the executor transitions from `Running` to
+    /// `Faulted` (executor-wide iteration budget breach, `REQ_0071`).
+    fn on_executor_fault(&self, _reason: ExecutorFaultReason) {}
+
+    /// Called once when the executor transitions from `Faulted` back
+    /// to `Running` (manual clear via `Executor::clear_executor_fault`).
+    fn on_executor_clear(&self) {}
 }
 
 /// No-op observer used when the user does not configure one.

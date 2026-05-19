@@ -8,6 +8,10 @@
 use crate::Channel;
 use crate::context::Stoppable;
 use crate::error::ExecutorError;
+use crate::fault::{
+    ExecutorFaultAtomic, ExecutorFaultReason, ExecutorFaultState, FaultAtomic, FaultReason,
+    FaultState, duration_to_ms_sat, instant_to_since_ms,
+};
 use crate::item::ExecutableItem;
 use crate::monitor::{ExecutionMonitor, NoopMonitor};
 use crate::observer::{NoopObserver, Observer};
@@ -17,12 +21,14 @@ use crate::task_id::TaskId;
 use crate::task_kind::TaskKind;
 use crate::thread_attrs::ThreadAttributes;
 use crate::trigger::{TriggerDecl, TriggerDeclarer};
+use core::sync::atomic::AtomicU32;
 use iceoryx2::node::Node;
 use iceoryx2::port::listener::Listener as IxListener;
 use iceoryx2::prelude::ipc;
 use iceoryx2::prelude::*;
 use iceoryx2::waitset::WaitSetRunResult;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -46,6 +52,29 @@ pub(crate) struct TaskEntry {
     /// `TaskKind::Graph`, which dispatches its vertices via a separate
     /// path and is handled by `REQ_0062` / `REQ_0063` follow-on work.
     pub(crate) job: Option<Box<dyn FnMut() + Send + 'static>>,
+
+    /// Per-task budget declared via `TriggerDeclarer::budget`. `None`
+    /// means no per-task check; the executor-wide iteration budget
+    /// still applies. `REQ_0070`.
+    pub(crate) budget: Option<Duration>,
+
+    /// Per-task fault state. Wait-free read on the dispatch hot path.
+    /// Wrapped in `Arc` so dispatch closures built at `add` time can
+    /// capture an owning handle into the same atomic the `TaskEntry`
+    /// holds — `Arc::clone` is refcount-only, so this stays compatible
+    /// with `REQ_0060` (no per-iteration allocation). `REQ_0070`.
+    pub(crate) fault: Arc<FaultAtomic>,
+
+    /// Monotonic per-task overrun counter. Increments on EVERY budget
+    /// breach, including breaches while already `Faulted`. Never reset
+    /// by clearing the fault. Shared with the dispatch closure via
+    /// `Arc::clone`. `REQ_0102`.
+    pub(crate) overrun_count: Arc<AtomicU64>,
+
+    /// Pre-built dispatch closure for the fault-handler item. Mirrors
+    /// `job`. `None` means no handler — the task is simply skipped
+    /// during fault. `REQ_0072`.
+    pub(crate) handler_job: Option<Box<dyn FnMut() + Send + 'static>>,
 }
 
 /// Top-level executor. One per process is the typical case.
@@ -70,6 +99,27 @@ pub struct Executor {
     /// the per-iteration heap allocation that the previous design incurred.
     /// Required for `REQ_0060`.
     pub(crate) iter_err: Arc<std::sync::Mutex<Option<ExecutorError>>>,
+    /// Executor-wide iteration budget from `ExecutorBuilder::iteration_budget`.
+    /// `None` means no executor-wide check.
+    pub(crate) iteration_budget: Option<Duration>,
+    /// Executor-wide fault state. Wrapped in `Arc` so each dispatch
+    /// closure can hold an owning handle without re-borrowing through
+    /// `self`. `REQ_0071`.
+    pub(crate) exec_fault: Arc<ExecutorFaultAtomic>,
+
+    /// Index of the task whose `execute()` overran when the executor
+    /// transitioned to `Faulted`. Read alongside `exec_fault`.
+    pub(crate) exec_fault_task_idx: Arc<AtomicU32>,
+
+    /// Budget that was breached when the executor transitioned to
+    /// `Faulted`, in ms (saturated). Read alongside `exec_fault`.
+    pub(crate) exec_fault_budget_ms: Arc<AtomicU32>,
+
+    /// Executor start time, set on first dispatch. Used to compute
+    /// `since_ms` for faults relative to `Executor::run` entry. Wrapped
+    /// in `Arc` so dispatch closures share the same `OnceLock` with the
+    /// executor — `get_or_init` is idempotent and wait-free.
+    pub(crate) start_time: Arc<OnceLock<Instant>>,
 }
 
 // SAFETY: `IxListener<ipc::Service>` is `!Send` for the same Rc-based
@@ -128,6 +178,7 @@ impl Executor {
         let id = item.task_id().map_or(id_arg, TaskId::new);
         let mut declarer = TriggerDeclarer::new_internal();
         item.declare_triggers(&mut declarer)?;
+        let budget = declarer.budget;
         let decls = declarer.into_decls();
 
         let mut item_box: Box<dyn ExecutableItem> = Box::new(item);
@@ -143,6 +194,28 @@ impl Executor {
         let item_ptr =
             SendItemPtr::new(std::ptr::from_mut::<dyn ExecutableItem>(item_box.as_mut()));
 
+        // Allocate the per-task atomics now so the dispatch closure
+        // and the `TaskEntry` share the same `Arc` storage. The task
+        // will occupy `self.tasks.len()` after the push below — capture
+        // that index up front for `task_idx_u32`. Bounded workspace, so
+        // the `as u32` cast is sound; explicit allow keeps clippy quiet.
+        let task_fault = Arc::new(FaultAtomic::new());
+        let overrun_count = Arc::new(AtomicU64::new(0));
+        #[allow(clippy::cast_possible_truncation)]
+        let task_idx_u32 = self.tasks.len() as u32;
+        let fault_ctx = FaultDispatchCtx {
+            task_budget: budget,
+            task_fault: Arc::clone(&task_fault),
+            overrun_count: Arc::clone(&overrun_count),
+            iteration_budget: self.iteration_budget,
+            exec_fault: Arc::clone(&self.exec_fault),
+            exec_fault_task_idx: Arc::clone(&self.exec_fault_task_idx),
+            exec_fault_budget_ms: Arc::clone(&self.exec_fault_budget_ms),
+            task_idx_u32,
+            exec_start: Arc::clone(&self.start_time),
+            observer: Arc::clone(&self.observer),
+        };
+
         let job = build_single_job(
             id.clone(),
             self.stoppable.clone(),
@@ -152,6 +225,7 @@ impl Executor {
             app_id,
             app_inst,
             item_ptr,
+            fault_ctx,
         );
 
         self.tasks.push(TaskEntry {
@@ -159,8 +233,201 @@ impl Executor {
             kind: TaskKind::Single(item_box),
             decls,
             job: Some(job),
+            budget,
+            fault: task_fault,
+            overrun_count,
+            handler_job: None,
         });
         Ok(id)
+    }
+
+    /// Register an item plus a fault-handler item.
+    ///
+    /// The main item is registered through the canonical [`add`](Self::add)
+    /// path. The handler's [`declare_triggers`](ExecutableItem::declare_triggers)
+    /// is called (so handlers that internally rely on the declarer being
+    /// invoked observe the call) but its returned trigger list is
+    /// **ignored** — the handler dispatches on the main item's triggers
+    /// while the task is in `Faulted` state and runs in place of the main
+    /// item's `execute()`. The pre-built handler dispatch closure is
+    /// stashed on the same task entry as the main item's `job`,
+    /// satisfying `REQ_0072`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any error from registering the main item via `add`, or
+    /// from the handler's `declare_triggers` call.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the task entry just inserted by [`add`](Self::add) cannot
+    /// be located in `self.tasks` — this is unreachable by construction
+    /// and indicates a logic bug.
+    pub fn add_with_fault_handler<I, H>(
+        &mut self,
+        main: I,
+        handler: H,
+    ) -> Result<TaskId, ExecutorError>
+    where
+        I: ExecutableItem,
+        H: ExecutableItem,
+    {
+        let task_id = self.add(main)?;
+
+        // Drain the handler's trigger declarations — they are ignored by
+        // design (the handler runs on the main item's triggers).
+        let mut handler_box: Box<dyn ExecutableItem> = Box::new(handler);
+        let mut throwaway = TriggerDeclarer::new_internal();
+        handler_box.declare_triggers(&mut throwaway)?;
+        drop(throwaway);
+
+        let app_id = handler_box.app_id();
+        let app_inst = handler_box.app_instance_id();
+
+        // Locate the task we just added so we can share its per-task
+        // atomics with the handler's `FaultDispatchCtx`. The handler
+        // runs on the same `TaskEntry`; per §4.6 invariant 5, a handler
+        // breach increments `overrun_count` and keeps state `Faulted`
+        // without re-firing the observer.
+        let task_idx = self
+            .tasks
+            .iter()
+            .position(|t| t.id == task_id)
+            .expect("just added; must exist");
+        let task = &self.tasks[task_idx];
+        #[allow(clippy::cast_possible_truncation)]
+        let task_idx_u32 = task_idx as u32;
+        let handler_fault_ctx = FaultDispatchCtx {
+            task_budget: task.budget,
+            task_fault: Arc::clone(&task.fault),
+            overrun_count: Arc::clone(&task.overrun_count),
+            iteration_budget: self.iteration_budget,
+            exec_fault: Arc::clone(&self.exec_fault),
+            exec_fault_task_idx: Arc::clone(&self.exec_fault_task_idx),
+            exec_fault_budget_ms: Arc::clone(&self.exec_fault_budget_ms),
+            task_idx_u32,
+            exec_start: Arc::clone(&self.start_time),
+            observer: Arc::clone(&self.observer),
+        };
+
+        let handler_closure = build_handler_job(
+            task_id.clone(),
+            self.stoppable.clone(),
+            Arc::clone(&self.observer),
+            Arc::clone(&self.monitor),
+            Arc::clone(&self.iter_err),
+            app_id,
+            app_inst,
+            handler_box,
+            handler_fault_ctx,
+        );
+
+        self.tasks[task_idx].handler_job = Some(handler_closure);
+
+        Ok(task_id)
+    }
+
+    /// Clear a per-task fault. Returns the previous `FaultState`.
+    /// Fires `Observer::on_task_clear` if the state changed from
+    /// `Faulted` to `Running`. `REQ_0070`.
+    ///
+    /// # Errors
+    ///
+    /// * [`ExecutorError::TaskNotFound`] if `task` is unknown.
+    /// * [`ExecutorError::TaskNotFaulted`] if `task` is already `Running`.
+    pub fn clear_task_fault(&self, task: TaskId) -> Result<FaultState, ExecutorError> {
+        let entry = self
+            .tasks
+            .iter()
+            .find(|t| t.id == task)
+            .ok_or_else(|| ExecutorError::TaskNotFound(task.clone()))?;
+        let budget_ms = entry.budget.map_or(0_u32, crate::fault::duration_to_ms_sat);
+        let prev = entry.fault.swap(FaultState::Running, budget_ms);
+        match prev {
+            FaultState::Running => Err(ExecutorError::TaskNotFaulted(task)),
+            FaultState::Faulted { .. } => {
+                self.observer.on_task_clear(task);
+                Ok(prev)
+            }
+        }
+    }
+
+    /// Clear the executor-wide fault and cascade-clear every task whose
+    /// state is `Faulted{ExecutorFaulted}`. Tasks whose state is
+    /// `Faulted{BudgetExceeded}` are NOT cleared (their own contract
+    /// breach is independent). Fires `Observer::on_executor_clear` and
+    /// one `Observer::on_task_clear` per cascade-cleared task.
+    /// `REQ_0071`.
+    ///
+    /// # Errors
+    ///
+    /// * [`ExecutorError::ExecutorNotFaulted`] if the executor is `Running`.
+    pub fn clear_executor_fault(&self) -> Result<ExecutorFaultState, ExecutorError> {
+        let task_idx = self.exec_fault_task_idx.load(Ordering::Acquire);
+        let budget_ms = self.exec_fault_budget_ms.load(Ordering::Acquire);
+        let prev = self
+            .exec_fault
+            .swap(ExecutorFaultState::Running, task_idx, budget_ms);
+        match prev {
+            ExecutorFaultState::Running => Err(ExecutorError::ExecutorNotFaulted),
+            ExecutorFaultState::Faulted { .. } => {
+                // Cascade-clear tasks whose reason is ExecutorFaulted.
+                for entry in &self.tasks {
+                    let task_budget_ms =
+                        entry.budget.map_or(0_u32, crate::fault::duration_to_ms_sat);
+                    if let FaultState::Faulted {
+                        reason: FaultReason::ExecutorFaulted,
+                        ..
+                    } = entry.fault.load(task_budget_ms)
+                    {
+                        let _ = entry.fault.swap(FaultState::Running, task_budget_ms);
+                        self.observer.on_task_clear(entry.id.clone());
+                    }
+                }
+                self.observer.on_executor_clear();
+                Ok(prev)
+            }
+        }
+    }
+
+    /// Return the per-task overrun counter — number of times the task's
+    /// `execute()` exceeded its budget over the executor's lifetime.
+    /// Monotonic; not reset by `clear_task_fault`. `REQ_0102`.
+    ///
+    /// # Errors
+    ///
+    /// * [`ExecutorError::TaskNotFound`] if `task` is unknown.
+    pub fn overrun_count(&self, task: TaskId) -> Result<u64, ExecutorError> {
+        self.tasks
+            .iter()
+            .find(|t| t.id == task)
+            .map(|t| t.overrun_count.load(Ordering::Acquire))
+            .ok_or_else(|| ExecutorError::TaskNotFound(task))
+    }
+
+    /// Return a snapshot of the per-task `FaultState`. `REQ_0073` (pull path).
+    ///
+    /// # Errors
+    ///
+    /// * [`ExecutorError::TaskNotFound`] if `task` is unknown.
+    pub fn task_fault_state(&self, task: TaskId) -> Result<FaultState, ExecutorError> {
+        self.tasks
+            .iter()
+            .find(|t| t.id == task)
+            .map(|t| {
+                let budget_ms = t.budget.map_or(0_u32, crate::fault::duration_to_ms_sat);
+                t.fault.load(budget_ms)
+            })
+            .ok_or_else(|| ExecutorError::TaskNotFound(task))
+    }
+
+    /// Return a snapshot of the executor-wide `ExecutorFaultState`.
+    /// `REQ_0073` (pull path).
+    #[must_use]
+    pub fn executor_fault_state(&self) -> ExecutorFaultState {
+        let task_idx = self.exec_fault_task_idx.load(Ordering::Acquire);
+        let budget_ms = self.exec_fault_budget_ms.load(Ordering::Acquire);
+        self.exec_fault.load(task_idx, budget_ms)
     }
 
     /// Add a sequential chain of items. Only the head item's
@@ -255,11 +522,24 @@ impl Executor {
         // (See the rebuild step below.)
         let _ = chain_ptr;
 
+        // Pre-allocate the per-task atomics so the chain's dispatch
+        // closure can capture clones of the same `Arc`s the `TaskEntry`
+        // holds. The chain occupies `self.tasks.len()` after the push.
+        let task_fault = Arc::new(FaultAtomic::new());
+        let overrun_count = Arc::new(AtomicU64::new(0));
+        #[allow(clippy::cast_possible_truncation)]
+        let task_idx_u32 = self.tasks.len() as u32;
+
         self.tasks.push(TaskEntry {
             id: id.clone(),
             kind: TaskKind::Chain(items),
             decls,
             job: None, // populated in the rebuild step below
+            // TODO(post-Task-10): chain budgets carried separately; for now None.
+            budget: None,
+            fault: Arc::clone(&task_fault),
+            overrun_count: Arc::clone(&overrun_count),
+            handler_job: None,
         });
 
         // After the push, the TaskEntry lives at a stable position in
@@ -281,6 +561,18 @@ impl Executor {
         };
         #[allow(unsafe_code)]
         let chain_ptr = SendChainPtr::new(chain_vec_ptr);
+        let fault_ctx = FaultDispatchCtx {
+            task_budget: None, // chain budgets are intentionally None for now
+            task_fault,
+            overrun_count,
+            iteration_budget: self.iteration_budget,
+            exec_fault: Arc::clone(&self.exec_fault),
+            exec_fault_task_idx: Arc::clone(&self.exec_fault_task_idx),
+            exec_fault_budget_ms: Arc::clone(&self.exec_fault_budget_ms),
+            task_idx_u32,
+            exec_start: Arc::clone(&self.start_time),
+            observer: Arc::clone(&self.observer),
+        };
         let job = build_chain_job(
             id.clone(),
             self.stoppable.clone(),
@@ -288,6 +580,7 @@ impl Executor {
             Arc::clone(&self.monitor),
             Arc::clone(&self.iter_err),
             chain_ptr,
+            fault_ctx,
         );
         self.tasks[task_idx].job = Some(job);
         Ok(id)
@@ -323,6 +616,9 @@ pub struct ExecutorBuilder {
     observer: Option<Arc<dyn Observer>>,
     monitor: Option<Arc<dyn ExecutionMonitor>>,
     worker_attrs: ThreadAttributes,
+    /// Executor-wide iteration budget (`REQ_0071`). `None` means no
+    /// executor-wide check.
+    iteration_budget: Option<Duration>,
 }
 
 impl Default for ExecutorBuilder {
@@ -332,6 +628,7 @@ impl Default for ExecutorBuilder {
             observer: None,
             monitor: None,
             worker_attrs: ThreadAttributes::new(),
+            iteration_budget: None,
         }
     }
 }
@@ -356,6 +653,15 @@ impl ExecutorBuilder {
     #[must_use]
     pub fn monitor(mut self, mon: Arc<dyn ExecutionMonitor>) -> Self {
         self.monitor = Some(mon);
+        self
+    }
+
+    /// Configure the executor-wide iteration budget. Any task whose
+    /// `execute()` exceeds `dur` transitions the executor to `Faulted`
+    /// (`REQ_0071`). Default: unset (no executor-wide check).
+    #[must_use]
+    pub const fn iteration_budget(mut self, dur: Duration) -> Self {
+        self.iteration_budget = Some(dur);
         self
     }
 
@@ -437,6 +743,11 @@ impl ExecutorBuilder {
             observer,
             monitor,
             iter_err: Arc::new(std::sync::Mutex::new(None)),
+            iteration_budget: self.iteration_budget,
+            exec_fault: Arc::new(ExecutorFaultAtomic::new()),
+            exec_fault_task_idx: Arc::new(AtomicU32::new(0)),
+            exec_fault_budget_ms: Arc::new(AtomicU32::new(0)),
+            start_time: Arc::new(OnceLock::new()),
         };
 
         Ok(exec)
@@ -676,6 +987,17 @@ impl Executor {
             // SAFETY: same as stop_listener_ref above — the Arc is alive for
             // the lifetime of dispatch_loop.
             let stop_listener_ptr = self.stop_listener.as_ref() as *const IxListener<ipc::Service>;
+            // Raw pointer to the executor-wide fault state. Same safety
+            // discipline as `tasks_ptr`: `Executor` is alive for the
+            // duration of `dispatch_loop`; the WaitSet callback is the
+            // only reader. REQ_0071. `self.exec_fault` is
+            // `Arc<ExecutorFaultAtomic>` — we deref once to obtain a
+            // pointer to the inner `ExecutorFaultAtomic`.
+            let exec_fault_ptr = &*self.exec_fault as *const ExecutorFaultAtomic;
+            // Raw pointer to the executor start time. Used by the lazy
+            // cascade below to compute `since_ms` on task transitions
+            // triggered by an executor-wide fault.
+            let exec_start_ptr = &*self.start_time as *const OnceLock<Instant>;
 
             let cb_result = waitset.wait_and_process_once(
                 |attachment_id: WaitSetAttachmentId<ipc::Service>| {
@@ -700,6 +1022,71 @@ impl Executor {
                         // dispatch_loop. The pointer is valid for the
                         // duration of this closure.
                         let task = unsafe { &mut (&mut *tasks_ptr)[task_idx] };
+
+                        // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072).
+                        // Only applies to Single/Chain — Graph tasks use their
+                        // own per-vertex scheduling and are out of scope for
+                        // FEAT_0018.
+                        if matches!(task.kind, TaskKind::Single(_) | TaskKind::Chain(_)) {
+                            // SAFETY: exec_fault_ptr derefs into the Executor that
+                            // owns this dispatch_loop — alive for the callback's
+                            // lifetime.
+                            let exec_faulted = matches!(
+                                unsafe { &*exec_fault_ptr }.load(0, 0),
+                                ExecutorFaultState::Faulted { .. }
+                            );
+                            let task_budget_ms = task.budget.map_or(0_u32, duration_to_ms_sat);
+                            let task_state = task.fault.load(task_budget_ms);
+
+                            // Lazy cascade: if executor is `Faulted` and task
+                            // is still `Running`, silently transition the task
+                            // to `Faulted{ExecutorFaulted}`. No `on_task_fault`
+                            // — Observer already heard about the executor-wide
+                            // fault via `on_executor_fault` (cascade-noise
+                            // invariant from FEAT_0018 §4.6).
+                            let task_faulted =
+                                if exec_faulted && matches!(task_state, FaultState::Running) {
+                                    // SAFETY: exec_start_ptr derefs into the same
+                                    // `Executor` owning this dispatch_loop. The
+                                    // `OnceLock` is wait-free.
+                                    let exec_start = *unsafe { &*exec_start_ptr }
+                                        .get_or_init(std::time::Instant::now);
+                                    let since_ms =
+                                        instant_to_since_ms(std::time::Instant::now(), exec_start);
+                                    let _ = task.fault.swap(
+                                        FaultState::Faulted {
+                                            reason: FaultReason::ExecutorFaulted,
+                                            since_ms,
+                                        },
+                                        task_budget_ms,
+                                    );
+                                    true
+                                } else {
+                                    matches!(task_state, FaultState::Faulted { .. })
+                                };
+                            let route_to_handler = exec_faulted || task_faulted;
+
+                            if route_to_handler {
+                                // If a handler is registered, dispatch it.
+                                // Otherwise, skip dispatch entirely this wakeup.
+                                if let Some(handler_box) = task.handler_job.as_deref_mut() {
+                                    let job_ptr: *mut (dyn FnMut() + Send) =
+                                        handler_box as *mut (dyn FnMut() + Send);
+                                    // SAFETY: same as the main-job dispatch
+                                    // below — handler_job is owned by the
+                                    // TaskEntry; pool.barrier() awaits its
+                                    // completion before the next callback.
+                                    #[allow(unsafe_code)]
+                                    unsafe {
+                                        pool.submit_borrowed(crate::pool::BorrowedJob::new(
+                                            job_ptr,
+                                        ));
+                                    }
+                                }
+                                // No handler and not Running — skip silently.
+                                continue;
+                            }
+                        }
 
                         match &mut task.kind {
                             TaskKind::Single(_) | TaskKind::Chain(_) => {
@@ -864,6 +1251,39 @@ unsafe impl Send for SendChainPtr {}
 #[allow(unsafe_code)]
 unsafe impl Sync for SendChainPtr {}
 
+/// Captured state needed by a dispatch closure to perform post-execute
+/// fault detection. All fields are `Arc`-shared with the owning
+/// `Executor` and `TaskEntry` so the closure can read/write them
+/// wait-free from any pool worker thread. `REQ_0070`, `REQ_0071`,
+/// `REQ_0102`.
+struct FaultDispatchCtx {
+    /// Per-task budget. `None` for chain / graph tasks (no per-task
+    /// check) — the executor-wide iteration budget still applies.
+    task_budget: Option<Duration>,
+    /// Per-task fault state (shared with `TaskEntry::fault`).
+    task_fault: Arc<FaultAtomic>,
+    /// Per-task monotonic overrun counter (shared with
+    /// `TaskEntry::overrun_count`). Increments on EVERY budget breach.
+    overrun_count: Arc<AtomicU64>,
+    /// Executor-wide iteration budget. `None` means no executor-wide
+    /// check.
+    iteration_budget: Option<Duration>,
+    /// Executor-wide fault state (shared with `Executor::exec_fault`).
+    exec_fault: Arc<ExecutorFaultAtomic>,
+    /// Executor-wide offending-task index storage (shared with
+    /// `Executor::exec_fault_task_idx`).
+    exec_fault_task_idx: Arc<AtomicU32>,
+    /// Executor-wide breached-budget storage (shared with
+    /// `Executor::exec_fault_budget_ms`).
+    exec_fault_budget_ms: Arc<AtomicU32>,
+    /// Index of this task in the executor's task table.
+    task_idx_u32: u32,
+    /// Executor start time (shared with `Executor::start_time`).
+    exec_start: Arc<OnceLock<Instant>>,
+    /// Observer for `on_task_fault` / `on_executor_fault` notifications.
+    observer: Arc<dyn Observer>,
+}
+
 /// Build the per-iteration dispatch closure for a `TaskKind::Single`.
 ///
 /// The returned closure is stored on `TaskEntry::job` and invoked once
@@ -881,6 +1301,7 @@ fn build_single_job(
     app_id: Option<u32>,
     app_inst: Option<u32>,
     item_ptr: SendItemPtr,
+    fault_ctx: FaultDispatchCtx,
 ) -> Box<dyn FnMut() + Send + 'static> {
     Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
@@ -903,11 +1324,61 @@ fn build_single_job(
         if app_id.is_some() {
             obs.on_app_stop(id.clone());
         }
+        post_execute_detect_fault(&id, started, took, &fault_ctx);
+        record_first_err(&err_slot, &id, res);
+    })
+}
+
+/// Build the per-iteration dispatch closure for a fault-handler item.
+///
+/// Mirrors [`build_single_job`] in every detail (same monitor /
+/// observer / first-error capture wiring) but owns the
+/// `Box<dyn ExecutableItem>` directly inside the closure instead of
+/// dereferencing a raw [`SendItemPtr`]. The handler has no parallel
+/// owner inside [`TaskEntry`] — the handler closure stored in
+/// `handler_job` is the sole owner — so the simpler owning form is
+/// both sound and avoids the aliasing dance the main item needs.
+/// `REQ_0072`.
+#[allow(clippy::too_many_arguments)]
+fn build_handler_job(
+    id: TaskId,
+    stop: Stoppable,
+    obs: Arc<dyn Observer>,
+    mon: Arc<dyn ExecutionMonitor>,
+    err_slot: Arc<std::sync::Mutex<Option<ExecutorError>>>,
+    app_id: Option<u32>,
+    app_inst: Option<u32>,
+    mut handler: Box<dyn ExecutableItem>,
+    fault_ctx: FaultDispatchCtx,
+) -> Box<dyn FnMut() + Send + 'static> {
+    Box::new(move || {
+        let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
+        if let Some(aid) = app_id {
+            obs.on_app_start(id.clone(), aid, app_inst);
+        }
+        let started = std::time::Instant::now();
+        mon.pre_execute(id.clone(), started);
+        let res = run_item_catch_unwind(handler.as_mut(), &mut ctx);
+        let took = started.elapsed();
+        mon.post_execute(id.clone(), started, took, res.is_ok());
+        if let Err(ref e) = res {
+            obs.on_app_error(id.clone(), e.as_ref());
+        }
+        if app_id.is_some() {
+            obs.on_app_stop(id.clone());
+        }
+        // Per §4.6 invariant 5 of FEAT_0018: a handler that ALSO breaches
+        // budget keeps the task in `Faulted` (state already `Faulted`),
+        // `overrun_count` increments, NO new `on_task_fault` fires —
+        // the `matches!(prev, FaultState::Running)` gate inside
+        // `post_execute_detect_fault` enforces that.
+        post_execute_detect_fault(&id, started, took, &fault_ctx);
         record_first_err(&err_slot, &id, res);
     })
 }
 
 /// Build the per-iteration dispatch closure for a `TaskKind::Chain`.
+#[allow(clippy::too_many_arguments)]
 fn build_chain_job(
     id: TaskId,
     stop: Stoppable,
@@ -915,6 +1386,7 @@ fn build_chain_job(
     mon: Arc<dyn ExecutionMonitor>,
     err_slot: Arc<std::sync::Mutex<Option<ExecutorError>>>,
     chain_ptr: SendChainPtr,
+    fault_ctx: FaultDispatchCtx,
 ) -> Box<dyn FnMut() + Send + 'static> {
     Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
@@ -942,6 +1414,11 @@ fn build_chain_job(
             if app_id.is_some() {
                 obs.on_app_stop(id.clone());
             }
+            // Per-item post-execute fault detection. `task_budget` is
+            // `None` for chains (see `add_chain_with_id_boxed`), so the
+            // per-task check no-ops; the executor-wide iteration-budget
+            // check still fires per item. `REQ_0071`.
+            post_execute_detect_fault(&id, started, took, &fault_ctx);
             match res {
                 Ok(crate::ControlFlow::Continue) => {}
                 Ok(crate::ControlFlow::StopChain) => break,
@@ -1007,6 +1484,89 @@ fn record_first_err(
                 task_id: id.clone(),
                 source,
             });
+        }
+    }
+}
+
+/// Post-execute fault detection — runs on a pool worker AFTER
+/// `mon.post_execute` so the full `took` is available. Implements:
+///
+///   * `REQ_0070` / `REQ_0102` — per-task budget overrun: increments
+///     `overrun_count` on every breach, transitions
+///     `Running -> Faulted{BudgetExceeded}` exactly once (subsequent
+///     breaches keep the state `Faulted` and do NOT re-fire the
+///     observer).
+///   * `REQ_0071` — executor-wide iteration overrun: transitions
+///     `Running -> Faulted{IterationBudgetExceeded}` exactly once;
+///     cascade to per-task state is LAZY (see the pre-dispatch block
+///     in `dispatch_loop`), so the per-task `on_task_fault` does NOT
+///     fire during cascade — only `on_executor_fault` does.
+fn post_execute_detect_fault(
+    id: &TaskId,
+    started: Instant,
+    took: Duration,
+    fault_ctx: &FaultDispatchCtx,
+) {
+    // REQ_0070 / REQ_0102 — per-task budget overrun.
+    if let Some(budget) = fault_ctx.task_budget {
+        if took > budget {
+            fault_ctx.overrun_count.fetch_add(1, Ordering::Relaxed);
+            let took_ms = duration_to_ms_sat(took);
+            let budget_ms = duration_to_ms_sat(budget);
+            let exec_start = *fault_ctx.exec_start.get_or_init(|| started);
+            let since_ms = instant_to_since_ms(started, exec_start);
+            let new_state = FaultState::Faulted {
+                reason: FaultReason::BudgetExceeded { took_ms, budget_ms },
+                since_ms,
+            };
+            let prev = fault_ctx.task_fault.swap(new_state, budget_ms);
+            if matches!(prev, FaultState::Running) {
+                fault_ctx.observer.on_task_fault(
+                    id.clone(),
+                    FaultReason::BudgetExceeded { took_ms, budget_ms },
+                );
+            }
+        }
+    }
+
+    // REQ_0071 — executor-wide iteration overrun.
+    if let Some(iter_budget) = fault_ctx.iteration_budget {
+        if took > iter_budget {
+            let took_ms = duration_to_ms_sat(took);
+            let budget_ms = duration_to_ms_sat(iter_budget);
+            let exec_start = *fault_ctx.exec_start.get_or_init(|| started);
+            let since_ms = instant_to_since_ms(started, exec_start);
+            fault_ctx
+                .exec_fault_task_idx
+                .store(fault_ctx.task_idx_u32, Ordering::Release);
+            fault_ctx
+                .exec_fault_budget_ms
+                .store(budget_ms, Ordering::Release);
+            let new_state = ExecutorFaultState::Faulted {
+                reason: ExecutorFaultReason::IterationBudgetExceeded {
+                    task_idx: fault_ctx.task_idx_u32,
+                    took_ms,
+                    budget_ms,
+                },
+                since_ms,
+            };
+            let prev = fault_ctx
+                .exec_fault
+                .swap(new_state, fault_ctx.task_idx_u32, budget_ms);
+            if matches!(prev, ExecutorFaultState::Running) {
+                fault_ctx.observer.on_executor_fault(
+                    ExecutorFaultReason::IterationBudgetExceeded {
+                        task_idx: fault_ctx.task_idx_u32,
+                        took_ms,
+                        budget_ms,
+                    },
+                );
+                // NO eager cascade here. Cascade is lazy: the
+                // pre-dispatch block in `dispatch_loop` transitions
+                // each `Running` task to `Faulted{ExecutorFaulted}` on
+                // the next wakeup — silently, so per-task observers
+                // do not fire (see §4.6 invariant on cascade-noise).
+            }
         }
     }
 }
@@ -1088,6 +1648,11 @@ impl ExecutorGraphBuilder<'_> {
             // stored inside the `Graph`; the per-task `job` slot
             // is unused for graphs.
             job: None,
+            // TODO(post-Task-10): graph budgets carried separately; for now None.
+            budget: None,
+            fault: Arc::new(FaultAtomic::new()),
+            overrun_count: Arc::new(AtomicU64::new(0)),
+            handler_job: None,
         });
         Ok(id)
     }
@@ -1118,6 +1683,58 @@ mod tests {
     }
 
     #[test]
+    fn add_persists_declared_budget() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let task_id = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(10));
+                    d.budget(Duration::from_millis(5));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .unwrap();
+        let entry = exec
+            .tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .expect("task present");
+        assert_eq!(entry.budget, Some(Duration::from_millis(5)));
+    }
+
+    #[test]
+    fn add_with_fault_handler_stores_handler_job() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let task_id = exec
+            .add_with_fault_handler(
+                crate::item::item_with_triggers(
+                    |d| {
+                        d.interval(Duration::from_millis(10));
+                        d.budget(Duration::from_millis(5));
+                        Ok(())
+                    },
+                    |_| Ok(crate::ControlFlow::Continue),
+                ),
+                crate::item::item_with_triggers(|_d| Ok(()), |_| Ok(crate::ControlFlow::Continue)),
+            )
+            .unwrap();
+        let entry = exec
+            .tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .expect("task present");
+        assert!(
+            entry.handler_job.is_some(),
+            "handler_job should be Some after add_with_fault_handler"
+        );
+        // Main job should still be present.
+        assert!(entry.job.is_some(), "main job should still be present");
+    }
+
+    #[test]
     fn declare_triggers_called_at_add_time() {
         let called = Arc::new(AtomicBool::new(false));
         let called_d = Arc::clone(&called);
@@ -1133,5 +1750,78 @@ mod tests {
         let mut exec = Executor::builder().worker_threads(0).build().unwrap();
         exec.add(it).unwrap();
         assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn clear_task_fault_errors_on_running_task() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let task_id = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(10));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .unwrap();
+        // Task starts in Running state — clearing should error.
+        let err = exec.clear_task_fault(task_id).expect_err("not faulted");
+        assert!(matches!(err, ExecutorError::TaskNotFaulted(_)));
+    }
+
+    #[test]
+    fn clear_executor_fault_errors_on_running_executor() {
+        let exec = Executor::builder().worker_threads(0).build().unwrap();
+        let err = exec.clear_executor_fault().expect_err("not faulted");
+        assert!(matches!(err, ExecutorError::ExecutorNotFaulted));
+    }
+
+    #[test]
+    fn overrun_count_returns_zero_for_new_task() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let task_id = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(10));
+                    d.budget(Duration::from_millis(5));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .unwrap();
+        assert_eq!(exec.overrun_count(task_id).unwrap(), 0);
+    }
+
+    #[test]
+    fn overrun_count_errors_for_unknown_task() {
+        let exec = Executor::builder().worker_threads(0).build().unwrap();
+        let err = exec
+            .overrun_count(crate::TaskId::new("nope"))
+            .expect_err("unknown task");
+        assert!(matches!(err, ExecutorError::TaskNotFound(_)));
+    }
+
+    #[test]
+    fn task_fault_state_starts_running() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let task_id = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(10));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .unwrap();
+        assert_eq!(exec.task_fault_state(task_id).unwrap(), FaultState::Running);
+    }
+
+    #[test]
+    fn executor_fault_state_starts_running() {
+        let exec = Executor::builder().worker_threads(0).build().unwrap();
+        assert_eq!(exec.executor_fault_state(), ExecutorFaultState::Running);
     }
 }

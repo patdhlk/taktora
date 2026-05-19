@@ -7,7 +7,9 @@
 
 #![doc(html_root_url = "https://docs.rs/taktora-executor-tracing/0.1.0")]
 
-use taktora_executor::{ExecutorError, Observer, TaskId, UserEvent};
+use taktora_executor::{
+    ExecutorError, ExecutorFaultReason, FaultReason, Observer, TaskId, UserEvent,
+};
 
 /// Observer that forwards every callback to the global `tracing` subscriber.
 #[derive(Debug, Default)]
@@ -55,5 +57,23 @@ impl Observer for TracingObserver {
             string_data = ev.string_data.as_deref().unwrap_or(""),
             "user.event"
         );
+    }
+
+    fn on_task_fault(&self, task: TaskId, reason: FaultReason) {
+        tracing::warn!(
+            target: "taktora.fault",
+            task = %task,
+            ?reason,
+            "task.fault"
+        );
+    }
+    fn on_task_clear(&self, task: TaskId) {
+        tracing::info!(target: "taktora.fault", task = %task, "task.clear");
+    }
+    fn on_executor_fault(&self, reason: ExecutorFaultReason) {
+        tracing::warn!(target: "taktora.fault", ?reason, "executor.fault");
+    }
+    fn on_executor_clear(&self) {
+        tracing::info!(target: "taktora.fault", "executor.clear");
     }
 }

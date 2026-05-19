@@ -15,6 +15,7 @@ members = [
     "crates/taktora-connector-zenoh",
     "crates/taktora-connector-zenoh-tests",
     "crates/taktora-executor",
+    "crates/taktora-executor-tests",
     "crates/taktora-executor-tracing",
     "crates/taktora-log",
     "crates/taktora-log-dlt",
