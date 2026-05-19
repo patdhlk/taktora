@@ -1,7 +1,7 @@
 //! [`RealCanInterface`] — Linux-only `CanInterfaceLike` backed by
 //! `socketcan::tokio::CanFdSocket`. Lives behind the
-//! `socketcan-integration` cargo feature (`REQ_0503`) and is only
-//! compiled on `cfg(target_os = "linux")` (`REQ_0502`).
+//! `socketcan-integration` cargo feature (`REQ_0603`) and is only
+//! compiled on `cfg(target_os = "linux")` (`REQ_0602`).
 //!
 //! The kernel's `PF_CAN` raw socket family is Linux-specific; the
 //! `socketcan` crate's build script rejects non-Linux targets, so
@@ -26,7 +26,7 @@
 //!   socket and constructs a fresh `CanFdSocket` for the same
 //!   interface; this is the cleanest way to recover from bus-off
 //!   when the kernel does not have `can-restart-ms` configured
-//!   (`REQ_0533`, `REQ_0544`).
+//!   (`REQ_0633`, `REQ_0644`).
 
 use socketcan::tokio::CanFdSocket;
 use socketcan::{

@@ -1,5 +1,5 @@
 //! Per-iface channel registry used by the gateway's RX/TX loops.
-//! `REQ_0525`.
+//! `REQ_0625`.
 //!
 //! Maps each registered [`ChannelDescriptor`] to its [`CanRouting`]
 //! and direction so the dispatcher can iterate matching channels
@@ -36,7 +36,7 @@ pub enum Direction {
     Inbound,
 }
 
-/// Gateway-side outbound drain. `REQ_0513`.
+/// Gateway-side outbound drain. `REQ_0613`.
 ///
 /// Wraps an iceoryx2 raw subscriber whose publisher lives on the
 /// plugin side. The dispatcher calls [`Self::drain_into`] each TX
@@ -54,7 +54,7 @@ pub trait OutboundDrain: Send {
     fn drain_into(&self, dest: &mut [u8]) -> Result<Option<usize>, ConnectorError>;
 }
 
-/// Gateway-side inbound publisher. `REQ_0514`.
+/// Gateway-side inbound publisher. `REQ_0614`.
 ///
 /// Wraps an iceoryx2 raw publisher whose subscriber lives on the
 /// plugin side. The dispatcher calls [`Self::publish_bytes`] for

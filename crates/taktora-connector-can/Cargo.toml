@@ -22,7 +22,7 @@ default = []
 # "linux")` target table — enabling this feature on non-Linux is a
 # no-op (no `dep:` reference fails because cargo's target-cfg
 # matching elides absent deps). Mirrors `bus-integration`
-# (BB_0030) and `zenoh-integration` (BB_0040). REQ_0503.
+# (BB_0030) and `zenoh-integration` (BB_0040). REQ_0603.
 socketcan-integration = ["dep:socketcan"]
 
 [dependencies]
@@ -38,7 +38,7 @@ thiserror                      = { workspace = true }
 bitflags                       = { workspace = true }
 
 # Real socketcan dep — Linux-only. The kernel `PF_CAN` socket family
-# is Linux-specific (REQ_0502); the `socketcan` crate's build.rs
+# is Linux-specific (REQ_0602); the `socketcan` crate's build.rs
 # rejects non-Linux targets, so we gate the dep itself rather than
 # the feature. Enabling `socketcan-integration` on macOS / Windows
 # is a no-op (no `dep:socketcan` is resolved).

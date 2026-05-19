@@ -5,16 +5,16 @@
 //!
 //! 1. Recompute and re-apply the per-iface filter when the registry's
 //!    Inbound channel count for this iface has changed since last
-//!    apply (`REQ_0522`, `REQ_0523`).
+//!    apply (`REQ_0622`, `REQ_0623`).
 //! 2. Drain outbound bindings for this iface — build a `CanFrame` per
 //!    drained envelope and `send_classical` / `send_fd` via the driver
-//!    (`ARCH_0060`, `REQ_0513`).
+//!    (`ARCH_0060`, `REQ_0613`).
 //! 3. Await one inbound frame with a TX tick timeout. On data, demux
 //!    to every reader binding whose routing matches under
-//!    `filter::matches` (`ARCH_0061`, `REQ_0514`, `REQ_0524`). On
+//!    `filter::matches` (`ARCH_0061`, `REQ_0614`, `REQ_0624`). On
 //!    error, classify and drive the health state machine; on bus-off,
 //!    consult [`taktora_connector_core::ReconnectPolicy`] and reopen
-//!    (`ARCH_0062`, `REQ_0533`, `REQ_0534`).
+//!    (`ARCH_0062`, `REQ_0633`, `REQ_0634`).
 //!
 //! The task exits cleanly when its `stop` signal flips to `true`.
 //!

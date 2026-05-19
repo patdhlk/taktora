@@ -1,5 +1,5 @@
 //! [`CanGateway`] — owns the per-gateway tokio runtime that hosts the
-//! per-iface RX / TX tasks. `REQ_0505`, `ADR_0026`.
+//! per-iface RX / TX tasks. `REQ_0605`, `ADR_0026`.
 
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ use crate::options::CanConnectorOptions;
 /// on `Drop`. Matches the EtherCAT crate's `DEFAULT_SHUTDOWN_BUDGET`.
 pub const DEFAULT_SHUTDOWN_BUDGET: Duration = Duration::from_secs(5);
 
-/// Gateway-side container. Owns the tokio runtime (`REQ_0505`) and
+/// Gateway-side container. Owns the tokio runtime (`REQ_0605`) and
 /// exposes a handle for spawning per-iface dispatcher tasks.
 #[derive(Debug)]
 pub struct CanGateway {

@@ -15,7 +15,7 @@
 //! On `create_writer` / `create_reader` (`REQ_0223`):
 //!
 //! 1. Validate the descriptor's routing iface is one configured on
-//!    this gateway (`REQ_0521`).
+//!    this gateway (`REQ_0621`).
 //! 2. Validate the channel's `N` const generic equals the routing
 //!    kind's max payload (`REQ_0612`).
 //! 3. Open the plugin-side iceoryx2 service `"{name}.out"` / `.in`.
@@ -25,7 +25,7 @@
 //! On `register_with`:
 //!
 //! * Take the driver vec out of the connector and spawn one
-//!   [`dispatcher_loop`] task per iface (`REQ_0505`). Also register
+//!   [`dispatcher_loop`] task per iface (`REQ_0605`). Also register
 //!   a heartbeat executor item to satisfy `REQ_0272`.
 
 use std::sync::Arc;

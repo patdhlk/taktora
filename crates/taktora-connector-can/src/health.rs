@@ -1,8 +1,8 @@
 //! [`CanHealthMonitor`] — wraps `taktora_connector_core::HealthMonitor`
 //! with per-interface sub-state and worst-of aggregation.
-//! `REQ_0530`, `REQ_0535`.
+//! `REQ_0630`, `REQ_0635`.
 //!
-//! Aggregation rule (`REQ_0530`): the externally-visible
+//! Aggregation rule (`REQ_0630`): the externally-visible
 //! [`ConnectorHealth`] is the worst of every iface's sub-state.
 //!
 //! * Every iface `Up` ⇒ connector `Up`.
@@ -185,7 +185,7 @@ impl From<CanHealthError> for ConnectorError {
 ///
 /// `triggering_iface` is the iface whose sub-state just changed —
 /// used to populate `Degraded`'s `reason` and `Down`'s `reason` with
-/// the offending iface name (`REQ_0535`'s aggregation rule).
+/// the offending iface name (`REQ_0635`'s aggregation rule).
 fn aggregate(
     ifaces: &HashMap<CanIface, IfaceState>,
     triggering_iface: CanIface,
@@ -207,7 +207,7 @@ fn aggregate(
         }
     }
     let total = ifaces.len();
-    // All down → connector Down (REQ_0530).
+    // All down → connector Down (REQ_0630).
     if down == total {
         return ConnectorHealth::Down {
             reason: format!("all ifaces down (latest: {triggering_iface})"),

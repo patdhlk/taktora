@@ -1,5 +1,5 @@
 //! `TEST_0512` — Linux raw-socket smoke against `vcan0`.
-//! `REQ_0502`, `REQ_0613`, `REQ_0614`.
+//! `REQ_0602`, `REQ_0613`, `REQ_0614`.
 //!
 //! Exercises [`crate::RealCanInterface`] end-to-end against the
 //! Linux kernel's virtual CAN driver. Two separate

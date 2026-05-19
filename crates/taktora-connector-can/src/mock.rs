@@ -1,5 +1,5 @@
 //! [`MockCanInterface`] — in-process loopback implementing
-//! [`CanInterfaceLike`]. `BB_0075`, `REQ_0504`.
+//! [`CanInterfaceLike`]. `BB_0075`, `REQ_0604`.
 //!
 //! Used by every layer-1 test in the corpus (TEST_0500–TEST_0510,
 //! TEST_0513, TEST_0514). Ships unfeature-gated so layer-1 work

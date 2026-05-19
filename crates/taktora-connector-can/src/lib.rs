@@ -5,29 +5,29 @@
 //!
 //! * [`routing`] — typed `CanRouting`, `CanIface`, `CanId`,
 //!   `CanFrameKind`, `CanFdFlags` (`REQ_0601`, `REQ_0615`).
-//! * [`options::CanConnectorOptions`] typed builder (`REQ_0506`,
-//!   `REQ_0520`, `REQ_0534`).
+//! * [`options::CanConnectorOptions`] typed builder (`REQ_0606`,
+//!   `REQ_0620`, `REQ_0634`).
 //! * [`bridge::OutboundBridge`] / [`bridge::InboundBridge`]
-//!   (`REQ_0506`–`REQ_0608`).
+//!   (`REQ_0606`–`REQ_0608`).
 //! * [`health::CanHealthMonitor`] with per-interface worst-of
 //!   aggregation (`REQ_0630`, `REQ_0635`).
 //! * [`registry::ChannelRegistry`] — per-iface routing registry
-//!   (`REQ_0525`).
+//!   (`REQ_0625`).
 //! * [`filter::PerIfaceFilter`] — union compiler + match predicate
 //!   (`BB_0074`, `REQ_0622`, `REQ_0623`, `REQ_0624`).
 //! * [`driver::CanInterfaceLike`] — async trait every back-end
 //!   implements (`BB_0072`).
 //! * [`mock::MockCanInterface`] — in-process loopback for layer-1
-//!   tests (`BB_0075`, `REQ_0504`).
+//!   tests (`BB_0075`, `REQ_0604`).
 //! * [`gateway::CanGateway`] — owns the per-gateway tokio runtime
-//!   (`REQ_0505`).
+//!   (`REQ_0605`).
 //! * [`dispatcher`] — per-iface RX/TX loops + error classifier +
 //!   bus-off reconnect (`ARCH_0061`, `ARCH_0062`).
 //! * [`connector::CanConnector`] — implements
 //!   [`taktora_connector_host::Connector`] (`REQ_0600`).
 //!
 //! Layer-2 (Linux-only, gated behind the default-off
-//! `socketcan-integration` cargo feature per `REQ_0503` / `REQ_0502`):
+//! `socketcan-integration` cargo feature per `REQ_0603` / `REQ_0602`):
 //!
 //! * `RealCanInterface` (in `real` module — compiled only when both
 //!   `feature = "socketcan-integration"` and

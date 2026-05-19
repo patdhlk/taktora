@@ -1,12 +1,12 @@
 //! Bounded bridges between the taktora-executor side (plugin) and the
-//! tokio sidecar (gateway). `REQ_0506`–`REQ_0608`.
+//! tokio sidecar (gateway). `REQ_0606`–`REQ_0608`.
 //!
 //! * [`OutboundBridge`] — plugin → gateway. Saturation surfaces as
-//!   [`OutboundError::BackPressure`] (`REQ_0507`).
+//!   [`OutboundError::BackPressure`] (`REQ_0607`).
 //! * [`InboundBridge`] — gateway → plugin. Saturation surfaces as
 //!   [`InboundOutcome::Dropped`] carrying the running dropped-count
 //!   so the gateway can emit `HealthEvent::DroppedInbound { count }`
-//!   (`REQ_0508`).
+//!   (`REQ_0608`).
 //!
 //! Identical shape to `taktora_connector_ethercat::bridge` (which is
 //! itself identical to `taktora_connector_zenoh::bridge`); the only
@@ -30,7 +30,7 @@ pub struct OutboundBridge<T> {
 #[derive(Debug, thiserror::Error)]
 pub enum OutboundError<T> {
     /// Channel is full — the caller can retry or surface
-    /// back-pressure to the application. `REQ_0507`.
+    /// back-pressure to the application. `REQ_0607`.
     #[error("outbound bridge full (capacity exceeded)")]
     BackPressure(T),
     /// All receivers have been dropped.
@@ -82,7 +82,7 @@ impl<T> OutboundBridge<T> {
 }
 
 /// Gateway → plugin bridge. On overflow the message is dropped and a
-/// running dropped-count is incremented (`REQ_0508`).
+/// running dropped-count is incremented (`REQ_0608`).
 #[derive(Debug)]
 pub struct InboundBridge<T> {
     tx: Sender<T>,
@@ -97,7 +97,7 @@ pub enum InboundOutcome {
     /// The message was enqueued.
     Sent,
     /// The channel was full — the message was dropped, and the
-    /// caller is given the running drop-count (`REQ_0508`). The
+    /// caller is given the running drop-count (`REQ_0608`). The
     /// gateway should emit `HealthEvent::DroppedInbound { count }`
     /// based on this value.
     Dropped {

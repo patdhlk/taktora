@@ -110,8 +110,8 @@ pub enum CanFrame {
         dlc: u8,
     },
     /// Classified error frame. Consumed by the gateway's error
-    /// classifier (`REQ_0531`); never delivered to a plugin channel
-    /// (`REQ_0536`).
+    /// classifier (`REQ_0631`); never delivered to a plugin channel
+    /// (`REQ_0636`).
     Error(CanErrorKind),
 }
 
@@ -180,7 +180,7 @@ pub trait CanInterfaceLike: Send + 'static {
 
     /// Apply the per-interface filter set. The kernel filters out
     /// non-matching frames before they reach the read loop
-    /// (`REQ_0522`).
+    /// (`REQ_0622`).
     ///
     /// # Errors
     ///
@@ -207,6 +207,6 @@ pub trait CanInterfaceLike: Send + 'static {
 
     /// Reopen the socket after a bus-off close. Dispatcher invokes
     /// this on the configured [`taktora_connector_core::ReconnectPolicy`]
-    /// backoff (`REQ_0533`, `REQ_0534`).
+    /// backoff (`REQ_0633`, `REQ_0634`).
     fn reopen(&mut self) -> impl core::future::Future<Output = Result<(), CanIoError>> + Send + '_;
 }

@@ -1,6 +1,6 @@
 //! [`CanConnectorOptions`] — typed builder configuring a
-//! `CanConnector` / `CanGateway` pair. `REQ_0506`, `REQ_0520`,
-//! `REQ_0534`.
+//! `CanConnector` / `CanGateway` pair. `REQ_0606`, `REQ_0620`,
+//! `REQ_0634`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,19 +50,19 @@ impl CanConnectorOptions {
         CanConnectorOptionsBuilder::new()
     }
 
-    /// Borrow the configured interface list (`REQ_0520`).
+    /// Borrow the configured interface list (`REQ_0620`).
     #[must_use]
     pub fn ifaces(&self) -> &[CanIface] {
         &self.ifaces
     }
 
-    /// Outbound bridge capacity per iface (`REQ_0506`). Default 256.
+    /// Outbound bridge capacity per iface (`REQ_0606`). Default 256.
     #[must_use]
     pub const fn outbound_capacity(&self) -> usize {
         self.outbound_capacity
     }
 
-    /// Inbound bridge capacity per iface (`REQ_0506`). Default 256.
+    /// Inbound bridge capacity per iface (`REQ_0606`). Default 256.
     #[must_use]
     pub const fn inbound_capacity(&self) -> usize {
         self.inbound_capacity
@@ -76,7 +76,7 @@ impl CanConnectorOptions {
     }
 
     /// Construct a fresh reconnect policy instance used on bus-off
-    /// (`REQ_0534`). Default is [`ExponentialBackoff`] with framework
+    /// (`REQ_0634`). Default is [`ExponentialBackoff`] with framework
     /// defaults. Each iface gets its own instance so backoff state
     /// does not bleed between ifaces.
     #[must_use]
@@ -91,7 +91,7 @@ impl CanConnectorOptions {
     }
 
     /// Tokio worker-thread count for the gateway sidecar
-    /// (`REQ_0505`). Default 1.
+    /// (`REQ_0605`). Default 1.
     #[must_use]
     pub const fn tokio_worker_threads(&self) -> usize {
         self.tokio_worker_threads
@@ -143,7 +143,7 @@ impl CanConnectorOptionsBuilder {
         self
     }
 
-    /// Override outbound bridge capacity (`REQ_0506`). Values below
+    /// Override outbound bridge capacity (`REQ_0606`). Values below
     /// 1 are clamped to 1 at build time.
     #[must_use]
     pub const fn outbound_capacity(mut self, n: usize) -> Self {
@@ -151,7 +151,7 @@ impl CanConnectorOptionsBuilder {
         self
     }
 
-    /// Override inbound bridge capacity (`REQ_0506`).
+    /// Override inbound bridge capacity (`REQ_0606`).
     #[must_use]
     pub const fn inbound_capacity(mut self, n: usize) -> Self {
         self.inbound_capacity = n;
@@ -165,7 +165,7 @@ impl CanConnectorOptionsBuilder {
         self
     }
 
-    /// Override the reconnect-policy factory (`REQ_0534`). Each
+    /// Override the reconnect-policy factory (`REQ_0634`). Each
     /// iface's dispatcher calls the factory once at construction so
     /// per-iface backoff state is independent.
     #[must_use]
@@ -174,7 +174,7 @@ impl CanConnectorOptionsBuilder {
         self
     }
 
-    /// Override the tokio worker-thread count (`REQ_0505`). Values
+    /// Override the tokio worker-thread count (`REQ_0605`). Values
     /// below 1 are clamped to 1 at build time.
     #[must_use]
     pub const fn tokio_worker_threads(mut self, n: usize) -> Self {

@@ -176,7 +176,7 @@ async fn test_0503_fd_round_trip() {
 
 /// TEST_0504 — per-iface filter union. Register three inbound channels
 /// with distinct (can_id, mask) and check that the mock recorded a
-/// filter with three entries. REQ_0522, REQ_0623.
+/// filter with three entries. REQ_0622, REQ_0623.
 #[tokio::test]
 async fn test_0504_filter_union() {
     let node = make_node();
@@ -233,7 +233,7 @@ async fn test_0504_filter_union() {
 
 /// TEST_0505 — multi-iface inbound demux. Two ifaces, frames sent on
 /// each must reach only the matching reader on that iface.
-/// REQ_0520, REQ_0521, REQ_0524.
+/// REQ_0620, REQ_0621, REQ_0624.
 #[tokio::test]
 async fn test_0505_multi_iface_demux() {
     let node = make_node();
@@ -320,8 +320,8 @@ async fn test_0505_multi_iface_demux() {
     assert!(reader_b.try_recv().unwrap().is_none());
 }
 
-/// TEST_0506 — bus-off → Down → reopen cycle. Verifies REQ_0533 and
-/// REQ_0534.
+/// TEST_0506 — bus-off → Down → reopen cycle. Verifies REQ_0633 and
+/// REQ_0634.
 #[tokio::test]
 async fn test_0506_bus_off_reconnect() {
     let registry = Arc::new(Mutex::new(ChannelRegistry::with_capacity(0)));
@@ -353,7 +353,7 @@ async fn test_0506_bus_off_reconnect() {
 }
 
 /// TEST_0507 — error-passive → Degraded with the iface name in the
-/// reason. Verifies REQ_0532, REQ_0535.
+/// reason. Verifies REQ_0632, REQ_0635.
 #[tokio::test]
 async fn test_0507_error_passive_degraded() {
     let registry = Arc::new(Mutex::new(ChannelRegistry::with_capacity(0)));
@@ -383,12 +383,12 @@ async fn test_0507_error_passive_degraded() {
         IfaceHealthKind::Degraded
     );
     // Aggregated visible state must be Degraded (one iface Degraded,
-    // one Up) per REQ_0530.
+    // one Up) per REQ_0630.
     assert_eq!(health.current().kind(), ConnectorHealthKind::Degraded);
 }
 
 /// TEST_0513 — error frames are never delivered to a reader.
-/// Regression-guards the explicit anti-requirement REQ_0543 / REQ_0636.
+/// Regression-guards the explicit anti-requirement REQ_0643 / REQ_0636.
 #[tokio::test]
 async fn test_0513_error_frames_not_exposed_to_reader() {
     let node = make_node();
@@ -436,7 +436,7 @@ async fn test_0513_error_frames_not_exposed_to_reader() {
 }
 
 /// TEST_0514 — per-iface routing registry iterates in insertion order.
-/// REQ_0525.
+/// REQ_0625.
 #[test]
 fn test_0514_registry_iter_order_is_insertion_order() {
     let mut registry = ChannelRegistry::with_capacity(8);
