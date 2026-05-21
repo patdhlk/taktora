@@ -1,0 +1,41 @@
+[package]
+name        = "ethercat-real-bus"
+version     = "0.1.0"
+edition     = "2024"
+publish     = false
+description = "taktora integration example: executor + ethercat connector against an EK1100 + EL1008 over a real Linux NIC"
+license     = "Apache-2.0 OR MIT"
+
+[workspace]
+# Empty — opt out of parent workspace discovery so this crate's
+# location (potentially inside `.claude/worktrees/...`) doesn't get
+# pulled into the outer repo's workspace. Established pattern across
+# every example in this directory.
+
+[dependencies]
+taktora-executor                = "0.1"
+taktora-connector-core          = "0.2"
+taktora-connector-host          = "0.1"
+taktora-connector-transport-iox = "0.1"
+taktora-connector-ethercat      = { version = "0.1", features = ["bus-integration"] }
+
+clap       = { version = "4", features = ["derive"] }
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio      = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+
+# >>> taktora-examples-local-deps >>>
+# [patch.crates-io]
+# taktora-executor                = { path = "../../crates/taktora-executor" }
+# taktora-executor-tracing        = { path = "../../crates/taktora-executor-tracing" }
+# taktora-log                     = { path = "../../crates/taktora-log" }
+# taktora-log-dlt                 = { path = "../../crates/taktora-log-dlt" }
+# taktora-bounded-alloc           = { path = "../../crates/taktora-bounded-alloc" }
+# taktora-connector-core          = { path = "../../crates/taktora-connector-core" }
+# taktora-connector-transport-iox = { path = "../../crates/taktora-connector-transport-iox" }
+# taktora-connector-codec         = { path = "../../crates/taktora-connector-codec" }
+# taktora-connector-host          = { path = "../../crates/taktora-connector-host" }
+# taktora-connector-can           = { path = "../../crates/taktora-connector-can" }
+# taktora-connector-ethercat      = { path = "../../crates/taktora-connector-ethercat" }
+# taktora-connector-zenoh         = { path = "../../crates/taktora-connector-zenoh" }
+# <<< taktora-examples-local-deps <<<
