@@ -19,9 +19,10 @@ taktora-connector-host          = "0.1"
 taktora-connector-transport-iox = "0.1"
 taktora-connector-ethercat      = { version = "0.1", features = ["bus-integration"] }
 
-clap  = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+clap       = { version = "4", features = ["derive"] }
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio      = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 
 # >>> taktora-examples-local-deps >>>
 # [patch.crates-io]

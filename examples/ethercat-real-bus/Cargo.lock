@@ -504,6 +504,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "serde",
+ "serde_json",
  "taktora-connector-core",
  "taktora-connector-ethercat",
  "taktora-connector-host",
