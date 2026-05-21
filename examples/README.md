@@ -13,6 +13,7 @@ write, with no workspace-relative paths active by default.
 | [`zenoh-pubsub-mock`](zenoh-pubsub-mock)   | `MockZenohSession`   | build + run | end-to-end pub/sub through the zenoh connector, no router needed |
 | [`zenoh-pubsub-real`](zenoh-pubsub-real)   | `RealZenohSession`   | build only  | same shape, but over the real `zenoh::Session` (two-terminal recipe) |
 | [`ethercat-mock-loop`](ethercat-mock-loop) | `MockBusDriver`      | build + run | 1 kHz control loop over the EtherCAT connector with PDI bit-slice routing |
+| [`ethercat-real-bus`](ethercat-real-bus)   | `EthercrabBusDriver` | build only  | drives a real Beckhoff EK1100 + EL1008 from a Linux host (Pi the canonical target) |
 
 ## Quick start
 
