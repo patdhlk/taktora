@@ -1,16 +1,49 @@
 //! Integration example: executor + ethercat connector against an
 //! EK1100 + EL1008 over a real Linux NIC. See README.md for hardware
 //! setup and run instructions.
+//!
+//! Topology assumption: EK1100 is SubDevice 0 (no PDI; it's a bus
+//! coupler) and the EL1008 is SubDevice 1 with an 8-bit Tx PDO at
+//! bit offset 0. If your topology has additional terminals between
+//! the EK1100 and EL1008, edit `SUBDEV` to the EL1008's actual
+//! auto-incremented address.
 
-use taktora_connector_core::{ConnectorError, PayloadCodec};
+use core::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use clap::Parser;
+use taktora_connector_core::{ChannelDescriptor, ConnectorError, PayloadCodec};
+use taktora_connector_ethercat::{
+    EthercatConnector, EthercatConnectorOptions, EthercatRouting, EthercrabBusDriver, PdoDirection,
+    connector::EthercatState, declare_pdu_storage,
+};
+use taktora_connector_host::Connector;
+use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+
+/// Channel capacity (iceoryx2 service buffer slots).
+const N: usize = 256;
+
+/// EL1008's auto-incremented EtherCAT SubDevice address. With a bare
+/// EK1100 + EL1008 the EL1008 lands at index 1 (the EK1100 is index 0
+/// with no PDI). Adjust if you have additional terminals between
+/// them.
+const SUBDEV: u16 = 1;
+
+/// 8 digital input bits, one PDI byte.
+const ROUTING_BITS: u16 = 8;
+
+/// Bus topology bounds passed to `EthercrabBusDriver`. Generous for
+/// a Pi + EK1100; tune down if memory is tight.
+const MAX_SUBDEVICES: usize = 16;
+const MAX_PDI: usize = 256;
+
+declare_pdu_storage!(EXAMPLE_PDU_STORAGE);
 
 /// One-byte codec used by this example. `JsonCodec` can't be used
 /// here because the EL1008's PDI is raw bits, not JSON text. This
 /// codec round-trips a `u8` to/from a single byte on the wire,
 /// matching the EL1008's 8-bit Tx PDO layout.
-// `RawByteCodec` is exercised by the unit tests and will be plugged
-// into `main()` in Task 3. Suppress dead-code until then.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Default)]
 struct RawByteCodec;
 
@@ -71,8 +104,109 @@ impl PayloadCodec for RawByteCodec {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(
+    name = "ethercat-real-bus",
+    about = "executor + ethercat connector against a real EK1100 + EL1008"
+)]
+struct Cli {
+    /// Network interface the EK1100 is wired to (e.g. `eth0`).
+    #[arg(long, default_value = "eth0")]
+    nic: String,
+
+    /// Number of scan cycles (10 ms each) before exiting. `0` runs
+    /// forever (until Ctrl-C).
+    #[arg(long, default_value_t = 0)]
+    ticks: u32,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("ethercat-real-bus stub — implementation lands in Task 3");
+    let cli = Cli::parse();
+
+    // 1. Options.
+    let opts = EthercatConnectorOptions::builder()
+        .network_interface(&cli.nic)
+        .cycle_time(Duration::from_millis(2))
+        .build();
+
+    // 2. Driver. EthercrabBusDriver wraps `ethercrab::MainDevice`
+    //    behind the `bus-integration` cargo feature. The PDU storage
+    //    is a `static` declared above via `declare_pdu_storage!`.
+    let driver =
+        EthercrabBusDriver::<MAX_SUBDEVICES, MAX_PDI>::new(&EXAMPLE_PDU_STORAGE, opts.clone())?;
+
+    // 3. Connector. RawByteCodec passes raw PDI bytes through unchanged.
+    let state = Arc::new(EthercatState::new(opts.clone()));
+    let mut connector = EthercatConnector::new(state, driver, RawByteCodec)?;
+
+    // 4. Routing — EL1008 inputs at SubDevice 1, bit offset 0, 8 bits.
+    //    PdoDirection::Tx means the SubDevice writes (Tx) and the
+    //    master reads.
+    let routing = EthercatRouting::new(SUBDEV, PdoDirection::Tx, 0, ROUTING_BITS);
+    let desc =
+        ChannelDescriptor::<EthercatRouting, N>::new("ethercat.el1008.inputs", routing)?;
+    let reader = connector.create_reader::<u8, N>(&desc)?;
+
+    // 5. Executor.
+    let mut exec = Executor::builder().worker_threads(1).build()?;
+    connector.register_with(&mut exec)?;
+
+    // 6. Health subscription — log Connecting → Up so the user sees
+    //    bring-up complete. Then poll for transitions.
+    let health_sub = connector.subscribe_health();
+    let mut last_state = connector.health().kind();
+    eprintln!("ethercat connector health at startup: {last_state:?}");
+    exec.add(item_with_triggers(
+        |d| -> Result<(), ExecutorError> {
+            d.interval(Duration::from_millis(250));
+            Ok(())
+        },
+        move |_ctx| -> ExecuteResult {
+            while let Ok(Some(event)) = health_sub.try_next() {
+                let new_state = event.to.kind();
+                if new_state != last_state {
+                    eprintln!("ethercat connector health: {last_state:?} -> {new_state:?}");
+                    last_state = new_state;
+                }
+            }
+            Ok(ControlFlow::Continue)
+        },
+    ))?;
+
+    // 7. Scan-and-print item — 10 ms interval; drain the reader and
+    //    print on every change. After `--ticks N` cycles, stop the
+    //    executor.
+    let started_at = Instant::now();
+    let last_value: Arc<Mutex<Option<u8>>> = Arc::new(Mutex::new(None));
+    let last_value_for_item = Arc::clone(&last_value);
+    let total = cli.ticks;
+    let mut cycle = 0_u32;
+
+    exec.add(item_with_triggers(
+        |d| -> Result<(), ExecutorError> {
+            d.interval(Duration::from_millis(10));
+            Ok(())
+        },
+        move |ctx| -> ExecuteResult {
+            cycle = cycle.saturating_add(1);
+            while let Ok(Some(env)) = reader.try_recv() {
+                let v: u8 = env.value;
+                let mut last = last_value_for_item.lock().expect("poisoned");
+                if last.as_ref().copied() != Some(v) {
+                    let elapsed_ms = started_at.elapsed().as_millis();
+                    println!("t=+{elapsed_ms:>6}ms  bits=0b{v:08b}  decimal={v}");
+                    *last = Some(v);
+                }
+            }
+            if total > 0 && cycle >= total {
+                ctx.stop_executor();
+            }
+            Ok(ControlFlow::Continue)
+        },
+    ))?;
+
+    // 8. Run. Exits when the scan item hits --ticks or on Ctrl-C.
+    exec.run()?;
     Ok(())
 }
 
