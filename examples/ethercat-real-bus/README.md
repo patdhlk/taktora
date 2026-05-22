@@ -76,20 +76,49 @@ Or cap the run length for a quick smoke test (each tick is the
 
 ## What you should see
 
+Bring-up, then (if any inputs are wired) one change-event per
+transition on the EL1008's 24 V inputs. The excerpt below is from a
+Pi 5 walking a 24 V probe across the eight input channels in order —
+captured on the documented topology plus an extra EL2004 between the
+EL1008 and the end cap:
+
 ```
+0 [W] "Config::global_config()"
+ | No config file was loaded, a config with default values will be used.
 ethercat connector health at startup: Connecting
+t=+   531ms  bits=0b00000000  decimal=0
 ethercat connector health: Connecting -> Up
-t=+    12ms  bits=0b00000000  decimal=0
-t=+  1842ms  bits=0b00000001  decimal=1
-t=+  2103ms  bits=0b00000011  decimal=3
-...
+ethercat connector health: Up -> Degraded
+t=+ 23510ms  bits=0b00000001  decimal=1
+t=+ 23650ms  bits=0b00000000  decimal=0
+t=+ 25360ms  bits=0b00000010  decimal=2
+t=+ 25780ms  bits=0b00000000  decimal=0
+t=+ 27170ms  bits=0b00000100  decimal=4
+t=+ 27460ms  bits=0b00000000  decimal=0
+t=+ 28580ms  bits=0b00001000  decimal=8
+t=+ 28840ms  bits=0b00000000  decimal=0
+t=+ 30190ms  bits=0b00010000  decimal=16
+t=+ 30410ms  bits=0b00000000  decimal=0
+t=+ 31370ms  bits=0b00100000  decimal=32
+t=+ 31610ms  bits=0b00000000  decimal=0
+t=+ 33730ms  bits=0b01000000  decimal=64
+t=+ 33960ms  bits=0b00000000  decimal=0
+t=+ 34730ms  bits=0b10000000  decimal=128
+t=+ 34881ms  bits=0b00000000  decimal=0
 ```
 
-Bring-up usually completes within 1–2 seconds on a Pi 4. If you see
-only `Connecting -> Up` and then no further output, that's expected
-with no inputs wired — the EL1008 just reports all zeros. The bus is
-alive; press a button on any 24V input channel to watch the byte
-change.
+Bring-up usually completes within 1–2 seconds on a Pi 4 or 5. With
+no inputs wired the EL1008 just reports all zeros — bring-up still
+runs to completion, the initial `bits=0b00000000` line prints, and
+nothing further appears until you touch 24 V to one of the input
+channels.
+
+The `Up -> Degraded` line above is rig-specific: adding an output
+terminal such as the EL2004 without writing to it makes the working
+counter come back lower than ethercrab expects, which trips the
+connector's asymmetric-PDO degradation flag. Reads from the EL1008
+keep flowing. With the bare EK1100 + EL1008 topology this README
+documents you stay at `Up` and never see the `Degraded` transition.
 
 ## Troubleshooting
 
