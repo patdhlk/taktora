@@ -99,10 +99,16 @@ fn registry_invariants() {
         }
         ALLOC.set_tracking(false);
 
+        // O(1) budget absorbs stray runtime bookkeeping (libtest
+        // thread, panic-hook / TLS lazy init) that the process-wide
+        // CountingAllocator picks up; a real per-iter alloc would be
+        // ≫ budget. See issue #10.
+        const STRAY_ALLOC_BUDGET: usize = 16;
         let allocs = ALLOC.alloc_count();
-        assert_eq!(
-            allocs, 0,
-            "iter() allocated {allocs} times across 1000 cycles × 16 channels — REQ_0328 prohibits per-cycle alloc"
+        assert!(
+            allocs <= STRAY_ALLOC_BUDGET,
+            "iter() allocated {allocs} times across 1000 cycles × 16 channels — \
+             budget is {STRAY_ALLOC_BUDGET}; REQ_0328 prohibits per-cycle alloc"
         );
         // Anti-elision check: total should be 16_000 (16 channels ×
         // 16 bit_length × 1000 cycles) — silences "loop never ran"
