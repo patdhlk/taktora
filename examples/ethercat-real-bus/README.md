@@ -21,10 +21,14 @@ does NOT run it (no NIC, no EK1100 in CI).
   NIC to the EK1100's **IN (X1)** port. The OUT (X2) port is for
   daisy-chaining additional couplers; leave it empty.
 
-> **Topology assumption.** The example pins the EL1008 to SubDevice
-> address `1` (the EK1100 is index `0` with no PDI). If you have
-> additional terminals between the EK1100 and EL1008, edit the
-> `SUBDEV` constant in `src/main.rs`.
+> **Topology assumption.** The example pins the EL1008 to the EtherCAT
+> configured station address `0x1001`. `ethercrab` auto-assigns these
+> starting at `0x1000` in bus-scan order, so EK1100 = `0x1000`,
+> EL1008 = `0x1001`, EL2004 = `0x1002`, etc. The driver matches on
+> the configured station address (not a 0-based topology index), so
+> this needs to be the real EtherCAT address. If you have additional
+> terminals between the EK1100 and EL1008, edit the `SUBDEV` constant
+> in `src/main.rs` accordingly.
 
 ## Host setup
 
