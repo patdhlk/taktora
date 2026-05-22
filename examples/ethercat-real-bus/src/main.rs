@@ -2,11 +2,12 @@
 //! EK1100 + EL1008 over a real Linux NIC. See README.md for hardware
 //! setup and run instructions.
 //!
-//! Topology assumption: EK1100 is SubDevice 0 (no PDI; it's a bus
-//! coupler) and the EL1008 is SubDevice 1 with an 8-bit Tx PDO at
-//! bit offset 0. If your topology has additional terminals between
-//! the EK1100 and EL1008, edit `SUBDEV` to the EL1008's actual
-//! auto-incremented address.
+//! Topology assumption: `ethercrab` assigns configured station
+//! addresses starting at `0x1000` — EK1100 = `0x1000` (no PDI; it's
+//! a bus coupler), EL1008 = `0x1001` with an 8-bit Tx PDO at bit
+//! offset 0. If your topology has additional terminals between the
+//! EK1100 and EL1008, edit `SUBDEV` to the EL1008's actual
+//! configured station address.
 
 use core::time::Duration;
 use std::sync::{Arc, Mutex};
@@ -24,11 +25,14 @@ use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item
 /// Channel capacity (iceoryx2 service buffer slots).
 const N: usize = 256;
 
-/// EL1008's auto-incremented EtherCAT SubDevice address. With a bare
-/// EK1100 + EL1008 the EL1008 lands at index 1 (the EK1100 is index 0
-/// with no PDI). Adjust if you have additional terminals between
-/// them.
-const SUBDEV: u16 = 1;
+/// EL1008's EtherCAT configured station address. `ethercrab`'s
+/// `init_single_group` assigns auto-incrementing addresses starting
+/// at `0x1000` (EK1100 = 0x1000, EL1008 = 0x1001, EL2004 = 0x1002,
+/// etc.). The driver matches on `sd.configured_address()`, not the
+/// topology index, so this needs to be the actual EtherCAT station
+/// address — not `1`. Adjust if you have additional terminals
+/// between the EK1100 and EL1008.
+const SUBDEV: u16 = 0x1001;
 
 /// 8 digital input bits, one PDI byte.
 const ROUTING_BITS: u16 = 8;
@@ -139,9 +143,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(EthercatState::new(opts.clone()));
     let mut connector = EthercatConnector::new(state, driver, RawByteCodec)?;
 
-    // 4. Routing — EL1008 inputs at SubDevice 1, bit offset 0, 8 bits.
-    //    PdoDirection::Tx means the SubDevice writes (Tx) and the
-    //    master reads.
+    // 4. Routing — EL1008 inputs at configured station address
+    //    `0x1001`, bit offset 0, 8 bits. PdoDirection::Tx means the
+    //    SubDevice writes (Tx) and the master reads.
     let routing = EthercatRouting::new(SUBDEV, PdoDirection::Tx, 0, ROUTING_BITS);
     let desc =
         ChannelDescriptor::<EthercatRouting, N>::new("ethercat.el1008.inputs", routing)?;
