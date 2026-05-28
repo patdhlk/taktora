@@ -18,6 +18,14 @@ pub struct SubDeviceMap {
     pub rx_pdos: &'static [PdoEntry],
     /// Mapped TxPDO entries (SubDevice → MainDevice flow).
     pub tx_pdos: &'static [PdoEntry],
+    /// Expected working-counter contribution of this SubDevice on
+    /// every healthy cycle. `REQ_0329`.
+    ///
+    /// EtherCAT's LRW datagram contributes +1 per SubDevice it
+    /// writes to and +2 per SubDevice it reads from. The canonical
+    /// values are 0 (no PDOs / coupler), 1 (RxPDOs only / outputs),
+    /// 2 (TxPDOs only / inputs), 3 (both directions).
+    pub expected_wkc: u16,
 }
 
 /// One mapped object within a PDO. `index` is the SDO index of the
