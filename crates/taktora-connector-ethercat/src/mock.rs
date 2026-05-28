@@ -48,6 +48,13 @@ struct MockState {
     /// outputs buffer over its inputs buffer (synthetic loopback).
     /// Used by `TEST_0222`.
     loopback: bool,
+    /// Programmed sequence of `recover` outcomes, drained FIFO. When
+    /// empty, every subsequent `recover` returns
+    /// `Ok(bring_up_response)` (mirroring the existing
+    /// `default_cycle_wkc` fallback).
+    recovery_sequence: VecDeque<Result<BringUp, String>>,
+    /// Number of `recover` calls completed.
+    recover_calls: u32,
 }
 
 impl MockBusDriver {
@@ -142,6 +149,26 @@ impl MockBusDriver {
     {
         self.lock().wkc_sequence = seq.into_iter().collect();
         self
+    }
+
+    /// Preload a sequence of `recover` outcomes (FIFO). Each `Err`
+    /// element is surfaced as `ConnectorError::Down { reason }`; each
+    /// `Ok(BringUp)` is returned verbatim. When the sequence is
+    /// exhausted, subsequent calls fall back to
+    /// `Ok(bring_up_response)`.
+    #[must_use]
+    pub fn with_recovery_sequence<I, S>(self, seq: I) -> Self
+    where
+        I: IntoIterator<Item = Result<BringUp, S>>,
+        S: Into<String>,
+    {
+        self.lock().recovery_sequence = seq.into_iter().map(|r| r.map_err(Into::into)).collect();
+        self
+    }
+
+    /// Number of `recover` calls completed since construction.
+    pub fn recover_calls(&self) -> u32 {
+        self.lock().recover_calls
     }
 
     /// Enable synthetic loopback: every subsequent `cycle` call
@@ -246,6 +273,16 @@ impl BusDriver for MockBusDriver {
             drop(inputs);
         }
         Ok(wkc)
+    }
+
+    async fn recover(&mut self) -> Result<BringUp, ConnectorError> {
+        let mut state = self.lock();
+        state.recover_calls += 1;
+        match state.recovery_sequence.pop_front() {
+            Some(Ok(b)) => Ok(b),
+            Some(Err(reason)) => Err(ConnectorError::Down { reason }),
+            None => Ok(state.bring_up_response),
+        }
     }
 
     fn with_subdevice_outputs_mut<R>(

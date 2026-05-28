@@ -1,6 +1,8 @@
 //! Tests for the bus-driver finishing slice — asymmetric WKC,
 //! BusDriver::recover, CycleKind DC branch, recovery state machine.
 
+use taktora_connector_ethercat::MockBusDriver;
+use taktora_connector_ethercat::driver::{BringUp, BusDriver};
 use taktora_connector_ethercat::{EthercatConnectorOptions, PdoEntry, SubDeviceMap};
 
 const PDO_ENTRY_TX: PdoEntry = PdoEntry {
@@ -44,4 +46,28 @@ fn expected_wkc_sums_per_subdevicemap() {
 
     let sum = taktora_connector_ethercat::expected_wkc_from_map(&opts);
     assert_eq!(sum, 3);
+}
+
+/// TEST_0225 (precursor) — MockBusDriver::recover returns programmed
+/// outcomes in order.
+#[tokio::test]
+async fn mock_recover_returns_programmed_sequence() {
+    let mut mock = MockBusDriver::new().with_recovery_sequence([
+        Err("transient fault"),
+        Ok(BringUp {
+            expected_wkc: 7,
+            subdevice_count: 3,
+        }),
+    ]);
+
+    // First recover attempt: programmed Err.
+    let r1 = mock.recover().await;
+    assert!(r1.is_err(), "first recover should fail per program");
+
+    // Second: programmed Ok.
+    let r2 = mock.recover().await.expect("second recover succeeds");
+    assert_eq!(r2.expected_wkc, 7);
+    assert_eq!(r2.subdevice_count, 3);
+
+    assert_eq!(mock.recover_calls(), 2);
 }

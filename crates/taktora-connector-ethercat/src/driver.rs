@@ -63,6 +63,26 @@ pub trait BusDriver: Send + 'static {
         &mut self,
     ) -> impl core::future::Future<Output = Result<u16, ConnectorError>> + Send + '_;
 
+    /// Return the bus to OP without consuming a new `PduStorage`
+    /// split. Called by the cycle runner when [`Self::cycle`] returns
+    /// `Err` and the configured `ReconnectPolicy` is non-exhausted.
+    ///
+    /// Contract:
+    /// * Drops in-flight operational state (e.g. the
+    ///   `SubDeviceGroup`); preserves `MainDevice` + the spawned
+    ///   `tx_rx_task`.
+    /// * Idempotent across operational states. Calling from
+    ///   `NotInitialised` shall return
+    ///   [`ConnectorError::Configuration`].
+    /// * Returns a freshly-computed [`BringUp`] reflecting the
+    ///   topology observed on this re-discovery (it may differ from
+    ///   the original bring-up).
+    ///
+    /// `REQ_0331`.
+    fn recover(
+        &mut self,
+    ) -> impl core::future::Future<Output = Result<BringUp, ConnectorError>> + Send + '_;
+
     /// Visit one SubDevice's outputs slice with mutable access.
     /// Used by the gateway dispatcher (C7b) to write outbound
     /// payloads before [`Self::cycle`] (`REQ_0326`).
