@@ -71,3 +71,25 @@ async fn mock_recover_returns_programmed_sequence() {
 
     assert_eq!(mock.recover_calls(), 2);
 }
+
+/// TEST_0225 (precursor) — options expose a reconnect policy factory
+/// with a sensible default.
+#[test]
+fn options_default_reconnect_policy_factory_yields_fresh_instances() {
+    let opts = EthercatConnectorOptions::builder()
+        .network_interface("mock0")
+        .build();
+    // Calling new_reconnect_policy should yield a fresh boxed-dyn
+    // instance on every call.
+    let p1 = opts.new_reconnect_policy();
+    let p2 = opts.new_reconnect_policy();
+    // The two box pointers must differ — they are independent
+    // allocations.
+    assert!(
+        !std::ptr::eq(
+            &*p1 as *const dyn taktora_connector_core::ReconnectPolicy as *const (),
+            &*p2 as *const dyn taktora_connector_core::ReconnectPolicy as *const (),
+        ),
+        "factory must yield a fresh boxed-dyn per call"
+    );
+}

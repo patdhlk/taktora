@@ -5,7 +5,15 @@
 //! lives in `.rodata` and the gateway needs no per-instance heap for
 //! it (`REQ_0314`, `REQ_0315`).
 
+use std::sync::Arc;
 use std::time::Duration;
+
+use taktora_connector_core::{ExponentialBackoff, ReconnectPolicy};
+
+/// Factory closure producing a fresh [`ReconnectPolicy`] instance per
+/// recovery episode. Mirrors the shape used by
+/// `taktora_connector_can::CanConnectorOptions`. `REQ_0332`.
+pub type ReconnectPolicyFactory = Arc<dyn Fn() -> Box<dyn ReconnectPolicy> + Send + Sync + 'static>;
 
 /// One SubDevice's PDO mapping. Application code declares an array of
 /// these as a `static` and passes the slice to
@@ -43,7 +51,7 @@ pub struct PdoEntry {
 
 /// Built `EthercatConnectorOptions`. Constructed via
 /// [`EthercatConnectorOptionsBuilder`]; never mutated after build.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct EthercatConnectorOptions {
     cycle_time: Duration,
     distributed_clocks: bool,
@@ -53,6 +61,26 @@ pub struct EthercatConnectorOptions {
     network_interface: Option<String>,
     pdo_map: &'static [SubDeviceMap],
     tokio_worker_threads: usize,
+    reconnect_policy_factory: ReconnectPolicyFactory,
+}
+
+impl core::fmt::Debug for EthercatConnectorOptions {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("EthercatConnectorOptions")
+            .field("cycle_time", &self.cycle_time)
+            .field("distributed_clocks", &self.distributed_clocks)
+            .field("outbound_capacity", &self.outbound_capacity)
+            .field("inbound_capacity", &self.inbound_capacity)
+            .field("inbound_drop_threshold", &self.inbound_drop_threshold)
+            .field("network_interface", &self.network_interface)
+            .field("pdo_map", &self.pdo_map)
+            .field("tokio_worker_threads", &self.tokio_worker_threads)
+            .field(
+                "reconnect_policy_factory",
+                &"<Fn() -> Box<dyn ReconnectPolicy>>",
+            )
+            .finish()
+    }
 }
 
 impl EthercatConnectorOptions {
@@ -115,10 +143,24 @@ impl EthercatConnectorOptions {
     pub const fn tokio_worker_threads(&self) -> usize {
         self.tokio_worker_threads
     }
+
+    /// Produce a fresh [`ReconnectPolicy`] for one recovery episode.
+    /// `REQ_0332`.
+    #[must_use]
+    pub fn new_reconnect_policy(&self) -> Box<dyn ReconnectPolicy> {
+        (self.reconnect_policy_factory)()
+    }
+
+    /// The configured factory itself. Useful when the gateway needs
+    /// to share the factory with auxiliary tasks.
+    #[must_use]
+    pub fn reconnect_policy_factory(&self) -> ReconnectPolicyFactory {
+        Arc::clone(&self.reconnect_policy_factory)
+    }
 }
 
 /// Builder for [`EthercatConnectorOptions`].
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct EthercatConnectorOptionsBuilder {
     cycle_time: Duration,
     distributed_clocks: bool,
@@ -128,6 +170,29 @@ pub struct EthercatConnectorOptionsBuilder {
     network_interface: Option<String>,
     pdo_map: &'static [SubDeviceMap],
     tokio_worker_threads: usize,
+    reconnect_policy_factory: Option<ReconnectPolicyFactory>,
+}
+
+impl core::fmt::Debug for EthercatConnectorOptionsBuilder {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("EthercatConnectorOptionsBuilder")
+            .field("cycle_time", &self.cycle_time)
+            .field("distributed_clocks", &self.distributed_clocks)
+            .field("outbound_capacity", &self.outbound_capacity)
+            .field("inbound_capacity", &self.inbound_capacity)
+            .field("inbound_drop_threshold", &self.inbound_drop_threshold)
+            .field("network_interface", &self.network_interface)
+            .field("pdo_map", &self.pdo_map)
+            .field("tokio_worker_threads", &self.tokio_worker_threads)
+            .field(
+                "reconnect_policy_factory",
+                &self
+                    .reconnect_policy_factory
+                    .as_ref()
+                    .map(|_| "<Fn() -> Box<dyn ReconnectPolicy>>"),
+            )
+            .finish()
+    }
 }
 
 const EMPTY_PDO_MAP: &[SubDeviceMap] = &[];
@@ -154,6 +219,7 @@ impl EthercatConnectorOptionsBuilder {
             network_interface: None,
             pdo_map: EMPTY_PDO_MAP,
             tokio_worker_threads: 1,
+            reconnect_policy_factory: None,
         }
     }
 
@@ -217,11 +283,23 @@ impl EthercatConnectorOptionsBuilder {
         self
     }
 
+    /// Override the default `ReconnectPolicy` factory. The closure is
+    /// called once per recovery episode; the returned policy governs
+    /// backoff and attempt budget for that episode.
+    #[must_use]
+    pub fn reconnect_policy_factory(mut self, factory: ReconnectPolicyFactory) -> Self {
+        self.reconnect_policy_factory = Some(factory);
+        self
+    }
+
     /// Finalise. Applies the minimum-cycle-time clamp (1 ms) and
     /// capacity clamps (at least 1).
     #[must_use]
     pub fn build(self) -> EthercatConnectorOptions {
         let cycle_time = self.cycle_time.max(Duration::from_millis(1));
+        let reconnect_policy_factory: ReconnectPolicyFactory = self
+            .reconnect_policy_factory
+            .unwrap_or_else(|| Arc::new(|| Box::new(ExponentialBackoff::default())));
         EthercatConnectorOptions {
             cycle_time,
             distributed_clocks: self.distributed_clocks,
@@ -231,6 +309,7 @@ impl EthercatConnectorOptionsBuilder {
             network_interface: self.network_interface,
             pdo_map: self.pdo_map,
             tokio_worker_threads: self.tokio_worker_threads.max(1),
+            reconnect_policy_factory,
         }
     }
 }
