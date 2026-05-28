@@ -76,7 +76,8 @@ pub use gateway::EthercatGateway;
 pub use health::EthercatHealthMonitor;
 pub use mock::{CycleKind, MockBusDriver};
 pub use options::{
-    EthercatConnectorOptions, EthercatConnectorOptionsBuilder, PdoEntry, SubDeviceMap,
+    EthercatConnectorOptions, EthercatConnectorOptionsBuilder, PdoEntry, ReconnectPolicyFactory,
+    SubDeviceMap,
 };
 pub use registry::{
     ChannelBinding, ChannelHandle, ChannelRegistry, InboundPublish, OutboundDrain,
