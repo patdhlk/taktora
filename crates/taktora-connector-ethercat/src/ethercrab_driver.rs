@@ -22,15 +22,6 @@
 //! `tx_rx_task` join handle for the rest of the driver's lifetime.
 //! Dropping the driver aborts the join handle so the raw socket is
 //! released.
-//!
-//! ## Working-counter expectation
-//!
-//! `group.tx_rx` issues an LRW datagram per cycle. A healthy LRW
-//! against `N` SubDevices contributes `3 × N` to the working counter
-//! (write `+1`, read `+2`). `expected_wkc` is therefore computed as
-//! `3 × subdevice_count` after discovery; asymmetric PDO mappings
-//! (read-only or write-only SubDevices) will need a per-deployment
-//! override — tracked as a follow-on.
 
 use std::time::Duration;
 
@@ -197,13 +188,10 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
         let group = group.into_op(&maindevice).await.map_err(map_ec_error)?;
 
         let subdevice_count = group.len();
-        // Expected WKC per cycle: LRW datagram contributes +3 per
-        // SubDevice (write +1, read +2). Asymmetric mappings need a
-        // per-deployment override — tracked as a follow-on. `u16::MAX`
-        // saturates if a topology somehow exceeds 21845 SubDevices.
-        let expected_wkc = u16::try_from(subdevice_count)
-            .unwrap_or(u16::MAX)
-            .saturating_mul(3);
+        // Asymmetric WKC per `REQ_0329`: each SubDeviceMap carries its
+        // own expected_wkc; we sum over the map. SubDevices on the bus
+        // but absent from `pdo_map` contribute 0.
+        let expected_wkc = crate::wkc::expected_wkc_from_map(&self.options);
 
         self.state = State::Operational(Box::new(OperationalState {
             maindevice,
