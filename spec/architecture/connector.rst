@@ -1219,6 +1219,8 @@ behaviour and the building blocks that implement it.
         Connecting --> Up: protocol stack reports connected
         Up --> Degraded: transient error (e.g. PUBACK timeout)
         Degraded --> Up: recovery
+        Degraded --> Connecting: recovery episode begins
+        Connecting --> Degraded: recover attempt failed
         Up --> Down: stack-level disconnect
         Degraded --> Down: error threshold exceeded
         Down --> Connecting: ReconnectPolicy backoff elapses

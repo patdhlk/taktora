@@ -224,3 +224,128 @@ async fn health_events_match_recovery_table() {
     use taktora_connector_core::ConnectorHealthKind::{Connecting, Degraded, Up};
     assert_eq!(kinds, vec![Up, Degraded, Connecting, Up]);
 }
+
+/// TEST_0226 (extended) — multi-attempt recovery within a single
+/// episode emits ``Degraded("recover failed: ...")`` between each
+/// failed attempt. Exercises the ``Connecting → Degraded`` edge in
+/// the ``ARCH_0012`` matrix.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn multi_attempt_recovery_emits_degraded_between_attempts() {
+    let opts = EthercatConnectorOptions::builder()
+        .network_interface("mock0")
+        .cycle_time(Duration::from_millis(1))
+        .reconnect_policy_factory(TestArc::new(|| {
+            Box::new(
+                ExponentialBackoffBuilder::new()
+                    .max_attempts(3)
+                    .initial(Duration::from_millis(1))
+                    .max(Duration::from_millis(2))
+                    .jitter(0.0)
+                    .build(),
+            )
+        }))
+        .build();
+
+    let mock = MockBusDriver::new()
+        .with_bring_up(BringUp {
+            expected_wkc: 3,
+            subdevice_count: 1,
+        })
+        .with_wkc_sequence([3])
+        .with_cycle_err_after(2, "synthetic fault")
+        .with_recovery_sequence::<Vec<Result<BringUp, &str>>, &str>(vec![
+            Err("first recover failed"),
+            Ok(BringUp {
+                expected_wkc: 3,
+                subdevice_count: 1,
+            }),
+        ])
+        .with_default_cycle_wkc(3);
+
+    let health = TestArc::new(EthercatHealthMonitor::new());
+    let sub = health.subscribe();
+    let mut runner = CycleRunner::new(mock, &opts, TestArc::clone(&health))
+        .await
+        .expect("bring_up");
+
+    let mut now = std::time::Instant::now();
+    for _ in 0..6 {
+        let _ = runner.tick(now).await;
+        now += Duration::from_millis(2);
+    }
+
+    let mut kinds = vec![];
+    while let Ok(ev) = sub.try_recv() {
+        kinds.push(ev.to.kind());
+    }
+
+    use taktora_connector_core::ConnectorHealthKind::{Connecting, Degraded, Up};
+    // Sequence: Up (initial bring-up) -> Degraded (cycle failed) ->
+    //           Connecting (recovery attempt 1) ->
+    //           Degraded (recover failed) ->
+    //           Connecting (recovery attempt 2) ->
+    //           Up (recover succeeded).
+    assert_eq!(
+        kinds,
+        vec![Up, Degraded, Connecting, Degraded, Connecting, Up]
+    );
+}
+
+/// TEST_0226 (extended) — when the reconnect policy is exhausted the
+/// runner emits a terminal ``Down`` and ``tick`` returns
+/// ``ConnectorError::Down``.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn policy_exhaustion_yields_terminal_down() {
+    let opts = EthercatConnectorOptions::builder()
+        .network_interface("mock0")
+        .cycle_time(Duration::from_millis(1))
+        .reconnect_policy_factory(TestArc::new(|| {
+            Box::new(
+                ExponentialBackoffBuilder::new()
+                    .max_attempts(1)
+                    .initial(Duration::from_millis(1))
+                    .max(Duration::from_millis(2))
+                    .jitter(0.0)
+                    .build(),
+            )
+        }))
+        .build();
+
+    let mock = MockBusDriver::new()
+        .with_bring_up(BringUp {
+            expected_wkc: 3,
+            subdevice_count: 1,
+        })
+        .with_wkc_sequence([3])
+        .with_cycle_err_after(2, "synthetic fault")
+        .with_recovery_sequence::<Vec<Result<BringUp, &str>>, &str>(vec![Err("persistent fault")]);
+
+    let health = TestArc::new(EthercatHealthMonitor::new());
+    let sub = health.subscribe();
+    let mut runner = CycleRunner::new(mock, &opts, TestArc::clone(&health))
+        .await
+        .expect("bring_up");
+
+    let mut now = std::time::Instant::now();
+    let mut last_tick: Result<Option<_>, taktora_connector_core::ConnectorError> = Ok(None);
+    for _ in 0..6 {
+        last_tick = runner.tick(now).await;
+        if last_tick.is_err() {
+            break;
+        }
+        now += Duration::from_millis(2);
+    }
+
+    let err = last_tick.expect_err("runner should exit with Down on policy exhaustion");
+    assert!(matches!(
+        err,
+        taktora_connector_core::ConnectorError::Down { .. }
+    ));
+
+    let mut kinds = vec![];
+    while let Ok(ev) = sub.try_recv() {
+        kinds.push(ev.to.kind());
+    }
+    use taktora_connector_core::ConnectorHealthKind::Down;
+    assert_eq!(kinds.last().copied(), Some(Down));
+}
