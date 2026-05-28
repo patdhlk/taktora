@@ -205,6 +205,53 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
         })
     }
 
+    async fn recover(&mut self) -> Result<BringUp, ConnectorError> {
+        let State::Operational(op_box) = std::mem::replace(&mut self.state, State::NotInitialised)
+        else {
+            return Err(ConnectorError::Configuration(
+                "EthercrabBusDriver::recover called before bring_up".into(),
+            ));
+        };
+
+        // Preserve MainDevice + tx_rx_task across the call. PduStorage
+        // is NOT re-split — its single split happened in `bring_up`
+        // and the resulting PduLoop is owned by `maindevice` for the
+        // driver's lifetime.
+        let OperationalState {
+            maindevice,
+            tx_rx_task,
+            group: _dropped,
+        } = *op_box;
+
+        // Walk PRE-OP again. SubDevice topology may have shifted (slave
+        // dropped and came back with a different configured address);
+        // we accept whatever ethercrab reports.
+        let group = maindevice
+            .init_single_group::<MAX_SUBDEVICES, MAX_PDI>(ethercat_now)
+            .await
+            .map_err(map_ec_error)?;
+
+        for map in self.options.pdo_map() {
+            apply_pdo_mapping_for_subdevice(&maindevice, &group, *map).await?;
+        }
+
+        let group = group.into_op(&maindevice).await.map_err(map_ec_error)?;
+
+        let subdevice_count = group.len();
+        let expected_wkc = crate::wkc::expected_wkc_from_map(&self.options);
+
+        self.state = State::Operational(Box::new(OperationalState {
+            maindevice,
+            group,
+            tx_rx_task,
+        }));
+
+        Ok(BringUp {
+            expected_wkc,
+            subdevice_count,
+        })
+    }
+
     async fn cycle(&mut self) -> Result<u16, ConnectorError> {
         let State::Operational(op) = &self.state else {
             return Err(ConnectorError::Down {

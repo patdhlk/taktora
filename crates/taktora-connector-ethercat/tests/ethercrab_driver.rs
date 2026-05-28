@@ -25,6 +25,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use taktora_connector_core::ConnectorHealthKind;
+use taktora_connector_ethercat::bus::EthercatPduStorage;
+use taktora_connector_ethercat::driver::BusDriver;
 use taktora_connector_ethercat::{
     CycleRunner, EthercatConnectorOptions, EthercatHealthMonitor, EthercrabBusDriver,
     declare_pdu_storage,
@@ -95,4 +97,25 @@ async fn bring_up_and_cycle_against_real_bus() {
         );
         now += options.cycle_time();
     }
+}
+
+#[ignore = "requires CAP_NET_RAW + EtherCAT NIC; set ETHERCAT_TEST_NIC"]
+#[tokio::test]
+async fn recover_returns_to_op_without_storage_resplit() {
+    let interface = std::env::var("ETHERCAT_TEST_NIC")
+        .expect("ETHERCAT_TEST_NIC environment variable required");
+
+    static STORAGE: EthercatPduStorage = EthercatPduStorage::new();
+
+    let opts = EthercatConnectorOptions::builder()
+        .network_interface(&interface)
+        .build();
+    let mut driver: EthercrabBusDriver<16, 64> =
+        EthercrabBusDriver::new(&STORAGE, opts).expect("construct driver");
+
+    let bring_up = driver.bring_up().await.expect("bring_up");
+    assert!(bring_up.subdevice_count > 0);
+
+    let recover = driver.recover().await.expect("recover");
+    assert_eq!(recover.subdevice_count, bring_up.subdevice_count);
 }
