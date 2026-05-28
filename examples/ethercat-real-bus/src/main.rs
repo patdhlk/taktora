@@ -292,20 +292,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             // Mode deadline.
-            if let Some(d) = deadline {
-                if Instant::now() >= d {
-                    match mode_for_pump {
-                        Mode::Endurance => eprintln!(
-                            "endurance summary: terminal_down={endurance_terminal_down}"
-                        ),
-                        Mode::Drill => eprintln!(
-                            "drill summary: saw_degraded={drill_seen_degraded} \
-                             saw_recover_up={drill_seen_recover_up}"
-                        ),
-                        Mode::Normal => {}
+            if let Some(d) = deadline
+                && Instant::now() >= d
+            {
+                match mode_for_pump {
+                    Mode::Endurance => {
+                        eprintln!("endurance summary: terminal_down={endurance_terminal_down}");
                     }
-                    ctx.stop_executor();
+                    Mode::Drill => eprintln!(
+                        "drill summary: saw_degraded={drill_seen_degraded} \
+                         saw_recover_up={drill_seen_recover_up}"
+                    ),
+                    Mode::Normal => {}
                 }
+                ctx.stop_executor();
             }
             Ok(ControlFlow::Continue)
         },
