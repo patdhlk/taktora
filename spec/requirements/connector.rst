@@ -590,8 +590,9 @@ EtherCAT reference connector
 
 .. req:: Cycle time configurable with millisecond resolution
    :id: REQ_0316
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0206
 
    The gateway shall accept a configurable cycle duration via
    ``EthercatConnectorOptions::cycle_time`` with a default of 2 ms and a
@@ -599,8 +600,9 @@ EtherCAT reference connector
 
 .. req:: Missed cycle ticks are skipped not queued
    :id: REQ_0317
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0207
 
    When the gateway misses one or more cycle ticks, it shall skip the
    missed ticks rather than queue them for catch-up execution.
@@ -616,8 +618,9 @@ EtherCAT reference connector
 
 .. req:: Working-counter-based health policy
    :id: REQ_0319
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0209
 
    The gateway shall report ``ConnectorHealth::Up`` only when the bus is in
    OP and the working counter on the latest cycle matches the expected
@@ -662,8 +665,9 @@ EtherCAT reference connector
 
 .. req:: Inbound bridge saturation drops PDUs and signals Degraded
    :id: REQ_0324
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: BB_0034, IMPL_0050, TEST_0214
 
    When the inbound bridge channel is full, the gateway shall
    (1) increment the per-channel inbound-drop counter exposed via
@@ -688,8 +692,9 @@ EtherCAT reference connector
 
 .. req:: Outbound payload written to PDI bit slice per routing
    :id: REQ_0326
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0216, TEST_0217, TEST_0218, TEST_0220, TEST_0222
 
    When a plugin publishes a value through ``ChannelWriter::send``, the
    gateway shall, before the next cycle's ``tx_rx`` call, write the
@@ -703,8 +708,9 @@ EtherCAT reference connector
 
 .. req:: Inbound payload read from PDI bit slice per routing
    :id: REQ_0327
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0216, TEST_0217, TEST_0221, TEST_0222
 
    After each cycle's ``tx_rx`` call returns successfully, the gateway
    shall, for every registered inbound channel, extract
