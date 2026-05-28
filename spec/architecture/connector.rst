@@ -2025,7 +2025,7 @@ spec text that needed amendment during implementation.
    :id: IMPL_0050
    :status: open
    :implements: BB_0030
-   :refines: REQ_0310, REQ_0311, REQ_0312, REQ_0313, REQ_0314, REQ_0315, REQ_0316, REQ_0317, REQ_0318, REQ_0319, REQ_0320, REQ_0321, REQ_0322, REQ_0323, REQ_0324, REQ_0325, REQ_0326, REQ_0327, REQ_0328
+   :refines: REQ_0310, REQ_0311, REQ_0312, REQ_0313, REQ_0314, REQ_0315, REQ_0316, REQ_0317, REQ_0318, REQ_0319, REQ_0320, REQ_0321, REQ_0322, REQ_0323, REQ_0324, REQ_0325, REQ_0326, REQ_0327, REQ_0328, REQ_0329, REQ_0330, REQ_0331, REQ_0332, REQ_0333
 
    **Crate.** ``crates/taktora-connector-ethercat``. Default deps:
    ``taktora-connector-core``, ``taktora-connector-transport-iox``,

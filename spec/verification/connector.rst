@@ -578,6 +578,64 @@ exercised without hardware. Bench tests run only when invoked as
    end-to-end iceoryx2 ↔ PDI ↔ iceoryx2 plumbing without
    hardware.
 
+.. test:: Asymmetric expected_wkc summing
+   :id: TEST_0223
+   :status: open
+   :verifies: REQ_0329
+
+   Table-driven unit test in
+   ``crates/taktora-connector-ethercat-tests/tests/recovery.rs``
+   asserting ``BringUp.expected_wkc`` equals the per-SubDevice
+   ``expected_wkc`` sum over SubDevices present in ``pdo_map``,
+   with bus-only SubDevices contributing 0.
+
+.. test:: DC cycle path branches on options.distributed_clocks
+   :id: TEST_0224
+   :status: open
+   :verifies: REQ_0330
+
+   Mock-driven unit test asserting ``MockBusDriver`` records
+   ``CycleKind::Dc`` exactly when ``options.distributed_clocks()``
+   is ``true``, and ``CycleKind::Plain`` otherwise. Lives in
+   ``crates/taktora-connector-ethercat-tests/tests/recovery.rs``.
+
+.. test:: Recovery state machine drives BusDriver::recover per policy
+   :id: TEST_0225
+   :status: open
+   :verifies: REQ_0331, REQ_0332
+
+   Integration test in
+   ``crates/taktora-connector-ethercat-tests/tests/recovery.rs``
+   composing ``MockBusDriver`` (programmed recovery sequence) +
+   ``CycleRunner`` + ``ExponentialBackoff::with_max_attempts(N)``.
+   Cases: one recoverable fault, multiple in sequence (fresh policy
+   per episode), policy exhausted ⇒ terminal Down + runner exits,
+   recovery yields a new expected_wkc adopted on the next cycle.
+
+.. test:: Health transitions during recovery
+   :id: TEST_0226
+   :status: open
+   :verifies: REQ_0333
+
+   Integration test asserting the exact emitted ``HealthEvent``
+   sequence across cycle-error → backoff → recover → up. Uses the
+   broadcast channel exposed by ``EthercatHealthMonitor``. Lives in
+   ``crates/taktora-connector-ethercat-tests/tests/recovery.rs``.
+
+.. test:: Hardware drill — endurance + unplug/replug
+   :id: TEST_0227
+   :status: open
+   :verifies: REQ_0331
+
+   Manual hardware test against EK1100 + EL1008 + EL2004. Operator
+   runs ``examples/ethercat-real-bus --mode drill --window 60`` and
+   ``--mode endurance --duration 3600``, performs the unplug/replug
+   drill, and archives the full stderr capture as
+   ``docs/superpowers/specs/2026-05-28-ethercrab-bus-driver-drill.log``.
+   Pass criterion: zero terminal ``Down`` transitions in endurance,
+   ``Up → Degraded → Connecting → Up`` sequence within the policy's
+   backoff envelope during the drill.
+
 ----
 
 Workspace end-to-end tests

@@ -743,6 +743,81 @@ EtherCAT reference connector
    re-hash). Required by :need:`REQ_0060` from the steady-state
    posture: connector dispatch shall not allocate.
 
+.. req:: Asymmetric working counter declared per SubDevice
+   :id: REQ_0329
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0223
+
+   ``SubDeviceMap`` shall carry an explicit ``expected_wkc: u16``
+   field. ``BringUp.expected_wkc`` shall be the sum of
+   ``SubDeviceMap.expected_wkc`` over the SubDevices that are both
+   discovered on the bus and present in ``EthercatConnectorOptions::pdo_map``.
+   SubDevices discovered on the bus but absent from ``pdo_map`` shall
+   contribute 0.
+
+.. req:: Distributed Clocks cycle path uses tx_rx_dc
+   :id: REQ_0330
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0224
+
+   When ``EthercatConnectorOptions::distributed_clocks`` is ``true``,
+   the cycle shall call ``ethercrab::SubDeviceGroup::tx_rx_dc``;
+   otherwise it shall call ``ethercrab::SubDeviceGroup::tx_rx``. This
+   refines :need:`REQ_0318` by specifying the per-cycle behaviour of
+   the DC opt-in.
+
+.. req:: Bus-level recovery on cycle error
+   :id: REQ_0331
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0225, TEST_0227
+
+   When ``BusDriver::cycle`` returns ``Err``, the cycle runner shall
+   transition health to ``Degraded { reason: "cycle failed: …" }`` and
+   consult the configured ``ReconnectPolicy``. For each non-``None``
+   backoff returned by the policy the runner shall sleep, then call
+   ``BusDriver::recover``. On ``recover`` ``Ok`` the runner shall
+   adopt the returned ``BringUp.expected_wkc`` and resume cycling;
+   on ``recover`` ``Err`` the runner shall update the Degraded reason
+   and continue consulting the policy. On policy exhaustion the
+   runner shall transition health to terminal ``Down`` and exit. The
+   ``recover`` call shall not consume a new ``PduStorage`` split.
+   NIC-level failure (the ``tx_rx_task`` future itself returning
+   ``Err``) is terminal and outside this scope.
+
+.. req:: Reconnect policy factory in connector options
+   :id: REQ_0332
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0225
+
+   ``EthercatConnectorOptions`` shall expose a ``reconnect_policy_factory``
+   producing a fresh ``Box<dyn ReconnectPolicy>`` per recovery
+   episode. The default factory shall produce
+   ``ExponentialBackoff::default()``. The shape and ownership of the
+   factory shall mirror ``taktora-connector-can``'s pattern
+   (``Arc<dyn Fn() -> Box<dyn ReconnectPolicy> + Send + Sync + 'static>``).
+
+.. req:: Health transitions during recovery
+   :id: REQ_0333
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0226
+
+   The health state machine shall emit, during a recovery episode,
+   exactly the transitions:
+
+   * ``Up → Degraded { reason: "cycle failed: …" }`` on cycle error.
+   * ``Degraded → Connecting`` immediately before each ``recover``
+     attempt.
+   * ``Connecting → Up`` on ``recover`` success.
+   * ``Connecting → Degraded { reason: "recover failed: …" }`` on
+     ``recover`` error.
+   * ``Degraded → Down { reason: "reconnect policy exhausted" }``
+     when the policy returns ``None``.
+
 Host wiring
 ~~~~~~~~~~~
 
