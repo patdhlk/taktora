@@ -148,6 +148,46 @@ scripts/examples-local.sh off       # restore committed state
 CI refuses to proceed if any example reports `on` — never commit
 while the toggle is active.
 
+## Hardware drill (TEST_0227)
+
+The drill exercises the bus-level recovery path against real silicon.
+
+### Rig
+
+- Raspberry Pi 4 (or any Linux host with `CAP_NET_RAW`).
+- Beckhoff EK1100 bus coupler.
+- Beckhoff EL1008 (8 digital inputs) immediately right of the EK1100.
+- Beckhoff EL2004 (4 digital outputs) immediately right of the EL1008.
+
+### Procedure
+
+1. **Normal mode smoke test.** Confirm bring-up, inputs read, outputs
+   toggle:
+   ```bash
+   sudo setcap cap_net_raw=eip target/release/ethercat-real-bus
+   ./target/release/ethercat-real-bus --nic eth0 --mode normal --ticks 1000
+   ```
+   Pass criterion: `ethercat health: Connecting -> Up`, EL2004 LEDs
+   flicker on a 500 ms cadence, EL1008 bits read correctly.
+
+2. **Reconnect drill.** Run with a 60-second window. After ~10 s,
+   physically unplug the EK1100 input cable for at least 2 s, then
+   replug. After ~30 s, briefly power-cycle the EK1100.
+   ```bash
+   ./target/release/ethercat-real-bus --nic eth0 --mode drill --window 60
+   ```
+   Pass criterion: the drill summary reports `saw_degraded=true
+   saw_recover_up=true`; the printed health transitions match
+   `Up -> Degraded -> Connecting -> Up` for each event.
+
+3. **Endurance run.** Run for 1 h.
+   ```bash
+   ./target/release/ethercat-real-bus --nic eth0 --mode endurance --duration 3600 2>&1 | tee drill.log
+   ```
+   Pass criterion: `terminal_down=false`. Archive `drill.log` as
+   `docs/superpowers/specs/2026-05-28-ethercrab-bus-driver-drill.log`
+   (this file is gitignored — kept locally only).
+
 ## What this shows
 
 - `EthercrabBusDriver::new(&PDU_STORAGE, opts)` — real-bus driver
