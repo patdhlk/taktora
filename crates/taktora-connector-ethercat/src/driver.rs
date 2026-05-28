@@ -8,13 +8,14 @@
 //! * [`crate::MockBusDriver`] — synthetic SubDevices, programmable
 //!   working-counter sequences, no hardware. Used by the in-tree
 //!   integration tests under `tests/runner.rs`.
-//! * `EthercrabBusDriver` — wraps `ethercrab::MainDevice`, spawns
-//!   `tx_rx_task`, drives the bus through PRE-OP → SAFE-OP → OP
-//!   per `REQ_0312` / `REQ_0313` / `REQ_0315`. Tracked as a
-//!   follow-on commit ("C5e") — its API requires hardware
-//!   iteration to verify, and the trait abstraction defined here is
-//!   the integration point that lets `EthercrabBusDriver` land
-//!   incrementally without breaking existing tests.
+//! * `EthercrabBusDriver` (in [`crate::ethercrab_driver`], gated on
+//!   the `bus-integration` cargo feature) — wraps
+//!   `ethercrab::MainDevice`, spawns `tx_rx_task`, drives the bus
+//!   through PRE-OP → SAFE-OP → OP per `REQ_0312` / `REQ_0313` /
+//!   `REQ_0315`, and supports bus-level recovery via
+//!   [`BusDriver::recover`] per `REQ_0331`. The trait abstraction
+//!   defined here is the integration point shared by the production
+//!   driver and [`crate::MockBusDriver`].
 //!
 //! Trait methods are async because real bus operations (ethercrab's
 //! `tx_rx`, SDO writes) are async-first. The cycle loop lives on the

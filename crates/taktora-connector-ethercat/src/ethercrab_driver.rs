@@ -4,13 +4,13 @@
 //!
 //! ## Verification posture
 //!
-//! Compile-checked against `ethercrab` 0.7. Runtime behaviour is
-//! **unverified** in this commit — no EtherCAT hardware is available
-//! to iterate against. The `tests/ethercrab_driver.rs` test
-//! demonstrates the intended bring-up shape under
-//! `#[ignore]` + `ETHERCAT_TEST_NIC` so the next contributor with a
-//! Linux gateway host (and `CAP_NET_RAW`) can validate the integration
-//! end-to-end without rewriting it from scratch.
+//! Compile-checked against `ethercrab` 0.7. Hardware verification
+//! runs through `tests/ethercrab_driver.rs` — both the bring-up and
+//! recovery tests are `#[ignore]`-gated and key off
+//! `ETHERCAT_TEST_NIC`. The hardware drill procedure (`TEST_0227`,
+//! see `examples/ethercat-real-bus/README.md`) is the canonical
+//! end-to-end exercise; archived drill logs serve as the `FEAT_0041`
+//! implemented-status evidence.
 //!
 //! ## Lifetime / ownership model
 //!

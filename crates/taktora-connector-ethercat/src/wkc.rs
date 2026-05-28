@@ -50,10 +50,11 @@ pub const fn evaluate_wkc(expected: u16, observed: u16) -> WkcVerdict {
 }
 
 /// Sum of every [`crate::SubDeviceMap::expected_wkc`] in
-/// `options.pdo_map()`. The pure-logic helper used by
-/// [`crate::EthercrabBusDriver::bring_up`] (and, in a follow-on task,
-/// [`crate::EthercrabBusDriver::recover`]) to compute the WKC the
-/// cycle loop compares each `tx_rx` response against.
+/// `options.pdo_map()`.
+///
+/// The pure-logic helper used by [`crate::BusDriver::bring_up`] and
+/// [`crate::BusDriver::recover`] to compute the WKC the cycle loop
+/// compares each `tx_rx` response against.
 ///
 /// `REQ_0329`. Computed without consulting the bus — every
 /// SubDevice present on the bus but absent from `pdo_map`

@@ -71,10 +71,10 @@ pub const ETHERCAT_MAX_PDU_DATA: usize = 1100;
 ///
 /// Declare a `static` of this type via
 /// [`crate::declare_pdu_storage!`] and pass a reference into the
-/// bring-up flow (deferred to the follow-on commit — see the module
-/// docs). Each storage can produce one `MainDevice`
-/// ([`PduStorage::try_split`] is one-shot), so applications wanting
-/// multiple gateways declare one storage per gateway (`REQ_0312`).
+/// bring-up flow via [`crate::EthercrabBusDriver`]. Each storage can
+/// produce one `MainDevice` ([`PduStorage::try_split`] is one-shot),
+/// so applications wanting multiple gateways declare one storage per
+/// gateway (`REQ_0312`).
 pub type EthercatPduStorage =
     PduStorage<ETHERCAT_MAX_FRAMES, { PduStorage::element_size(ETHERCAT_MAX_PDU_DATA) }>;
 
