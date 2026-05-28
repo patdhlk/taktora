@@ -8,13 +8,14 @@
 //! * [`crate::MockBusDriver`] — synthetic SubDevices, programmable
 //!   working-counter sequences, no hardware. Used by the in-tree
 //!   integration tests under `tests/runner.rs`.
-//! * `EthercrabBusDriver` — wraps `ethercrab::MainDevice`, spawns
-//!   `tx_rx_task`, drives the bus through PRE-OP → SAFE-OP → OP
-//!   per `REQ_0312` / `REQ_0313` / `REQ_0315`. Tracked as a
-//!   follow-on commit ("C5e") — its API requires hardware
-//!   iteration to verify, and the trait abstraction defined here is
-//!   the integration point that lets `EthercrabBusDriver` land
-//!   incrementally without breaking existing tests.
+//! * `EthercrabBusDriver` (in [`crate::ethercrab_driver`], gated on
+//!   the `bus-integration` cargo feature) — wraps
+//!   `ethercrab::MainDevice`, spawns `tx_rx_task`, drives the bus
+//!   through PRE-OP → SAFE-OP → OP per `REQ_0312` / `REQ_0313` /
+//!   `REQ_0315`, and supports bus-level recovery via
+//!   [`BusDriver::recover`] per `REQ_0331`. The trait abstraction
+//!   defined here is the integration point shared by the production
+//!   driver and [`crate::MockBusDriver`].
 //!
 //! Trait methods are async because real bus operations (ethercrab's
 //! `tx_rx`, SDO writes) are async-first. The cycle loop lives on the
@@ -62,6 +63,26 @@ pub trait BusDriver: Send + 'static {
     fn cycle(
         &mut self,
     ) -> impl core::future::Future<Output = Result<u16, ConnectorError>> + Send + '_;
+
+    /// Return the bus to OP without consuming a new `PduStorage`
+    /// split. Called by the cycle runner when [`Self::cycle`] returns
+    /// `Err` and the configured `ReconnectPolicy` is non-exhausted.
+    ///
+    /// Contract:
+    /// * Drops in-flight operational state (e.g. the
+    ///   `SubDeviceGroup`); preserves `MainDevice` + the spawned
+    ///   `tx_rx_task`.
+    /// * Idempotent across operational states. Calling from
+    ///   `NotInitialised` shall return
+    ///   [`ConnectorError::Configuration`].
+    /// * Returns a freshly-computed [`BringUp`] reflecting the
+    ///   topology observed on this re-discovery (it may differ from
+    ///   the original bring-up).
+    ///
+    /// `REQ_0331`.
+    fn recover(
+        &mut self,
+    ) -> impl core::future::Future<Output = Result<BringUp, ConnectorError>> + Send + '_;
 
     /// Visit one SubDevice's outputs slice with mutable access.
     /// Used by the gateway dispatcher (C7b) to write outbound

@@ -62,12 +62,20 @@ const ALL_KINDS: [ConnectorHealthKind; 4] = [
 ];
 
 /// Legal edges per `ARCH_0012` (encoded as `(from, to)` pairs).
-const LEGAL_EDGES: [(ConnectorHealthKind, ConnectorHealthKind); 7] = [
+const LEGAL_EDGES: [(ConnectorHealthKind, ConnectorHealthKind); 9] = [
     (ConnectorHealthKind::Connecting, ConnectorHealthKind::Up),
+    (
+        ConnectorHealthKind::Connecting,
+        ConnectorHealthKind::Degraded,
+    ),
     (ConnectorHealthKind::Connecting, ConnectorHealthKind::Down),
     (ConnectorHealthKind::Up, ConnectorHealthKind::Degraded),
     (ConnectorHealthKind::Up, ConnectorHealthKind::Down),
     (ConnectorHealthKind::Degraded, ConnectorHealthKind::Up),
+    (
+        ConnectorHealthKind::Degraded,
+        ConnectorHealthKind::Connecting,
+    ),
     (ConnectorHealthKind::Degraded, ConnectorHealthKind::Down),
     (ConnectorHealthKind::Down, ConnectorHealthKind::Connecting),
 ];

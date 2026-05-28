@@ -590,8 +590,9 @@ EtherCAT reference connector
 
 .. req:: Cycle time configurable with millisecond resolution
    :id: REQ_0316
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0206
 
    The gateway shall accept a configurable cycle duration via
    ``EthercatConnectorOptions::cycle_time`` with a default of 2 ms and a
@@ -599,8 +600,9 @@ EtherCAT reference connector
 
 .. req:: Missed cycle ticks are skipped not queued
    :id: REQ_0317
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0207
 
    When the gateway misses one or more cycle ticks, it shall skip the
    missed ticks rather than queue them for catch-up execution.
@@ -616,8 +618,9 @@ EtherCAT reference connector
 
 .. req:: Working-counter-based health policy
    :id: REQ_0319
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0209
 
    The gateway shall report ``ConnectorHealth::Up`` only when the bus is in
    OP and the working counter on the latest cycle matches the expected
@@ -662,8 +665,9 @@ EtherCAT reference connector
 
 .. req:: Inbound bridge saturation drops PDUs and signals Degraded
    :id: REQ_0324
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: BB_0034, IMPL_0050, TEST_0214
 
    When the inbound bridge channel is full, the gateway shall
    (1) increment the per-channel inbound-drop counter exposed via
@@ -688,8 +692,9 @@ EtherCAT reference connector
 
 .. req:: Outbound payload written to PDI bit slice per routing
    :id: REQ_0326
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0216, TEST_0217, TEST_0218, TEST_0220, TEST_0222
 
    When a plugin publishes a value through ``ChannelWriter::send``, the
    gateway shall, before the next cycle's ``tx_rx`` call, write the
@@ -703,8 +708,9 @@ EtherCAT reference connector
 
 .. req:: Inbound payload read from PDI bit slice per routing
    :id: REQ_0327
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0216, TEST_0217, TEST_0221, TEST_0222
 
    After each cycle's ``tx_rx`` call returns successfully, the gateway
    shall, for every registered inbound channel, extract
@@ -736,6 +742,91 @@ EtherCAT reference connector
    cycle heap allocation (no ``Vec`` resize, no ``HashMap``
    re-hash). Required by :need:`REQ_0060` from the steady-state
    posture: connector dispatch shall not allocate.
+
+.. req:: Asymmetric working counter declared per SubDevice
+   :id: REQ_0329
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0223
+
+   ``SubDeviceMap`` shall carry an explicit ``expected_wkc: u16``
+   field. ``BringUp.expected_wkc`` shall be the sum of
+   ``SubDeviceMap.expected_wkc`` over the SubDevices that are both
+   discovered on the bus and present in ``EthercatConnectorOptions::pdo_map``.
+   SubDevices discovered on the bus but absent from ``pdo_map`` shall
+   contribute 0.
+
+.. req:: Distributed Clocks cycle path uses tx_rx_dc
+   :id: REQ_0330
+   :status: open
+   :satisfies: FEAT_0041
+
+   When ``EthercatConnectorOptions::distributed_clocks`` is ``true``,
+   the cycle shall call ``ethercrab::SubDeviceGroup::tx_rx_dc``;
+   otherwise it shall call ``ethercrab::SubDeviceGroup::tx_rx``. This
+   refines :need:`REQ_0318` by specifying the per-cycle behaviour of
+   the DC opt-in.
+
+   **Implementation status (2026-05-28).** Deferred. ``tx_rx_dc`` is
+   only callable when the ``SubDeviceGroup`` typestate is ``HasDc``,
+   but the current ``EthercrabBusDriver::bring_up`` walks
+   PRE-OP → OP via ``into_op`` which yields ``NoDc``. Honouring this
+   requirement requires the alternate bring-up path
+   (``into_pre_op_pdi`` → ``configure_dc_sync`` →
+   ``request_into_op``) and threading the ``HasDc`` typestate
+   through ``OperationalState`` (and ``recover``). The mock-side
+   ``CycleKind`` recorder (:need:`TEST_0224`) is in place to drive
+   that follow-on once it lands.
+
+.. req:: Bus-level recovery on cycle error
+   :id: REQ_0331
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0225, TEST_0227
+
+   When ``BusDriver::cycle`` returns ``Err``, the cycle runner shall
+   transition health to ``Degraded { reason: "cycle failed: …" }`` and
+   consult the configured ``ReconnectPolicy``. For each non-``None``
+   backoff returned by the policy the runner shall sleep, then call
+   ``BusDriver::recover``. On ``recover`` ``Ok`` the runner shall
+   adopt the returned ``BringUp.expected_wkc`` and resume cycling;
+   on ``recover`` ``Err`` the runner shall update the Degraded reason
+   and continue consulting the policy. On policy exhaustion the
+   runner shall transition health to terminal ``Down`` and exit. The
+   ``recover`` call shall not consume a new ``PduStorage`` split.
+   NIC-level failure (the ``tx_rx_task`` future itself returning
+   ``Err``) is terminal and outside this scope.
+
+.. req:: Reconnect policy factory in connector options
+   :id: REQ_0332
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0225
+
+   ``EthercatConnectorOptions`` shall expose a ``reconnect_policy_factory``
+   producing a fresh ``Box<dyn ReconnectPolicy>`` per recovery
+   episode. The default factory shall produce
+   ``ExponentialBackoff::default()``. The shape and ownership of the
+   factory shall mirror ``taktora-connector-can``'s pattern
+   (``Arc<dyn Fn() -> Box<dyn ReconnectPolicy> + Send + Sync + 'static>``).
+
+.. req:: Health transitions during recovery
+   :id: REQ_0333
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0226
+
+   The health state machine shall emit, during a recovery episode,
+   exactly the transitions:
+
+   * ``Up → Degraded { reason: "cycle failed: …" }`` on cycle error.
+   * ``Degraded → Connecting`` immediately before each ``recover``
+     attempt.
+   * ``Connecting → Up`` on ``recover`` success.
+   * ``Connecting → Degraded { reason: "recover failed: …" }`` on
+     ``recover`` error.
+   * ``Degraded → Down { reason: "reconnect policy exhausted" }``
+     when the policy returns ``None``.
 
 Host wiring
 ~~~~~~~~~~~

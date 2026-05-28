@@ -1,73 +1,60 @@
 //! Forward-compatible declarations for ethercrab integration. Gated
 //! on the `bus-integration` cargo feature.
 //!
-//! This module is intentionally minimal in C5c. It provides:
+//! This module provides:
 //!
 //! * [`EthercatPduStorage`] — the default [`PduStorage`] type alias
 //!   carrying ethercrab's recommended frame pool size.
 //! * [`crate::declare_pdu_storage`] — a macro that declares a
 //!   `static` of [`EthercatPduStorage`] in application code, ready
-//!   to pass into the bring-up flow.
+//!   to pass into the production [`crate::EthercrabBusDriver`].
 //!
-//! ### What's deferred and why
+//! ## Production driver
 //!
-//! The full `bring_up_bus` + `BusHandle::cycle_once` wiring against
-//! `ethercrab::MainDevice` was scoped to this commit but pulled back
-//! when it became clear that `ethercrab` 0.7's API surface differs in
-//! several places from the example code reachable via documentation
-//! search. Without an EtherCAT NIC to iterate against, writing 1000+
-//! lines of speculative integration code against an API the author
-//! cannot exercise produces code that compiles but whose runtime
-//! behaviour is unverified — exactly the kind of "trust me" code the
-//! framework otherwise avoids.
+//! [`crate::EthercrabBusDriver`] wraps `ethercrab::MainDevice`,
+//! spawns `ethercrab::std::tx_rx_task` on a tokio runtime, and
+//! drives the bus through PRE-OP → SAFE-OP → OP per `REQ_0312` /
+//! `REQ_0313` / `REQ_0315`. It implements [`crate::BusDriver`]:
 //!
-//! The integration is therefore tracked as a follow-on under
-//! :need:`IMPL_0050` and lands when:
+//! * `bring_up` — splits storage, constructs `MainDevice`, spawns
+//!   `tx_rx_task`, calls `init_single_group`, applies the
+//!   per-SubDevice SDO writes from [`crate::pdo_sdo_writes`], walks
+//!   into OP, returns [`crate::BringUp`] with the asymmetric WKC
+//!   computed from each [`crate::SubDeviceMap`]'s `expected_wkc`
+//!   (`REQ_0329`).
+//! * `cycle` — calls `group.tx_rx` per cycle (`REQ_0312`).
+//!   Distributed Clocks opt-in
+//!   ([`crate::EthercatConnectorOptions::distributed_clocks`])
+//!   currently applies during bring-up only via
+//!   `MainDeviceConfig::dc_static_sync_iterations`; the per-cycle
+//!   `group.tx_rx_dc` branch (`REQ_0330`) is tracked as a follow-on.
+//! * `recover` — drops the in-flight `SubDeviceGroup`, re-runs
+//!   `init_single_group` against the same `MainDevice`, re-applies
+//!   the PDO mapping, walks back into OP (`REQ_0331`). The
+//!   `MainDevice` and `tx_rx_task` are preserved across the call —
+//!   [`PduStorage::try_split`] is one-shot and cannot be re-run.
 //!
-//! 1. A developer with `CAP_NET_RAW` on a Linux gateway host can
-//!    iterate the bring-up code against a real bus (or the project
-//!    moves to a `BusDriver` trait abstraction with a `MockBusDriver`
-//!    in dev-dependencies); and
-//! 2. The cycle-loop integration with [`crate::CycleScheduler`],
-//!    [`crate::wkc::evaluate_wkc`], [`crate::EthercatHealthMonitor`],
-//!    and the bridges can be wired without speculation.
+//! ## Recovery scope
 //!
-//! The pure-logic helpers `sdo`, `scheduler`, `wkc`, `bridge`, and
-//! `health` are already in place and exhaustively unit-tested — when
-//! the bring-up code lands, those helpers are the load-bearing
-//! decision logic and will not need to change.
+//! Bus-level faults (SubDevice drops, persistent WKC mismatch,
+//! OP→SAFE-OP fallback) are recoverable via `recover`, driven from
+//! the cycle runner per a configurable
+//! [`crate::EthercatConnectorOptions::reconnect_policy_factory`]
+//! (`REQ_0332`). NIC-level failure (the `tx_rx_task` future itself
+//! returning `Err`) is **terminal**: the cycle runner emits a
+//! terminal `Down` and exits. Re-spawning `tx_rx_task` would require
+//! splitting a fresh `PduStorage`, which ethercrab does not support.
 //!
-//! ### Intended bring-up shape (forward reference)
+//! ## Tests
 //!
-//! The cycle-loop integration is expected to follow this skeleton
-//! once the API mismatches are resolved:
-//!
-//! 1. `let (tx, rx, pdu_loop) = storage.try_split()?` — one
-//!    `MainDevice` per storage (`REQ_0312`).
-//! 2. `MainDevice::new(pdu_loop, …)` with `dc_static_sync_iterations`
-//!    derived from [`crate::EthercatConnectorOptions::distributed_clocks`]
-//!    (`REQ_0318`).
-//! 3. `tokio::spawn(ethercrab::std::tx_rx_task(interface, tx, rx)?)`
-//!    on the [`crate::EthercatGateway`]'s tokio runtime, which opens
-//!    an `AF_PACKET` raw socket and runs the TX/RX cycle
-//!    (`REQ_0321`, `REQ_0325`).
-//! 4. `maindevice.init_single_group::<MAX_SUBDEVICES, PDI_LEN>(…)`
-//!    for SubDevice discovery (PRE-OP state).
-//! 5. For every [`crate::SubDeviceMap`] in `options.pdo_map()`,
-//!    apply the writes from [`crate::pdo_sdo_writes`] via
-//!    `subdevice.sdo_write(index, subindex, value)` (`REQ_0314`,
-//!    `REQ_0315`).
-//! 6. `group.into_op(&maindevice)` — fast-path PRE-OP → OP
-//!    (internally PRE-OP → SAFE-OP → OP) (`REQ_0313`).
-//! 7. Per-cycle: [`crate::CycleScheduler::poll`] decides fire/skip;
-//!    on fire, `group.tx_rx(&maindevice)`; the response's
-//!    `working_counter` feeds [`crate::wkc::evaluate_wkc`] which
-//!    drives [`crate::EthercatHealthMonitor`] transitions
-//!    (`REQ_0317`, `REQ_0319`, `REQ_0320`).
-//!
-//! `REQ_0312` (single MainDevice), `REQ_0313` (bus reaches OP before
-//! traffic), and `REQ_0325` (Linux raw socket) remain `open` in the
-//! corpus until that wiring lands.
+//! * `crates/taktora-connector-ethercat/tests/ethercrab_driver.rs`
+//!   — compile-checked + `#[ignore]`-gated against ethercrab 0.7;
+//!   set `ETHERCAT_TEST_NIC` to run the hardware-side tests including
+//!   `recover_returns_to_op_without_storage_resplit`.
+//! * [`crate::MockBusDriver`] — the in-tree test substitute. Used
+//!   by `crates/taktora-connector-ethercat-tests/tests/recovery.rs`
+//!   for the recovery state machine + asymmetric WKC + CycleKind
+//!   recorder.
 
 use ethercrab::PduStorage;
 
@@ -84,10 +71,10 @@ pub const ETHERCAT_MAX_PDU_DATA: usize = 1100;
 ///
 /// Declare a `static` of this type via
 /// [`crate::declare_pdu_storage!`] and pass a reference into the
-/// bring-up flow (deferred to the follow-on commit — see the module
-/// docs). Each storage can produce one `MainDevice`
-/// ([`PduStorage::try_split`] is one-shot), so applications wanting
-/// multiple gateways declare one storage per gateway (`REQ_0312`).
+/// bring-up flow via [`crate::EthercrabBusDriver`]. Each storage can
+/// produce one `MainDevice` ([`PduStorage::try_split`] is one-shot),
+/// so applications wanting multiple gateways declare one storage per
+/// gateway (`REQ_0312`).
 pub type EthercatPduStorage =
     PduStorage<ETHERCAT_MAX_FRAMES, { PduStorage::element_size(ETHERCAT_MAX_PDU_DATA) }>;
 

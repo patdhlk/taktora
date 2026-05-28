@@ -48,3 +48,22 @@ pub const fn evaluate_wkc(expected: u16, observed: u16) -> WkcVerdict {
         WkcVerdict::Mismatch { observed, expected }
     }
 }
+
+/// Sum of every [`crate::SubDeviceMap::expected_wkc`] in
+/// `options.pdo_map()`.
+///
+/// The pure-logic helper used by [`crate::BusDriver::bring_up`] and
+/// [`crate::BusDriver::recover`] to compute the WKC the cycle loop
+/// compares each `tx_rx` response against.
+///
+/// `REQ_0329`. Computed without consulting the bus — every
+/// SubDevice present on the bus but absent from `pdo_map`
+/// contributes 0 by construction (we only iterate the map).
+#[must_use]
+pub fn expected_wkc_from_map(options: &crate::EthercatConnectorOptions) -> u16 {
+    let mut total: u16 = 0;
+    for map in options.pdo_map() {
+        total = total.saturating_add(map.expected_wkc);
+    }
+    total
+}

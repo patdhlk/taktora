@@ -23,6 +23,7 @@ static PDO_MAP: &[SubDeviceMap] = &[SubDeviceMap {
     address: 0x0001,
     rx_pdos: RX_ENTRIES,
     tx_pdos: TX_ENTRIES,
+    expected_wkc: 3,
 }];
 
 #[test]
@@ -104,4 +105,15 @@ fn network_interface_round_trips() {
         .network_interface("eth0")
         .build();
     assert_eq!(opts.network_interface(), Some("eth0"));
+}
+
+#[test]
+fn subdevice_map_carries_expected_wkc() {
+    let map = SubDeviceMap {
+        address: 0x1001,
+        rx_pdos: &[],
+        tx_pdos: &[],
+        expected_wkc: 2,
+    };
+    assert_eq!(map.expected_wkc, 2);
 }

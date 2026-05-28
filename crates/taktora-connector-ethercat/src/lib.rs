@@ -19,12 +19,19 @@
 //! * [`connector::EthercatConnector`] — implements
 //!   [`taktora_connector_host::Connector`] (`REQ_0310`).
 //!
-//! `ethercrab` integration (MainDevice, SDO writes to `0x1C12` /
-//! `0x1C13`, Distributed Clocks bring-up, `tx_rx_task`) lands in a
-//! follow-on commit. Until then the gateway side does not actually
-//! drive a bus — the trait surface is in place, the bridge / health
-//! / lifecycle plumbing is exercised by unit tests, and the typed
-//! routing / options types match `REQ_0311` / `REQ_0314`.
+//! `ethercrab` integration is in place — [`EthercrabBusDriver`]
+//! (gated on the `bus-integration` cargo feature) wraps
+//! `ethercrab::MainDevice`, drives the bus through PRE-OP → SAFE-OP
+//! → OP, applies per-SubDevice SDO PDO mapping, and supports
+//! bus-level recovery via [`BusDriver::recover`] driven by
+//! [`EthercatConnectorOptions::reconnect_policy_factory`].
+//! Distributed Clocks opt-in currently applies during bring-up
+//! only via `MainDeviceConfig::dc_static_sync_iterations`; the
+//! per-cycle `tx_rx_dc` branch (`REQ_0330`) is a follow-on. See
+//! [`crate::bus`] for the production-driver overview and
+//! [`MockBusDriver`] for the in-tree test substitute. `REQ_0312` /
+//! `REQ_0313` / `REQ_0314` / `REQ_0315` / `REQ_0329` / `REQ_0331` /
+//! `REQ_0332`.
 //!
 //! [`HealthEvent`]: taktora_connector_core::HealthEvent
 
@@ -67,9 +74,10 @@ pub use driver::{BringUp, BusDriver};
 pub use ethercrab_driver::EthercrabBusDriver;
 pub use gateway::EthercatGateway;
 pub use health::EthercatHealthMonitor;
-pub use mock::MockBusDriver;
+pub use mock::{CycleKind, MockBusDriver};
 pub use options::{
-    EthercatConnectorOptions, EthercatConnectorOptionsBuilder, PdoEntry, SubDeviceMap,
+    EthercatConnectorOptions, EthercatConnectorOptionsBuilder, PdoEntry, ReconnectPolicyFactory,
+    SubDeviceMap,
 };
 pub use registry::{
     ChannelBinding, ChannelHandle, ChannelRegistry, InboundPublish, OutboundDrain,
@@ -79,4 +87,4 @@ pub use routing::{EthercatRouting, PdoDirection};
 pub use runner::{CycleReport, CycleRunner};
 pub use scheduler::{CycleDecision, CycleScheduler};
 pub use sdo::{SM_ASSIGN_RX_PDO, SM_ASSIGN_TX_PDO, SdoValue, SdoWrite, pdo_sdo_writes};
-pub use wkc::{WkcVerdict, evaluate_wkc};
+pub use wkc::{WkcVerdict, evaluate_wkc, expected_wkc_from_map};

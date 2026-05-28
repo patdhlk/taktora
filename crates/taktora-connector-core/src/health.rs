@@ -6,11 +6,21 @@
 //!
 //! ```text
 //!   [start] → Connecting
-//!   Connecting → Up | Down
+//!   Connecting → Up | Degraded | Down
 //!   Up → Degraded | Down | [shutdown]
-//!   Degraded → Up | Down
+//!   Degraded → Up | Connecting | Down
 //!   Down → Connecting | [shutdown]
 //! ```
+//!
+//! The `Degraded → Connecting` edge supports recovery loops that
+//! re-bring the underlying stack while the connector is degraded
+//! (e.g. `REQ_0331` — `EtherCAT` cycle failure triggers
+//! `BusDriver::recover` per policy; the connector emits a
+//! `Connecting` transition while the recovery is in flight). The
+//! symmetric `Connecting → Degraded` edge fires when a recovery
+//! attempt itself fails: the runner emits `Degraded("recover failed:
+//! …")` between attempts so subscribers see the full attempt history
+//! before the next backoff (`REQ_0333`).
 //!
 //! Same-discriminant transitions (e.g. `Up → Up`) are illegal — they
 //! indicate a bug at the call site (the caller failed to debounce or
@@ -206,10 +216,12 @@ const fn is_legal_transition(from: ConnectorHealthKind, to: ConnectorHealthKind)
     matches!(
         (from, to),
         (Connecting, Up)
+            | (Connecting, Degraded)
             | (Connecting, Down)
             | (Up, Degraded)
             | (Up, Down)
             | (Degraded, Up)
+            | (Degraded, Connecting)
             | (Degraded, Down)
             | (Down, Connecting)
     )

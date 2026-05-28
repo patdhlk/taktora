@@ -49,6 +49,7 @@ fn empty_pdo_map_emits_no_writes() {
         address: 0x0001,
         rx_pdos: EMPTY_ENTRIES,
         tx_pdos: EMPTY_ENTRIES,
+        expected_wkc: 0,
     };
     assert!(pdo_sdo_writes(&map).is_empty());
 }
@@ -59,6 +60,7 @@ fn rx_only_emits_clear_assign_count_to_index_0x1c12() {
         address: 0x0042,
         rx_pdos: TWO_RX_ENTRIES,
         tx_pdos: EMPTY_ENTRIES,
+        expected_wkc: 1,
     };
     let writes = pdo_sdo_writes(&map);
 
@@ -117,6 +119,7 @@ fn tx_only_emits_clear_assign_count_to_index_0x1c13() {
         address: 0x0007,
         rx_pdos: EMPTY_ENTRIES,
         tx_pdos: THREE_TX_ENTRIES,
+        expected_wkc: 2,
     };
     let writes = pdo_sdo_writes(&map);
 
@@ -139,6 +142,7 @@ fn both_directions_emit_rx_then_tx() {
         address: 0x0011,
         rx_pdos: TWO_RX_ENTRIES,
         tx_pdos: THREE_TX_ENTRIES,
+        expected_wkc: 3,
     };
     let writes = pdo_sdo_writes(&map);
 
@@ -158,6 +162,7 @@ fn entry_subindexes_start_at_one_and_count_writes_use_subindex_zero() {
         address: 0x00ff,
         rx_pdos: TWO_RX_ENTRIES,
         tx_pdos: EMPTY_ENTRIES,
+        expected_wkc: 1,
     };
     let writes = pdo_sdo_writes(&map);
     let entry_subindexes: Vec<u8> = writes

@@ -4,13 +4,13 @@
 //!
 //! ## Verification posture
 //!
-//! Compile-checked against `ethercrab` 0.7. Runtime behaviour is
-//! **unverified** in this commit — no EtherCAT hardware is available
-//! to iterate against. The `tests/ethercrab_driver.rs` test
-//! demonstrates the intended bring-up shape under
-//! `#[ignore]` + `ETHERCAT_TEST_NIC` so the next contributor with a
-//! Linux gateway host (and `CAP_NET_RAW`) can validate the integration
-//! end-to-end without rewriting it from scratch.
+//! Compile-checked against `ethercrab` 0.7. Hardware verification
+//! runs through `tests/ethercrab_driver.rs` — both the bring-up and
+//! recovery tests are `#[ignore]`-gated and key off
+//! `ETHERCAT_TEST_NIC`. The hardware drill procedure (`TEST_0227`,
+//! see `examples/ethercat-real-bus/README.md`) is the canonical
+//! end-to-end exercise; archived drill logs serve as the `FEAT_0041`
+//! implemented-status evidence.
 //!
 //! ## Lifetime / ownership model
 //!
@@ -22,15 +22,6 @@
 //! `tx_rx_task` join handle for the rest of the driver's lifetime.
 //! Dropping the driver aborts the join handle so the raw socket is
 //! released.
-//!
-//! ## Working-counter expectation
-//!
-//! `group.tx_rx` issues an LRW datagram per cycle. A healthy LRW
-//! against `N` SubDevices contributes `3 × N` to the working counter
-//! (write `+1`, read `+2`). `expected_wkc` is therefore computed as
-//! `3 × subdevice_count` after discovery; asymmetric PDO mappings
-//! (read-only or write-only SubDevices) will need a per-deployment
-//! override — tracked as a follow-on.
 
 use std::time::Duration;
 
@@ -197,18 +188,62 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
         let group = group.into_op(&maindevice).await.map_err(map_ec_error)?;
 
         let subdevice_count = group.len();
-        // Expected WKC per cycle: LRW datagram contributes +3 per
-        // SubDevice (write +1, read +2). Asymmetric mappings need a
-        // per-deployment override — tracked as a follow-on. `u16::MAX`
-        // saturates if a topology somehow exceeds 21845 SubDevices.
-        let expected_wkc = u16::try_from(subdevice_count)
-            .unwrap_or(u16::MAX)
-            .saturating_mul(3);
+        // Asymmetric WKC per `REQ_0329`: each SubDeviceMap carries its
+        // own expected_wkc; we sum over the map. SubDevices on the bus
+        // but absent from `pdo_map` contribute 0.
+        let expected_wkc = crate::wkc::expected_wkc_from_map(&self.options);
 
         self.state = State::Operational(Box::new(OperationalState {
             maindevice,
             group,
             tx_rx_task: tx_rx_task_handle,
+        }));
+
+        Ok(BringUp {
+            expected_wkc,
+            subdevice_count,
+        })
+    }
+
+    async fn recover(&mut self) -> Result<BringUp, ConnectorError> {
+        let State::Operational(op_box) = std::mem::replace(&mut self.state, State::NotInitialised)
+        else {
+            return Err(ConnectorError::Configuration(
+                "EthercrabBusDriver::recover called before bring_up".into(),
+            ));
+        };
+
+        // Preserve MainDevice + tx_rx_task across the call. PduStorage
+        // is NOT re-split — its single split happened in `bring_up`
+        // and the resulting PduLoop is owned by `maindevice` for the
+        // driver's lifetime.
+        let OperationalState {
+            maindevice,
+            tx_rx_task,
+            group: _dropped,
+        } = *op_box;
+
+        // Walk PRE-OP again. SubDevice topology may have shifted (slave
+        // dropped and came back with a different configured address);
+        // we accept whatever ethercrab reports.
+        let group = maindevice
+            .init_single_group::<MAX_SUBDEVICES, MAX_PDI>(ethercat_now)
+            .await
+            .map_err(map_ec_error)?;
+
+        for map in self.options.pdo_map() {
+            apply_pdo_mapping_for_subdevice(&maindevice, &group, *map).await?;
+        }
+
+        let group = group.into_op(&maindevice).await.map_err(map_ec_error)?;
+
+        let subdevice_count = group.len();
+        let expected_wkc = crate::wkc::expected_wkc_from_map(&self.options);
+
+        self.state = State::Operational(Box::new(OperationalState {
+            maindevice,
+            group,
+            tx_rx_task,
         }));
 
         Ok(BringUp {
