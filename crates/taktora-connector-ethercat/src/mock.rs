@@ -10,22 +10,18 @@ use taktora_connector_core::ConnectorError;
 
 use crate::driver::{BringUp, BusDriver};
 
-/// Which cycle method a `cycle` call represents. Set on the mock via
-/// [`MockBusDriver::with_dc_cycle_kind`]; recorded into
-/// `MockState::cycle_kinds` on every `cycle` call. Used by tests
+/// Which cycle method a `cycle` call represents.
+///
+/// Set on the mock via [`MockBusDriver::with_dc_cycle_kind`]; recorded
+/// into `MockState::cycle_kinds` on every `cycle` call. Used by tests
 /// asserting the DC branch (`REQ_0330`).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum CycleKind {
     /// `group.tx_rx` — the non-DC code path.
+    #[default]
     Plain,
     /// `group.tx_rx_dc` — the DC opt-in code path.
     Dc,
-}
-
-impl Default for CycleKind {
-    fn default() -> Self {
-        Self::Plain
-    }
 }
 
 /// Programmable [`BusDriver`] for tests. Records every method call

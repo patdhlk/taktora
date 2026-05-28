@@ -86,8 +86,10 @@ async fn bring_up_and_cycle_against_real_bus() {
     // against known SubDevice topology.
     let mut now = Instant::now();
     for _ in 0..5 {
-        let report = runner
-            .tick(now)
+        // Box::pin to keep the large CycleRunner::tick future off the
+        // stack (clippy::large_futures — the future carries the full
+        // SubDeviceGroup + scheduler state).
+        let report = Box::pin(runner.tick(now))
             .await
             .expect("cycle succeeds")
             .expect("scheduler fires");
@@ -102,10 +104,12 @@ async fn bring_up_and_cycle_against_real_bus() {
 #[ignore = "requires CAP_NET_RAW + EtherCAT NIC; set ETHERCAT_TEST_NIC"]
 #[tokio::test]
 async fn recover_returns_to_op_without_storage_resplit() {
+    // `static` declared at the top of the function so the clippy
+    // `items_after_statements` lint stays clean.
+    static STORAGE: EthercatPduStorage = EthercatPduStorage::new();
+
     let interface = std::env::var("ETHERCAT_TEST_NIC")
         .expect("ETHERCAT_TEST_NIC environment variable required");
-
-    static STORAGE: EthercatPduStorage = EthercatPduStorage::new();
 
     let opts = EthercatConnectorOptions::builder()
         .network_interface(&interface)
@@ -113,9 +117,12 @@ async fn recover_returns_to_op_without_storage_resplit() {
     let mut driver: EthercrabBusDriver<16, 64> =
         EthercrabBusDriver::new(&STORAGE, opts).expect("construct driver");
 
-    let bring_up = driver.bring_up().await.expect("bring_up");
+    // Box::pin to keep the large bring_up / recover futures off the
+    // stack (clippy::large_futures — the futures carry the full
+    // SubDeviceGroup + PduStorage borrows).
+    let bring_up = Box::pin(driver.bring_up()).await.expect("bring_up");
     assert!(bring_up.subdevice_count > 0);
 
-    let recover = driver.recover().await.expect("recover");
+    let recover = Box::pin(driver.recover()).await.expect("recover");
     assert_eq!(recover.subdevice_count, bring_up.subdevice_count);
 }
