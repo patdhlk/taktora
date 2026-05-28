@@ -25,17 +25,17 @@ serde_json = "1"
 tokio      = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 
 # >>> taktora-examples-local-deps >>>
-[patch.crates-io]
-taktora-executor                = { path = "../../crates/taktora-executor" }
-taktora-executor-tracing        = { path = "../../crates/taktora-executor-tracing" }
-taktora-log                     = { path = "../../crates/taktora-log" }
-taktora-log-dlt                 = { path = "../../crates/taktora-log-dlt" }
-taktora-bounded-alloc           = { path = "../../crates/taktora-bounded-alloc" }
-taktora-connector-core          = { path = "../../crates/taktora-connector-core" }
-taktora-connector-transport-iox = { path = "../../crates/taktora-connector-transport-iox" }
-taktora-connector-codec         = { path = "../../crates/taktora-connector-codec" }
-taktora-connector-host          = { path = "../../crates/taktora-connector-host" }
-taktora-connector-can           = { path = "../../crates/taktora-connector-can" }
-taktora-connector-ethercat      = { path = "../../crates/taktora-connector-ethercat" }
-taktora-connector-zenoh         = { path = "../../crates/taktora-connector-zenoh" }
+# [patch.crates-io]
+# taktora-executor                = { path = "../../crates/taktora-executor" }
+# taktora-executor-tracing        = { path = "../../crates/taktora-executor-tracing" }
+# taktora-log                     = { path = "../../crates/taktora-log" }
+# taktora-log-dlt                 = { path = "../../crates/taktora-log-dlt" }
+# taktora-bounded-alloc           = { path = "../../crates/taktora-bounded-alloc" }
+# taktora-connector-core          = { path = "../../crates/taktora-connector-core" }
+# taktora-connector-transport-iox = { path = "../../crates/taktora-connector-transport-iox" }
+# taktora-connector-codec         = { path = "../../crates/taktora-connector-codec" }
+# taktora-connector-host          = { path = "../../crates/taktora-connector-host" }
+# taktora-connector-can           = { path = "../../crates/taktora-connector-can" }
+# taktora-connector-ethercat      = { path = "../../crates/taktora-connector-ethercat" }
+# taktora-connector-zenoh         = { path = "../../crates/taktora-connector-zenoh" }
 # <<< taktora-examples-local-deps <<<
