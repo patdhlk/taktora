@@ -758,15 +758,25 @@ EtherCAT reference connector
 
 .. req:: Distributed Clocks cycle path uses tx_rx_dc
    :id: REQ_0330
-   :status: implemented
+   :status: open
    :satisfies: FEAT_0041
-   :links: IMPL_0050, TEST_0224
 
    When ``EthercatConnectorOptions::distributed_clocks`` is ``true``,
    the cycle shall call ``ethercrab::SubDeviceGroup::tx_rx_dc``;
    otherwise it shall call ``ethercrab::SubDeviceGroup::tx_rx``. This
    refines :need:`REQ_0318` by specifying the per-cycle behaviour of
    the DC opt-in.
+
+   **Implementation status (2026-05-28).** Deferred. ``tx_rx_dc`` is
+   only callable when the ``SubDeviceGroup`` typestate is ``HasDc``,
+   but the current ``EthercrabBusDriver::bring_up`` walks
+   PRE-OP → OP via ``into_op`` which yields ``NoDc``. Honouring this
+   requirement requires the alternate bring-up path
+   (``into_pre_op_pdi`` → ``configure_dc_sync`` →
+   ``request_into_op``) and threading the ``HasDc`` typestate
+   through ``OperationalState`` (and ``recover``). The mock-side
+   ``CycleKind`` recorder (:need:`TEST_0224`) is in place to drive
+   that follow-on once it lands.
 
 .. req:: Bus-level recovery on cycle error
    :id: REQ_0331
