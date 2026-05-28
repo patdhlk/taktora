@@ -93,3 +93,21 @@ fn options_default_reconnect_policy_factory_yields_fresh_instances() {
         "factory must yield a fresh boxed-dyn per call"
     );
 }
+
+/// TEST_0224 (precursor) — CycleKind::Plain recorded by default.
+#[tokio::test]
+async fn mock_records_cycle_kind_plain_by_default() {
+    use taktora_connector_ethercat::mock::CycleKind;
+    let mut mock = MockBusDriver::new();
+    mock.cycle().await.expect("cycle");
+    assert_eq!(mock.cycle_kinds(), vec![CycleKind::Plain]);
+}
+
+/// TEST_0224 — CycleKind::Dc recorded when the mock is marked DC.
+#[tokio::test]
+async fn mock_records_cycle_kind_dc_when_marked() {
+    use taktora_connector_ethercat::mock::CycleKind;
+    let mut mock = MockBusDriver::new().with_dc_cycle_kind();
+    mock.cycle().await.expect("cycle");
+    assert_eq!(mock.cycle_kinds(), vec![CycleKind::Dc]);
+}

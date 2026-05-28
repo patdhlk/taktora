@@ -67,7 +67,7 @@ pub use driver::{BringUp, BusDriver};
 pub use ethercrab_driver::EthercrabBusDriver;
 pub use gateway::EthercatGateway;
 pub use health::EthercatHealthMonitor;
-pub use mock::MockBusDriver;
+pub use mock::{CycleKind, MockBusDriver};
 pub use options::{
     EthercatConnectorOptions, EthercatConnectorOptionsBuilder, PdoEntry, SubDeviceMap,
 };

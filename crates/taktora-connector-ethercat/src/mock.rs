@@ -10,6 +10,24 @@ use taktora_connector_core::ConnectorError;
 
 use crate::driver::{BringUp, BusDriver};
 
+/// Which cycle method a `cycle` call represents. Set on the mock via
+/// [`MockBusDriver::with_dc_cycle_kind`]; recorded into
+/// `MockState::cycle_kinds` on every `cycle` call. Used by tests
+/// asserting the DC branch (`REQ_0330`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CycleKind {
+    /// `group.tx_rx` — the non-DC code path.
+    Plain,
+    /// `group.tx_rx_dc` — the DC opt-in code path.
+    Dc,
+}
+
+impl Default for CycleKind {
+    fn default() -> Self {
+        Self::Plain
+    }
+}
+
 /// Programmable [`BusDriver`] for tests. Records every method call
 /// and lets tests preload sequences of return values.
 ///
@@ -55,6 +73,11 @@ struct MockState {
     recovery_sequence: VecDeque<Result<BringUp, String>>,
     /// Number of `recover` calls completed.
     recover_calls: u32,
+    /// Default `CycleKind` recorded on every `cycle` call. Defaults to
+    /// `Plain`; set to `Dc` via [`MockBusDriver::with_dc_cycle_kind`].
+    cycle_kind: CycleKind,
+    /// Every cycle call's recorded kind, ordered earliest-first.
+    cycle_kinds: Vec<CycleKind>,
 }
 
 impl MockBusDriver {
@@ -186,6 +209,21 @@ impl MockBusDriver {
         self
     }
 
+    /// Mark every subsequent `cycle` call as DC. Used by tests that
+    /// stand in for the production driver's DC branch behaviour.
+    #[must_use]
+    pub fn with_dc_cycle_kind(self) -> Self {
+        self.lock().cycle_kind = CycleKind::Dc;
+        self
+    }
+
+    /// Snapshot of every cycle kind recorded since construction
+    /// (earliest first).
+    #[must_use]
+    pub fn cycle_kinds(&self) -> Vec<CycleKind> {
+        self.lock().cycle_kinds.clone()
+    }
+
     /// Snapshot the outputs buffer for `address`. Returns `None`
     /// when no buffer was configured for that SubDevice.
     ///
@@ -248,6 +286,8 @@ impl BusDriver for MockBusDriver {
         let (wkc, loopback) = {
             let mut state = self.lock();
             state.cycle_calls += 1;
+            let kind = state.cycle_kind;
+            state.cycle_kinds.push(kind);
             let wkc = state
                 .wkc_sequence
                 .pop_front()
