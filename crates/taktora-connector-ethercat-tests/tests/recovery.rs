@@ -111,3 +111,116 @@ async fn mock_records_cycle_kind_dc_when_marked() {
     mock.cycle().await.expect("cycle");
     assert_eq!(mock.cycle_kinds(), vec![CycleKind::Dc]);
 }
+
+use std::sync::Arc as TestArc;
+use std::time::Duration;
+
+use taktora_connector_core::ExponentialBackoffBuilder;
+use taktora_connector_ethercat::{CycleRunner, EthercatHealthMonitor};
+
+/// TEST_0225 — cycle Err triggers BusDriver::recover per policy and
+/// the runner adopts the recover()'s expected_wkc.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn cycle_err_triggers_recover_per_policy() {
+    let opts = EthercatConnectorOptions::builder()
+        .network_interface("mock0")
+        .cycle_time(Duration::from_millis(1))
+        .reconnect_policy_factory(TestArc::new(|| {
+            Box::new(
+                ExponentialBackoffBuilder::new()
+                    .max_attempts(3)
+                    .initial(Duration::from_millis(1))
+                    .max(Duration::from_millis(10))
+                    .jitter(0.0)
+                    .build(),
+            )
+        }))
+        .build();
+
+    let mock = MockBusDriver::new()
+        .with_bring_up(BringUp {
+            expected_wkc: 3,
+            subdevice_count: 1,
+        })
+        .with_wkc_sequence([3, 3])
+        .with_cycle_err_after(3, "synthetic fault")
+        .with_recovery_sequence([Ok::<_, String>(BringUp {
+            expected_wkc: 5,
+            subdevice_count: 1,
+        })])
+        .with_default_cycle_wkc(5);
+
+    let health = TestArc::new(EthercatHealthMonitor::new());
+    let mut runner = CycleRunner::new(mock, &opts, TestArc::clone(&health))
+        .await
+        .expect("bring_up");
+
+    // Drive a series of ticks. Each tick advances tokio's paused
+    // clock so the scheduler's `cycle_time` is honoured.
+    let mut now = std::time::Instant::now();
+    for _ in 0..8 {
+        let _ = runner.tick(now).await;
+        now += Duration::from_millis(2);
+    }
+
+    assert_eq!(runner.driver().recover_calls(), 1);
+    assert_eq!(runner.expected_wkc(), 5);
+}
+
+/// TEST_0226 — exact HealthEvent sequence across a single recovery
+/// episode.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn health_events_match_recovery_table() {
+    let opts = EthercatConnectorOptions::builder()
+        .network_interface("mock0")
+        .cycle_time(Duration::from_millis(1))
+        .reconnect_policy_factory(TestArc::new(|| {
+            Box::new(
+                ExponentialBackoffBuilder::new()
+                    .max_attempts(3)
+                    .initial(Duration::from_millis(1))
+                    .max(Duration::from_millis(2))
+                    .jitter(0.0)
+                    .build(),
+            )
+        }))
+        .build();
+
+    let mock = MockBusDriver::new()
+        .with_bring_up(BringUp {
+            expected_wkc: 3,
+            subdevice_count: 1,
+        })
+        .with_wkc_sequence([3])
+        .with_cycle_err_after(2, "synthetic fault")
+        .with_recovery_sequence([Ok::<_, String>(BringUp {
+            expected_wkc: 3,
+            subdevice_count: 1,
+        })])
+        .with_default_cycle_wkc(3);
+
+    let health = TestArc::new(EthercatHealthMonitor::new());
+    let sub = health.subscribe();
+    let mut runner = CycleRunner::new(mock, &opts, TestArc::clone(&health))
+        .await
+        .expect("bring_up");
+
+    let mut now = std::time::Instant::now();
+    for _ in 0..6 {
+        let _ = runner.tick(now).await;
+        now += Duration::from_millis(2);
+    }
+
+    // Drain the health-event subscription. `subscribe()` returns a
+    // `crossbeam_channel::Receiver`, so the idiomatic non-blocking
+    // drain is `try_recv()` until `Empty` is returned. Exact expected
+    // sequence: Up (set by bring_up) → Degraded (cycle failed) →
+    // Connecting (recover episode in flight) → Up (recover succeeded).
+    let mut kinds = vec![];
+    while let Ok(ev) = sub.try_recv() {
+        kinds.push(ev.to.kind());
+    }
+
+    use taktora_connector_core::ConnectorHealthKind::{Connecting, Degraded, Up};
+    assert_eq!(kinds, vec![Up, Degraded, Connecting, Up]);
+}

@@ -25,6 +25,11 @@ use crate::options::EthercatConnectorOptions;
 use crate::scheduler::{CycleDecision, CycleScheduler};
 use crate::wkc::{WkcVerdict, evaluate_wkc};
 
+// Recovery loop (REQ_0331 / REQ_0333) needs `tokio::time::sleep` for
+// the backoff wait. Imported at module scope so the inner helper is
+// easy to read.
+use tokio::time::sleep;
+
 /// One cycle's outcome, returned from [`CycleRunner::tick`] when a
 /// cycle actually fired (the scheduler reported `Fire`).
 #[derive(Clone, Copy, Debug)]
@@ -46,6 +51,10 @@ pub struct CycleRunner<D> {
     health: Arc<EthercatHealthMonitor>,
     expected_wkc: u16,
     cycle_index: u64,
+    /// Cloned at construction so the recovery loop (`REQ_0331` /
+    /// `REQ_0333`) can mint a fresh `ReconnectPolicy` per episode
+    /// without holding a borrow on the caller's options.
+    options_snapshot: EthercatConnectorOptions,
 }
 
 impl<D> CycleRunner<D>
@@ -77,6 +86,7 @@ where
             health,
             expected_wkc,
             cycle_index: 0,
+            options_snapshot: options.clone(),
         })
     }
 
@@ -121,16 +131,86 @@ where
         if self.scheduler.poll(now) == CycleDecision::Skip {
             return Ok(None);
         }
-        let working_counter = self.driver.cycle().await?;
-        let verdict = evaluate_wkc(self.expected_wkc, working_counter);
-        self.apply_verdict(verdict);
-        let report = CycleReport {
-            cycle_index: self.cycle_index,
-            working_counter,
-            verdict,
-        };
-        self.cycle_index += 1;
-        Ok(Some(report))
+        match self.driver.cycle().await {
+            Ok(working_counter) => {
+                let verdict = evaluate_wkc(self.expected_wkc, working_counter);
+                self.apply_verdict(verdict);
+                let report = CycleReport {
+                    cycle_index: self.cycle_index,
+                    working_counter,
+                    verdict,
+                };
+                self.cycle_index += 1;
+                Ok(Some(report))
+            }
+            Err(e) => {
+                // REQ_0331 / REQ_0333: enter a recovery episode. The
+                // failed cycle does not advance `cycle_index` and does
+                // not emit a `CycleReport`. Health transitions are
+                // best-effort — a redundant `Up → Degraded` (e.g. WKC
+                // mismatch followed by a hard fault on the same cycle)
+                // can be illegal per `ARCH_0012` and is silently
+                // dropped.
+                let reason = format!("cycle failed: {e}");
+                let _ = self
+                    .health
+                    .transition_to(ConnectorHealth::Degraded { reason });
+                self.recover_per_policy().await?;
+                Ok(None)
+            }
+        }
+    }
+
+    /// Inner recovery loop — called once per recovery episode.
+    /// Consults [`EthercatConnectorOptions::new_reconnect_policy`] for
+    /// a fresh policy, walks `next_backoff()` until either:
+    ///
+    /// * `driver.recover()` returns `Ok(bring_up)` — adopt the new
+    ///   `expected_wkc` (topology may have shifted mid-run), transition
+    ///   to `Up`, return `Ok(())` so the next `tick` resumes cycling;
+    /// * the policy returns `None` — transition to
+    ///   `Down("reconnect policy exhausted")` and return
+    ///   `Err(ConnectorError::Down)` so the runner exits.
+    ///
+    /// `REQ_0331`, `REQ_0333`.
+    async fn recover_per_policy(&mut self) -> Result<(), ConnectorError> {
+        let mut policy = self.options_snapshot.new_reconnect_policy();
+        loop {
+            let Some(backoff) = policy.next_backoff() else {
+                let reason = "reconnect policy exhausted".to_string();
+                // Best-effort terminal transition. Down requires the
+                // current state to be Connecting / Up / Degraded;
+                // recover_per_policy is only entered from the
+                // `Degraded` branch above, so this is legal at the
+                // first iteration. On subsequent iterations the state
+                // is `Degraded` again (set by the last `recover
+                // failed` arm), so the transition is still legal.
+                let _ = self.health.transition_to(ConnectorHealth::Down {
+                    reason: reason.clone(),
+                    since: Instant::now(),
+                });
+                return Err(ConnectorError::Down { reason });
+            };
+            sleep(backoff).await;
+            let _ = self.health.transition_to(ConnectorHealth::Connecting {
+                since: Instant::now(),
+            });
+            match self.driver.recover().await {
+                Ok(bring_up) => {
+                    self.expected_wkc = bring_up.expected_wkc;
+                    let _ = self.health.transition_to(ConnectorHealth::Up);
+                    return Ok(());
+                }
+                Err(e) => {
+                    let reason = format!("recover failed: {e}");
+                    let _ = self
+                        .health
+                        .transition_to(ConnectorHealth::Degraded { reason });
+                    // Loop continues; next iteration consults the
+                    // policy for the next backoff (or exhaustion).
+                }
+            }
+        }
     }
 
     fn apply_verdict(&self, verdict: WkcVerdict) {

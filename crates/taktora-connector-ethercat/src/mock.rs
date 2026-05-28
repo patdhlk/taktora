@@ -78,6 +78,11 @@ struct MockState {
     cycle_kind: CycleKind,
     /// Every cycle call's recorded kind, ordered earliest-first.
     cycle_kinds: Vec<CycleKind>,
+    /// When set, the `cycle_calls`-th cycle call (1-indexed,
+    /// matching the post-increment value) returns
+    /// `Err(ConnectorError::Down { reason })`. Cleared once it
+    /// fires.
+    cycle_err_after: Option<(u32, String)>,
 }
 
 impl MockBusDriver {
@@ -189,6 +194,17 @@ impl MockBusDriver {
         self
     }
 
+    /// Make the `n`-th cycle call (1-indexed) fail with `reason`. The
+    /// failure fires exactly once; subsequent cycles fall through to
+    /// the wkc_sequence / default_cycle_wkc fallback. Used by tests
+    /// that need to drive the cycle runner's recovery loop
+    /// (`REQ_0331` / `REQ_0333`).
+    #[must_use]
+    pub fn with_cycle_err_after(self, n: u32, reason: impl Into<String>) -> Self {
+        self.lock().cycle_err_after = Some((n, reason.into()));
+        self
+    }
+
     /// Number of `recover` calls completed since construction.
     pub fn recover_calls(&self) -> u32 {
         self.lock().recover_calls
@@ -283,9 +299,31 @@ impl BusDriver for MockBusDriver {
     }
 
     async fn cycle(&mut self) -> Result<u16, ConnectorError> {
-        let (wkc, loopback) = {
+        // Pre-increment to compute the target index. Check
+        // cycle_err_after BEFORE recording cycle_kind / pushing kinds /
+        // draining wkc_sequence so a programmed error counts as one
+        // cycle but produces no other visible side-effects on this
+        // call. Splitting the critical sections (rather than folding
+        // the err check into the original one) keeps the WKC + kind
+        // recording cleanly skipped on the failure path.
+        let err = {
             let mut state = self.lock();
             state.cycle_calls += 1;
+            if let Some((target, _)) = state.cycle_err_after.as_ref() {
+                if state.cycle_calls == *target {
+                    state.cycle_err_after.take().map(|(_, reason)| reason)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        if let Some(reason) = err {
+            return Err(ConnectorError::Down { reason });
+        }
+        let (wkc, loopback) = {
+            let mut state = self.lock();
             let kind = state.cycle_kind;
             state.cycle_kinds.push(kind);
             let wkc = state

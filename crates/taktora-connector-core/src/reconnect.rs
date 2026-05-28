@@ -21,6 +21,21 @@ pub trait ReconnectPolicy: Send {
     /// Reset internal state so the next [`Self::next_delay`] returns
     /// the initial delay.
     fn reset(&mut self);
+
+    /// Bounded form of [`Self::next_delay`] — returns `Some(delay)`
+    /// while the policy still has attempts in its budget, `None` once
+    /// the budget is exhausted. Default implementation never exhausts
+    /// (just wraps `next_delay`); policies with a finite attempt
+    /// budget (e.g. [`ExponentialBackoff`] with
+    /// [`ExponentialBackoffBuilder::max_attempts`]) override this to
+    /// return `None` once the budget is reached.
+    ///
+    /// `REQ_0333` — the `EtherCAT` cycle runner consults this method
+    /// so a finite-budget policy can terminate the recovery loop with
+    /// a `Down("reconnect policy exhausted")` transition.
+    fn next_backoff(&mut self) -> Option<Duration> {
+        Some(self.next_delay())
+    }
 }
 
 /// Builder for [`ExponentialBackoff`] — pulled out so the fields can
@@ -32,12 +47,14 @@ pub struct ExponentialBackoffBuilder {
     growth: f64,
     jitter: f64,
     seed: Option<u64>,
+    max_attempts: Option<u32>,
 }
 
 impl ExponentialBackoffBuilder {
     /// Construct a builder with the default initial delay (100 ms),
     /// maximum delay (30 s), growth factor (2.0), and jitter ratio
-    /// (0.1).
+    /// (0.1). The default attempt budget is unlimited; configure a
+    /// finite budget via [`Self::max_attempts`].
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -46,7 +63,20 @@ impl ExponentialBackoffBuilder {
             growth: 2.0,
             jitter: 0.1,
             seed: None,
+            max_attempts: None,
         }
+    }
+
+    /// Bound the number of [`ReconnectPolicy::next_backoff`] calls
+    /// before the policy reports exhaustion (returns `None`). Default
+    /// is unlimited. `REQ_0333`.
+    ///
+    /// The legacy [`ReconnectPolicy::next_delay`] entry point is
+    /// unaffected — it never exhausts.
+    #[must_use]
+    pub const fn max_attempts(mut self, n: u32) -> Self {
+        self.max_attempts = Some(n);
+        self
     }
 
     /// Override the initial delay. Must be positive.
@@ -112,6 +142,7 @@ impl ExponentialBackoffBuilder {
             jitter,
             attempts: 0,
             rng,
+            max_attempts: self.max_attempts,
         }
     }
 }
@@ -125,6 +156,11 @@ impl Default for ExponentialBackoffBuilder {
 /// Exponential-backoff [`ReconnectPolicy`]. The `attempts`-th call to
 /// [`Self::next_delay`] returns
 /// `min(initial * growth^attempts, max) * (1 + jitter * uniform(-1, 1))`.
+///
+/// When `max_attempts` is `Some(n)`, [`ReconnectPolicy::next_backoff`]
+/// returns `None` once `n` delays have been issued — driving the
+/// `EtherCAT` cycle runner's recovery loop to the `Down("reconnect
+/// policy exhausted")` terminal (`REQ_0333`).
 #[derive(Debug)]
 pub struct ExponentialBackoff {
     initial: Duration,
@@ -133,6 +169,7 @@ pub struct ExponentialBackoff {
     jitter: f64,
     attempts: u32,
     rng: StdRng,
+    max_attempts: Option<u32>,
 }
 
 impl ExponentialBackoff {
@@ -186,6 +223,15 @@ impl ReconnectPolicy for ExponentialBackoff {
 
     fn reset(&mut self) {
         self.attempts = 0;
+    }
+
+    fn next_backoff(&mut self) -> Option<Duration> {
+        if let Some(budget) = self.max_attempts {
+            if self.attempts >= budget {
+                return None;
+            }
+        }
+        Some(self.next_delay())
     }
 }
 

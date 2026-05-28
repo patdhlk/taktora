@@ -28,4 +28,4 @@ taktora-connector-transport-iox  = { workspace = true }
 iceoryx2   = { workspace = true }
 serde      = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
-tokio      = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+tokio      = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time", "test-util"] }
