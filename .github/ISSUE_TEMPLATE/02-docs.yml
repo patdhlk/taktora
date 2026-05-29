@@ -1,0 +1,71 @@
+name: Documentation issue
+description: Typo, outdated docs, broken link, or missing/confusing content.
+title: "docs: "
+labels: ["area:docs", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Documentation lives in three places: the top-level README, the
+        spec site (https://taktora.dev/, built from `spec/`), and the
+        per-crate `README.md` / rustdoc inside `crates/*/`.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      description: Please confirm before filing.
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I reproduced the issue on the latest commit of `main`.
+          required: true
+        - label: I read the relevant README or spec section.
+          required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where is the problem?
+      description: URL on taktora.dev, or path in `spec/`, or path in a crate `README.md`.
+      placeholder: e.g. https://taktora.dev/requirements/connector.html#REQ_0316
+    validations:
+      required: true
+  - type: dropdown
+    id: docs_area
+    attributes:
+      label: Docs area
+      options:
+        - top-level README
+        - "spec/requirements"
+        - "spec/architecture"
+        - "spec/safety"
+        - crate-level rustdoc / README
+        - "examples/"
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What's wrong?
+      options:
+        - typo / grammar
+        - outdated
+        - missing
+        - confusing
+        - broken link
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested fix
+      description: Optional. A sentence, a sketch, or a PR link.
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **taktora is a pre-1.0 personal experiment.** There is no SLA,
+        no support, and no backwards-compatibility guarantee. Responses
+        are best-effort. See the [README](https://github.com/patdhlk/taktora#readme)
+        for the full status statement.
