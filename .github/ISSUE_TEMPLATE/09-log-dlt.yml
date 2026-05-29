@@ -1,0 +1,114 @@
+name: DLT logging issue
+description: Bug or problem in `taktora-log-dlt` — UDS/TCP transport, framing, or daemon interop.
+title: "log-dlt: "
+labels: ["area:log-dlt", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `taktora-log-dlt` is a pure-Rust AUTOSAR DLT R20-11 backend
+        that talks to a co-located COVESA `dlt-daemon` over a Unix
+        domain socket (default) or TCP.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      description: Please confirm before filing.
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I reproduced the issue on the latest commit of `main`.
+          required: true
+        - label: I read the relevant README or spec section.
+          required: true
+  - type: dropdown
+    id: usage
+    attributes:
+      label: How are you using it?
+      options:
+        - "via taktora-log facade"
+        - "via log::Log directly"
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options:
+        - "UDS (default)"
+        - "TCP"
+        - "not yet connected"
+    validations:
+      required: true
+  - type: input
+    id: endpoint
+    attributes:
+      label: Socket path / host:port
+      placeholder: e.g. /tmp/dlt or 127.0.0.1:3490
+  - type: input
+    id: daemon_version
+    attributes:
+      label: dlt-daemon version
+      placeholder: e.g. 2.18.10
+    validations:
+      required: true
+  - type: dropdown
+    id: system_tests
+    attributes:
+      label: Is the `system-tests` feature enabled?
+      options:
+        - "No"
+        - "Yes"
+  - type: input
+    id: viewer
+    attributes:
+      label: DLT viewer used to inspect the trace
+      description: Optional.
+      placeholder: e.g. dlt-viewer 2.x, dlt-receive
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: What happens? Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Reproducer
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample DLT payload or daemon log
+      render: shell
+  - type: input
+    id: commit
+    attributes:
+      label: Workspace commit SHA
+      placeholder: e.g. 7e3d42e
+    validations:
+      required: true
+  - type: input
+    id: toolchain
+    attributes:
+      label: Rust toolchain
+      placeholder: e.g. rustc 1.85.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS & kernel
+      placeholder: e.g. Linux 6.6.0
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **taktora is a pre-1.0 personal experiment.** There is no SLA,
+        no support, and no backwards-compatibility guarantee. Responses
+        are best-effort. See the [README](https://github.com/patdhlk/taktora#readme)
+        for the full status statement.

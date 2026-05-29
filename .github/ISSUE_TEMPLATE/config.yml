@@ -1,0 +1,15 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/patdhlk/taktora/security/advisories/new
+    about: >
+      Please do not file public security issues. Use GitHub's private
+      security-advisory flow instead. See SECURITY.md for details.
+  - name: Specification and architecture docs
+    url: https://taktora.dev/
+    about: >
+      Browse the spec site built from `spec/` on every push to `main`.
+  - name: README and quick start
+    url: https://github.com/patdhlk/taktora#readme
+    about: >
+      Project overview, status, and pre-1.0 disclaimer.

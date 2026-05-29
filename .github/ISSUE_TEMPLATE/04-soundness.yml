@@ -1,0 +1,102 @@
+name: Soundness / unsafe / safety report
+description: Report UB, broken `unsafe` invariants, data races, or safety-spec inconsistencies. NOT for security vulnerabilities.
+title: "soundness: "
+labels: ["area:soundness", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > **If this is a security vulnerability, please file a private
+        > advisory instead** —
+        > <https://github.com/patdhlk/taktora/security/advisories/new>.
+        >
+        > This template is for non-security soundness issues:
+        > undefined behavior, broken `unsafe` invariants, data races,
+        > aliasing violations, or safety-spec (`spec/safety/`)
+        > inconsistencies.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      description: Please confirm before filing.
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I reproduced the issue on the latest commit of `main`.
+          required: true
+        - label: I read the relevant README or spec section.
+          required: true
+        - label: This is NOT a security vulnerability (if it is, I will close this and file a private advisory).
+          required: true
+  - type: input
+    id: block
+    attributes:
+      label: Affected `unsafe` block or function
+      description: "Format: `crate::module::function` plus line range if known."
+      placeholder: e.g. taktora_executor::publisher::send_raw (lines 142-158)
+    validations:
+      required: true
+  - type: textarea
+    id: invariant
+    attributes:
+      label: What invariant do you believe is violated?
+      description: If a `// SAFETY:` comment names the invariant, please quote it.
+    validations:
+      required: true
+  - type: checkboxes
+    id: manifests
+    attributes:
+      label: How does it manifest?
+      description: Tick all that apply.
+      options:
+        - label: UB observed at runtime
+        - label: Miri error
+        - label: ASan / TSan / UBSan error
+        - label: data race in loom
+        - label: aliasing violation
+        - label: panic in code claiming `unsafe` invariant
+        - label: safety-spec inconsistency (`spec/safety`)
+        - label: other
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Reproducer
+      description: Minimal repro, including Miri / sanitizer invocation if applicable.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: sanitizer
+    attributes:
+      label: Sanitizer / Miri output
+      description: Optional. Paste the relevant section.
+      render: shell
+  - type: input
+    id: commit
+    attributes:
+      label: Workspace commit SHA
+      placeholder: e.g. 7e3d42e
+    validations:
+      required: true
+  - type: input
+    id: toolchain
+    attributes:
+      label: Rust toolchain
+      placeholder: e.g. rustc 1.85.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS & kernel
+      placeholder: e.g. Linux 6.6.0
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **taktora is a pre-1.0 personal experiment.** There is no SLA,
+        no support, and no backwards-compatibility guarantee. Responses
+        are best-effort. See the [README](https://github.com/patdhlk/taktora#readme)
+        for the full status statement.

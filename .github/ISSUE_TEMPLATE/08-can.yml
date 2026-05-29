@@ -1,0 +1,133 @@
+name: CAN connector issue
+description: Bug or problem in `taktora-connector-can`, mock or SocketCAN.
+title: "can: "
+labels: ["area:connector-can", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `taktora-connector-can` ships two `CanInterfaceLike` back-ends:
+        `MockCanInterface` (always available) and `RealCanInterface`
+        (gated on the `socketcan-integration` Cargo feature, **Linux
+        only**). Please pick the one your repro uses and fill the
+        matching section below.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      description: Please confirm before filing.
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I reproduced the issue on the latest commit of `main`.
+          required: true
+        - label: I read the relevant README or spec section.
+          required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: CAN interface
+      options:
+        - "MockCanInterface"
+        - "RealCanInterface (SocketCAN, socketcan-integration feature, Linux only)"
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ### MockCanInterface — fill if you picked Mock above
+  - type: textarea
+    id: mock_rx
+    attributes:
+      label: Programmed RX frames
+  - type: textarea
+    id: mock_tx
+    attributes:
+      label: Programmed TX expectations
+  - type: markdown
+    attributes:
+      value: |
+        ### RealCanInterface — fill if you picked Real above
+
+        > **Note:** `RealCanInterface` requires Linux SocketCAN (`PF_CAN`).
+        > On macOS / Windows the `socketcan-integration` feature is a no-op.
+  - type: input
+    id: real_distro
+    attributes:
+      label: Linux distro & kernel
+      placeholder: e.g. Ubuntu 24.04 / Linux 6.6.0
+  - type: input
+    id: real_iface
+    attributes:
+      label: CAN interface name
+      placeholder: e.g. vcan0, can0
+  - type: input
+    id: real_socketcan_version
+    attributes:
+      label: socketcan crate version
+      value: "3.x"
+  - type: input
+    id: real_bitrate
+    attributes:
+      label: Bitrate / sample point
+      placeholder: e.g. 500 kbit/s, sample point 87.5%
+  - type: dropdown
+    id: real_frame
+    attributes:
+      label: Frame variant
+      options:
+        - "n/a (mock)"
+        - "CAN 2.0A"
+        - "CAN 2.0B"
+        - "CAN FD"
+  - type: markdown
+    attributes:
+      value: |
+        ### Reproducer and observed behavior
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: What happens? Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Reproducer
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      render: shell
+  - type: input
+    id: commit
+    attributes:
+      label: Workspace commit SHA
+      placeholder: e.g. 7e3d42e
+    validations:
+      required: true
+  - type: input
+    id: toolchain
+    attributes:
+      label: Rust toolchain
+      placeholder: e.g. rustc 1.85.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS & kernel
+      placeholder: e.g. Linux 6.6.0
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **taktora is a pre-1.0 personal experiment.** There is no SLA,
+        no support, and no backwards-compatibility guarantee. Responses
+        are best-effort. See the [README](https://github.com/patdhlk/taktora#readme)
+        for the full status statement.

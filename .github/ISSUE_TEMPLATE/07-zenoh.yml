@@ -1,0 +1,137 @@
+name: Zenoh connector issue
+description: Bug or problem in `taktora-connector-zenoh`, mock or real session.
+title: "zenoh: "
+labels: ["area:connector-zenoh", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `taktora-connector-zenoh` ships two `ZenohSessionLike` back-ends:
+        `MockZenohSession` (always available) and `RealZenohSession`
+        (gated on the `zenoh-integration` Cargo feature). Please pick
+        the one your repro uses and fill the matching section below.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      description: Please confirm before filing.
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I reproduced the issue on the latest commit of `main`.
+          required: true
+        - label: I read the relevant README or spec section.
+          required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Session back-end
+      options:
+        - "MockZenohSession"
+        - "RealZenohSession (zenoh-integration feature)"
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ### MockZenohSession — fill if you picked Mock above
+  - type: input
+    id: mock_peer_count
+    attributes:
+      label: Programmed peer_count knob
+      placeholder: e.g. 2
+  - type: textarea
+    id: mock_responses
+    attributes:
+      label: Programmed responses / queryable state
+  - type: markdown
+    attributes:
+      value: |
+        ### RealZenohSession — fill if you picked Real above
+  - type: input
+    id: real_zenoh_version
+    attributes:
+      label: zenoh crate version
+      value: "1.x"
+  - type: textarea
+    id: real_topology
+    attributes:
+      label: Topology
+      description: Peer count, router yes/no, locators (e.g. `tcp/127.0.0.1:7447`).
+  - type: checkboxes
+    id: real_transports
+    attributes:
+      label: Transport in use
+      options:
+        - label: transport_tcp
+        - label: transport_udp
+        - label: transport_quic
+        - label: transport_unixsock
+        - label: other
+  - type: markdown
+    attributes:
+      value: |
+        ### Operation and observed behavior
+  - type: dropdown
+    id: operation
+    attributes:
+      label: Operation
+      options:
+        - "pub/sub"
+        - "query/reply"
+        - "health-watcher"
+        - "mixed"
+    validations:
+      required: true
+  - type: textarea
+    id: routing
+    attributes:
+      label: Routing under test
+      description: "`ZenohRouting`: key expression, congestion control, reliability, priority."
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: What happens? Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Reproducer
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      render: shell
+  - type: input
+    id: commit
+    attributes:
+      label: Workspace commit SHA
+      placeholder: e.g. 7e3d42e
+    validations:
+      required: true
+  - type: input
+    id: toolchain
+    attributes:
+      label: Rust toolchain
+      placeholder: e.g. rustc 1.85.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS & kernel
+      placeholder: e.g. Linux 6.6.0
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **taktora is a pre-1.0 personal experiment.** There is no SLA,
+        no support, and no backwards-compatibility guarantee. Responses
+        are best-effort. See the [README](https://github.com/patdhlk/taktora#readme)
+        for the full status statement.

@@ -1,0 +1,133 @@
+name: Bug report
+description: Report a bug in taktora.
+title: "bug: "
+labels: ["kind:bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please fill the form completely — the
+        per-area templates (EtherCAT, Zenoh, CAN, DLT) collect richer
+        info, so reach for those if your issue is connector-specific.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      description: Please confirm before filing.
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I reproduced the issue on the latest commit of `main`.
+          required: true
+        - label: I read the relevant README or spec section.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One paragraph describing what's wrong.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which workspace crate (or cross-cutting bucket) is affected?
+      options:
+        - taktora-executor
+        - taktora-executor-tracing
+        - taktora-connector-core
+        - taktora-connector-host
+        - taktora-connector-transport-iox
+        - taktora-connector-codec
+        - taktora-connector-ethercat
+        - taktora-connector-zenoh
+        - taktora-connector-can
+        - taktora-log
+        - taktora-log-dlt
+        - taktora-bounded-alloc
+        - taktora-replay
+        - docs / spec-site
+        - examples
+        - CI / build
+        - other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: >
+        Minimal code or commands. Please mention which cargo features
+        are enabled, and include the smallest possible failing input.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior, including any panic / error / backtrace
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Workspace commit SHA
+      description: Output of `git rev-parse HEAD`, or the crate version if installed from crates.io.
+      placeholder: e.g. 7e3d42e
+    validations:
+      required: true
+  - type: input
+    id: toolchain
+    attributes:
+      label: Rust toolchain
+      description: Output of `rustc --version --verbose`.
+      placeholder: e.g. rustc 1.85.0 (xxxxxxxx 2025-xx-xx)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS & kernel
+      placeholder: e.g. Linux 6.6.0 / Ubuntu 24.04, or macOS 14.5
+    validations:
+      required: true
+  - type: input
+    id: iceoryx2
+    attributes:
+      label: iceoryx2 version in use
+      value: "0.8.x"
+  - type: checkboxes
+    id: features
+    attributes:
+      label: Cargo features enabled
+      description: Tick all that apply.
+      options:
+        - label: "`json` (taktora-connector-codec)"
+        - label: "`tracing` (taktora-executor)"
+        - label: "`thread_attrs` (taktora-executor)"
+        - label: "`bus-integration` (taktora-connector-ethercat)"
+        - label: "`zenoh-integration` (taktora-connector-zenoh)"
+        - label: "`socketcan-integration` (taktora-connector-can)"
+        - label: "`system-tests` (taktora-log-dlt)"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / additional context
+      description: Optional. Tracing output, DLT trace, full backtrace, links to flamegraphs, etc.
+      render: shell
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **taktora is a pre-1.0 personal experiment.** There is no SLA,
+        no support, and no backwards-compatibility guarantee. Responses
+        are best-effort. See the [README](https://github.com/patdhlk/taktora#readme)
+        for the full status statement.

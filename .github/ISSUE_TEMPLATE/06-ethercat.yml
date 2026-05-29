@@ -1,0 +1,149 @@
+name: EtherCAT connector issue
+description: Bug or problem in `taktora-connector-ethercat`, mock or real bus.
+title: "ethercat: "
+labels: ["area:connector-ethercat", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `taktora-connector-ethercat` ships two `BusDriver` back-ends:
+        `MockBusDriver` (always available) and `EthercrabBusDriver`
+        (gated on the `bus-integration` Cargo feature). Please pick
+        the one your repro uses and fill the matching section below.
+        YAML forms don't support conditional visibility — fill only
+        the branch that applies, leave the other empty.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      description: Please confirm before filing.
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I reproduced the issue on the latest commit of `main`.
+          required: true
+        - label: I read the relevant README or spec section.
+          required: true
+  - type: dropdown
+    id: bus_driver
+    attributes:
+      label: Bus driver
+      options:
+        - "MockBusDriver"
+        - "EthercrabBusDriver (real bus, bus-integration feature)"
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ### MockBusDriver — fill this section if you picked Mock above
+  - type: textarea
+    id: mock_wkc
+    attributes:
+      label: Programmed working-counter sequence
+      description: e.g. `[WorkingCounter::Ok, WorkingCounter::Mismatch, …]`
+  - type: textarea
+    id: mock_pdi
+    attributes:
+      label: Per-SubDevice PDI buffer sizes
+      description: e.g. `0x1001 → 8 bytes out / 4 bytes in`
+  - type: dropdown
+    id: mock_loopback
+    attributes:
+      label: Loopback enabled?
+      options:
+        - "n/a (real bus)"
+        - "Yes"
+        - "No"
+  - type: markdown
+    attributes:
+      value: |
+        ### EthercrabBusDriver — fill this section if you picked Ethercrab above
+  - type: input
+    id: real_nic
+    attributes:
+      label: NIC name / ETHERCAT_TEST_NIC value
+      placeholder: e.g. eth0
+  - type: textarea
+    id: real_topology
+    attributes:
+      label: EtherCAT topology
+      description: Number and type of SubDevices, vendor IDs, product codes (e.g. EK1100 + EL1008 + EL2004).
+  - type: input
+    id: real_ethercrab_version
+    attributes:
+      label: ethercrab crate version
+      value: "0.7"
+  - type: dropdown
+    id: real_state
+    attributes:
+      label: State reached
+      options:
+        - "n/a (mock)"
+        - "error before INIT"
+        - INIT
+        - PRE-OP
+        - SAFE-OP
+        - OP
+  - type: textarea
+    id: real_pdo
+    attributes:
+      label: PDO mapping (0x1C12 / 0x1C13 writes)
+      description: Optional. The SDO writes that configured PDO assignment.
+  - type: markdown
+    attributes:
+      value: |
+        ### Routing and observed behavior
+  - type: textarea
+    id: routing
+    attributes:
+      label: Routing under test
+      description: "`EthercatRouting`: subdevice address + bit offset + bit length for the channel(s) involved."
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: What happens? Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Reproducer
+      description: Code or commands; reference an example if applicable.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / tx_rx errors
+      render: shell
+  - type: input
+    id: commit
+    attributes:
+      label: Workspace commit SHA
+      placeholder: e.g. 7e3d42e
+    validations:
+      required: true
+  - type: input
+    id: toolchain
+    attributes:
+      label: Rust toolchain
+      placeholder: e.g. rustc 1.85.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS & kernel
+      placeholder: e.g. Linux 6.6.0
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **taktora is a pre-1.0 personal experiment.** There is no SLA,
+        no support, and no backwards-compatibility guarantee. Responses
+        are best-effort. See the [README](https://github.com/patdhlk/taktora#readme)
+        for the full status statement.
