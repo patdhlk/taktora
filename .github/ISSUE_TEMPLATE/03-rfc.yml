@@ -6,10 +6,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Substantial designs should land as a markdown file under
-        `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`.** Use
-        this issue to track the discussion and link the spec once
-        drafted. Small features belong in
+        **Substantial designs land as sphinx-needs directives in the
+        `spec/` tree** — typically `feat::` + child `req::` directives
+        under `spec/requirements/<topic>.rst`, or an `arch-decision::`
+        under `spec/architecture/` for ADRs. Set `:status: draft` on
+        new needs; promote to `open` once accepted. Use this issue to
+        track the discussion and reference the need IDs once drafted.
+
+        Small features belong in
         [`01-feature.yml`](?template=01-feature.yml).
   - type: checkboxes
     id: preflight
@@ -19,7 +23,7 @@ body:
       options:
         - label: I searched existing issues and didn't find a duplicate.
           required: true
-        - label: I reproduced the issue on the latest commit of `main`.
+        - label: I confirmed the design space isn't already covered by an existing spec or merged RFC.
           required: true
         - label: I read the relevant README or spec section.
           required: true
@@ -34,7 +38,7 @@ body:
     id: design
     attributes:
       label: Proposed design
-      description: A summary of the design, or a link to the draft spec file.
+      description: A summary of the design, plus the sphinx-needs IDs (e.g. FEAT_NNNN, REQ_NNNN, ADR_NNNN) if you've drafted them.
     validations:
       required: true
   - type: textarea

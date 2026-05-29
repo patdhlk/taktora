@@ -18,7 +18,7 @@ body:
       options:
         - label: I searched existing issues and didn't find a duplicate.
           required: true
-        - label: I reproduced the issue on the latest commit of `main`.
+        - label: I confirmed this feature is not already tracked or implemented on `main`.
           required: true
         - label: I read the relevant README or spec section.
           required: true
@@ -71,12 +71,18 @@ body:
     id: is_new_connector
     attributes:
       label: Is this a new connector, codec, or protocol back-end?
-      description: If Yes — please file an RFC (03-rfc.yml) instead. New connectors are large enough to deserve up-front design.
       options:
         - "No"
         - "Yes"
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: |
+        > **If you answered Yes above:** please file an
+        > [RFC](?template=03-rfc.yml) instead. New connectors, codecs,
+        > and protocol back-ends are large enough to deserve an
+        > up-front design pass before code.
   - type: dropdown
     id: implement
     attributes:

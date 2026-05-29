@@ -105,17 +105,33 @@ typos
 
 ## Specs and RFCs
 
+The project's specification is authored with
+[sphinx-needs](https://sphinx-needs.readthedocs.io/) and lives in
+the `spec/` tree, published to <https://taktora.dev/>. Need types
+declared in `spec/ubproject.toml` include `feat::` (features),
+`req::` (requirements), `spec::` (specifications), `impl::`
+(implementation pointers), `arch-decision::` (ADRs),
+`constraint::`, `quality-goal::`, and others.
+
 Anything substantial — new connector, new public trait, behavior
 that changes the cycle-loop semantics, anything that needs more
 than a paragraph to explain — goes through this loop:
 
 1. Open an RFC issue using `03-rfc.yml`.
-2. Draft a markdown design under
-   `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`.
-   Note that `docs/superpowers/` is gitignored locally — specs
-   live in your worktree, not in the published history.
-3. Discuss in the RFC issue until the design is settled.
-4. Open the implementation PR, link the RFC.
+2. Draft the design as sphinx-needs directives in the relevant
+   `spec/` page:
+   - New capabilities → `feat::` + child `req::` in
+     `spec/requirements/<topic>.rst`.
+   - Architecture / design decisions → `arch-decision::` in
+     `spec/architecture/<topic>.rst`.
+   - Safety analyses → `risk::` / `tsr::` / `aou::` in
+     `spec/safety/<topic>.rst`.
+   Set `:status: draft` on every new need.
+3. Discuss in the RFC issue, referencing the draft need IDs
+   (e.g. `FEAT_0123`, `REQ_0456`, `ADR_0007`).
+4. Promote `:status:` from `draft` to `open` once accepted.
+5. Open the implementation PR; link the RFC issue and the need
+   IDs it satisfies via `:satisfies:` on `impl::` directives.
 
 ## Labels
 
