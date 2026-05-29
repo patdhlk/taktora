@@ -17,7 +17,7 @@ body:
       options:
         - label: I searched existing issues and didn't find a duplicate.
           required: true
-        - label: I reproduced the issue on the latest commit of `main`.
+        - label: I confirmed the issue exists in the current docs.
           required: true
         - label: I read the relevant README or spec section.
           required: true
@@ -38,7 +38,7 @@ body:
         - "spec/requirements"
         - "spec/architecture"
         - "spec/safety"
-        - crate-level rustdoc / README
+        - "crate-level rustdoc / README"
         - "examples/"
         - other
     validations:
