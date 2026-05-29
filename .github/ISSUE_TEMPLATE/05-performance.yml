@@ -1,0 +1,110 @@
+name: Performance regression
+description: Something got slower, less zero-copy, or started allocating.
+title: "perf: "
+labels: ["kind:bug", "area:perf", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For performance reports, the baseline vs current numbers are
+        the heart of the issue. Please include measurement methodology
+        and hardware so the regression is reproducible.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      description: Please confirm before filing.
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I reproduced the issue on the latest commit of `main`.
+          required: true
+        - label: I read the relevant README or spec section.
+          required: true
+  - type: textarea
+    id: regression
+    attributes:
+      label: What got slower / less zero-copy / allocates now?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which workspace crate (or cross-cutting bucket) is affected?
+      options:
+        - taktora-executor
+        - taktora-executor-tracing
+        - taktora-connector-core
+        - taktora-connector-host
+        - taktora-connector-transport-iox
+        - taktora-connector-codec
+        - taktora-connector-ethercat
+        - taktora-connector-zenoh
+        - taktora-connector-can
+        - taktora-log
+        - taktora-log-dlt
+        - taktora-bounded-alloc
+        - taktora-replay
+        - docs / spec-site
+        - examples
+        - CI / build
+        - other / not sure
+    validations:
+      required: true
+  - type: input
+    id: baseline
+    attributes:
+      label: Baseline
+      description: Commit SHA or crate version that was fast.
+    validations:
+      required: true
+  - type: input
+    id: current
+    attributes:
+      label: Current
+      description: Commit SHA or crate version that is slow.
+    validations:
+      required: true
+  - type: textarea
+    id: methodology
+    attributes:
+      label: Measurement methodology
+      description: Criterion harness, custom benchmark, `perf stat`, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Numbers
+      description: Before / after. Standard deviation if available.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload
+      description: Rate, payload size, number of channels, fan-out, anything that shapes the load.
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: CPU model, core count, kernel, NIC if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: profile
+    attributes:
+      label: Profile data
+      description: Optional. Paste or link to flamegraph / perf output.
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **taktora is a pre-1.0 personal experiment.** There is no SLA,
+        no support, and no backwards-compatibility guarantee. Responses
+        are best-effort. See the [README](https://github.com/patdhlk/taktora#readme)
+        for the full status statement.
