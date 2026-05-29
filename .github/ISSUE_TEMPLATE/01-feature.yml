@@ -1,0 +1,97 @@
+name: Feature request
+description: Suggest a feature, API addition, or behavior change.
+title: "feat: "
+labels: ["kind:feature", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Small features (a new helper, a knob,
+        a quality-of-life improvement) belong here. **New connectors,
+        codecs, or protocol back-ends are big enough to deserve up-front
+        design** — please file an [RFC](?template=03-rfc.yml) instead.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      description: Please confirm before filing.
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I reproduced the issue on the latest commit of `main`.
+          required: true
+        - label: I read the relevant README or spec section.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem you're trying to solve
+      description: What's not possible — or unnecessarily painful — today?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which workspace crate (or cross-cutting bucket) is affected?
+      options:
+        - taktora-executor
+        - taktora-executor-tracing
+        - taktora-connector-core
+        - taktora-connector-host
+        - taktora-connector-transport-iox
+        - taktora-connector-codec
+        - taktora-connector-ethercat
+        - taktora-connector-zenoh
+        - taktora-connector-can
+        - taktora-log
+        - taktora-log-dlt
+        - taktora-bounded-alloc
+        - taktora-replay
+        - docs / spec-site
+        - examples
+        - CI / build
+        - other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: Sketch of the proposed shape
+      description: Pseudocode or an API sketch is fine. Doesn't have to compile.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Why not solve this a different way?
+  - type: dropdown
+    id: is_new_connector
+    attributes:
+      label: Is this a new connector, codec, or protocol back-end?
+      description: If Yes — please file an RFC (03-rfc.yml) instead. New connectors are large enough to deserve up-front design.
+      options:
+        - "No"
+        - "Yes"
+    validations:
+      required: true
+  - type: dropdown
+    id: implement
+    attributes:
+      label: Are you offering to implement it?
+      options:
+        - "Yes"
+        - "Not sure"
+        - "No"
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **taktora is a pre-1.0 personal experiment.** There is no SLA,
+        no support, and no backwards-compatibility guarantee. Responses
+        are best-effort. See the [README](https://github.com/patdhlk/taktora#readme)
+        for the full status statement.
