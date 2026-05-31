@@ -16,6 +16,7 @@ devices:
   - label: coupler
     pdos:
       tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }]
+      rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }]
 channels:
   - name: ethercat.wago.750-430.inputs
     device: coupler

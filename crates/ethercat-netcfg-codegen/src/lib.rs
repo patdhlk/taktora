@@ -23,6 +23,173 @@ pub enum CodegenError {
     /// input config.
     #[error("generated token stream is not a valid Rust file: {0}")]
     Syn(#[from] syn::Error),
+    /// The input config failed a build-time validation rule.
+    #[error(transparent)]
+    Validation(#[from] ValidationError),
+}
+
+/// A single build-time validation fault, one variant per rule.
+///
+/// Each variant carries enough context (channel name(s), device label,
+/// values) for a clear [`Display`](std::fmt::Display) message.
+#[derive(Debug, thiserror::Error)]
+pub enum ValidationError {
+    /// A channel binding declares a zero-bit slice.
+    #[error("channel `{channel}` has a zero-length slice (bit_length == 0)")]
+    ZeroLengthSlice {
+        /// Name of the offending channel.
+        channel: String,
+    },
+    /// A channel references a device label that is not declared.
+    #[error("channel `{channel}` references unknown device `{device}`")]
+    UnknownDevice {
+        /// Name of the offending channel.
+        channel: String,
+        /// The unresolved device label.
+        device: String,
+    },
+    /// Two channels share the same name.
+    #[error("duplicate channel name `{name}`")]
+    DuplicateChannelName {
+        /// The repeated channel name.
+        name: String,
+    },
+    /// Two devices resolve to the same configured station address.
+    #[error("devices {labels:?} resolve to the same configured address {address:#06x}")]
+    DuplicateAddress {
+        /// The conflicting configured address.
+        address: u16,
+        /// Labels of the two devices that collide.
+        labels: [String; 2],
+    },
+    /// A channel slice extends past the device's process image for its
+    /// direction.
+    #[error(
+        "channel `{channel}` slice ends at bit {slice_end} but device process image is only {image_bits} bits"
+    )]
+    SliceOutOfImage {
+        /// Name of the offending channel.
+        channel: String,
+        /// One past the last bit the slice covers (`bit_offset + bit_length`).
+        slice_end: u32,
+        /// Process-image size, in bits, for the channel's direction.
+        image_bits: u32,
+    },
+    /// Two channels on the same device and direction cover intersecting
+    /// bit ranges, and neither opted in via `allow_overlap`.
+    #[error("channels `{a}` and `{b}` overlap on the same device and direction")]
+    OverlappingSlices {
+        /// Name of the first channel.
+        a: String,
+        /// Name of the second channel.
+        b: String,
+    },
+}
+
+/// Inline process-image size, in bits, for `direction`: the maximum
+/// `bit_offset + bit_length` over the device's entries in that direction
+/// (`0` if the entry list for that direction is empty).
+fn image_bits(device: &DeviceInstance, direction: PdoDirection) -> u32 {
+    let DeviceSource::Inline { rx, tx } = &device.source;
+    let entries = match direction {
+        PdoDirection::Rx => rx,
+        PdoDirection::Tx => tx,
+    };
+    entries
+        .iter()
+        .map(|e| u32::from(e.bit_offset) + u32::from(e.bit_length))
+        .max()
+        .unwrap_or(0)
+}
+
+/// Validate a network config against the build-time rules.
+///
+/// Returns the first fault found as a [`CodegenError::Validation`].
+pub fn validate(config: &NetworkConfig) -> Result<(), CodegenError> {
+    let device_by_label: HashMap<&str, &DeviceInstance> = config
+        .devices
+        .iter()
+        .map(|d| (d.label.as_str(), d))
+        .collect();
+
+    for channel in &config.channels {
+        // Rule 1: zero-length slice.
+        if channel.bit_length == 0 {
+            return Err(ValidationError::ZeroLengthSlice {
+                channel: channel.name.clone(),
+            }
+            .into());
+        }
+        // Rule 2: unknown / dangling device.
+        let Some(device) = device_by_label.get(channel.device.as_str()) else {
+            return Err(ValidationError::UnknownDevice {
+                channel: channel.name.clone(),
+                device: channel.device.clone(),
+            }
+            .into());
+        };
+        // Rule 5: slice out of process image (rule 2 takes precedence).
+        let slice_end = channel.bit_offset + u32::from(channel.bit_length);
+        let image = image_bits(device, channel.direction);
+        if slice_end > image {
+            return Err(ValidationError::SliceOutOfImage {
+                channel: channel.name.clone(),
+                slice_end,
+                image_bits: image,
+            }
+            .into());
+        }
+    }
+
+    // Rule 3: duplicate channel name.
+    let mut seen_names: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for channel in &config.channels {
+        if !seen_names.insert(channel.name.as_str()) {
+            return Err(ValidationError::DuplicateChannelName {
+                name: channel.name.clone(),
+            }
+            .into());
+        }
+    }
+
+    // Rule 4: duplicate configured address (only reachable via override).
+    let mut addr_by_address: HashMap<u16, &str> = HashMap::new();
+    for (index, device) in config.devices.iter().enumerate() {
+        let address = device_address(index, device);
+        if let Some(&prior) = addr_by_address.get(&address) {
+            return Err(ValidationError::DuplicateAddress {
+                address,
+                labels: [prior.to_owned(), device.label.clone()],
+            }
+            .into());
+        }
+        addr_by_address.insert(address, device.label.as_str());
+    }
+
+    // Rule 6: overlapping slices on the same device + direction. Pairwise
+    // check; an overlap is permitted if either channel sets `allow_overlap`.
+    for (i, a) in config.channels.iter().enumerate() {
+        for b in &config.channels[i + 1..] {
+            if a.device != b.device || a.direction != b.direction {
+                continue;
+            }
+            if a.allow_overlap || b.allow_overlap {
+                continue;
+            }
+            let a_end = a.bit_offset + u32::from(a.bit_length);
+            let b_end = b.bit_offset + u32::from(b.bit_length);
+            // Half-open ranges intersect iff each starts before the other ends.
+            if a.bit_offset < b_end && b.bit_offset < a_end {
+                return Err(ValidationError::OverlappingSlices {
+                    a: a.name.clone(),
+                    b: b.name.clone(),
+                }
+                .into());
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Generate formatted Rust source for the given network config.
@@ -30,6 +197,7 @@ pub enum CodegenError {
 /// This slice emits a single item: a `pub static PDO_MAP` of
 /// `taktora_connector_ethercat::SubDeviceMap` entries, one per device.
 pub fn generate(config: &NetworkConfig) -> Result<String, CodegenError> {
+    validate(config)?;
     let pdo_map = pdo_map_tokens(config);
     let routing = routing_const_tokens(config);
     let tokens = quote! {
