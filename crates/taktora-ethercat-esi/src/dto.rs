@@ -492,12 +492,11 @@ fn dc_from_dto(dto: DcDto) -> Result<DistributedClock, EsiError> {
 // ── object dictionary conversion ──────────────────────────────────────────────
 
 fn dictionary_from_profile(
-    profile: &Option<ProfileDto>,
+    profile: Option<&ProfileDto>,
 ) -> Result<Vec<taktora_fieldbus_od_core::DictEntry>, EsiError> {
     use taktora_fieldbus_od_core::{Access, DictEntry};
 
     let Some(objects) = profile
-        .as_ref()
         .and_then(|p| p.dictionary.as_ref())
         .and_then(|d| d.objects.as_ref())
     else {
@@ -611,7 +610,7 @@ impl EtherCatInfo {
                 rx_pdos,
                 mailbox,
                 dc,
-                dictionary: dictionary_from_profile(&dev.profile)?,
+                dictionary: dictionary_from_profile(dev.profile.as_ref())?,
                 vendor_extensions: Vec::new(),
             });
         }
