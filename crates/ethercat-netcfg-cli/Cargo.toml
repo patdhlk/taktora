@@ -1,0 +1,42 @@
+[package]
+name         = "ethercat-netcfg-cli"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Command-line front end for the ethercat-netcfg toolchain (expand a network.yaml to generated Rust source)."
+
+[[bin]]
+name = "netcfg"
+path = "src/main.rs"
+
+[dependencies]
+ethercat-netcfg         = { workspace = true }
+ethercat-netcfg-codegen = { workspace = true }
+clap                    = { workspace = true, features = ["derive"] }
+thiserror               = { workspace = true }
+serde                   = { workspace = true, features = ["std", "derive"] }
+serde_json              = { workspace = true, features = ["std"] }
+sha2                    = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+syn      = { workspace = true, features = ["full", "parsing"] }
+sha2     = { workspace = true }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"
