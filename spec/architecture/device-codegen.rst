@@ -119,6 +119,12 @@ Quality goals capture the qualities the architecture is optimised for.
    with an ``alloc`` dependency. Build helpers, CLI, and verifier
    may depend on ``std``.
 
+   **Scope narrowed (2026-05).** The parser (``taktora-ethercat-esi``)
+   and the shared ``taktora-fieldbus-od-core`` crate now adopt a ``std``
+   baseline (see :need:`ADR_0097`); :need:`REQ_0501` is rejected. This
+   constraint now governs the runtime-trait crate (:need:`FEAT_0054`)
+   only, revisited in its own round.
+
 .. constraint:: ETG owns the ESI XML schema
    :id: CON_0014
    :status: open
@@ -301,10 +307,15 @@ requirement or feature it answers.
    ``ethercat-esi``. Manageable — the lift is mechanical because
    parser and IR are already decoupled (per :need:`ADR_0070`).
 
-   **Closure.** Closed by :need:`ADR_0078`. The lift is performed
-   as part of :need:`FEAT_0060` "CANopen device-driver codegen
-   toolchain"; see :doc:`canopen-codegen` for the executed
-   decomposition.
+   **Closure.** The OD-core lift (:need:`ADR_0078`) is realised by the
+   ``taktora-fieldbus-od-core`` crate (2026-05), which now holds the
+   shared ``Identity``, ``DataType``, and ``DictEntry`` types;
+   ``taktora-ethercat-esi`` depends on it and re-exports them, and
+   ``taktora-ethercat-netcfg`` consumes the shared ``Identity``.
+   First-class ``FEAT``/``REQ`` authoring for
+   ``taktora-fieldbus-od-core`` as a standalone feature is a follow-on
+   round, paired with the CANopen consumer (:need:`FEAT_0060`) that
+   motivates a *shared* OD crate.
 
 .. arch-decision:: Vendor extensions captured as opaque blobs
    :id: ADR_0074
@@ -395,6 +406,28 @@ requirement or feature it answers.
    build``. ❌ IDE doesn't surface generated symbols on hover.
    Acceptable; the generated file is a regular file in
    ``$OUT_DIR`` that rust-analyzer indexes.
+
+.. arch-decision:: std/POSIX baseline for the parser and OD-core crates
+   :id: ADR_0097
+   :status: accepted
+   :refines: FEAT_0051
+
+   **Context.** :need:`REQ_0501` and :need:`CON_0013` specified a
+   ``no_std`` + ``alloc`` baseline. In practice taktora targets a POSIX
+   OS today, and ``no_std`` forced a hand-rolled error type (no
+   ``core::error::Error``) and blocked ``thiserror``-derived errors
+   carrying source positions (:need:`REQ_0506`).
+
+   **Decision.** ``taktora-ethercat-esi`` and the new
+   ``taktora-fieldbus-od-core`` crate target ``std``. ``thiserror`` v2
+   provides the error derive. ``no_std`` is deferred, not abandoned;
+   genuinely ``no_std`` crates (e.g. ``taktora-bounded-alloc``) are
+   unaffected.
+
+   **Consequences.** :need:`REQ_0501` is rejected and :need:`CON_0013`'s
+   scope narrows to the runtime-trait crate (:need:`FEAT_0054`),
+   revisited in its own round. The parser gains located,
+   ``core::error::Error``-implementing errors.
 
 ----
 

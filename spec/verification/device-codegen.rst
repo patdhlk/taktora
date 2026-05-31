@@ -35,7 +35,7 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
 
 .. test:: Parser compiles under no_std + alloc
    :id: TEST_0401
-   :status: open
+   :status: rejected
    :verifies: REQ_0501
 
    Compile-only test: a small bin target inside
@@ -44,6 +44,10 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
    target must compile with ``--no-default-features`` against the
    crate; the test passes if compilation succeeds (no runtime
    assertion).
+
+   **Superseded.** The parser now targets ``std`` (see :need:`ADR_0097`);
+   :need:`REQ_0501` is rejected, so this compile-only ``no_std`` test no
+   longer applies.
 
 .. test:: Parser is independent of ethercrab
    :id: TEST_0402
