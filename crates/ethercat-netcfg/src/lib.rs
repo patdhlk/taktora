@@ -147,10 +147,26 @@ pub enum NetcfgError {
     /// The source document could not be deserialized from YAML.
     #[error("failed to parse network config YAML: {0}")]
     Yaml(#[from] serde_norway::Error),
+
+    /// The input is a multi-document YAML stream, but one `network.yaml`
+    /// describes exactly one bus (`REQ_0822` / `ADR_0096`).
+    #[error("found {count} YAML documents; one network.yaml describes exactly one bus")]
+    MultipleBuses {
+        /// Number of `---`-separated documents found in the stream.
+        count: usize,
+    },
 }
 
 /// Parse a network-config YAML document into the [`NetworkConfig`] IR.
 pub fn parse(yaml: &str) -> Result<NetworkConfig, NetcfgError> {
+    // One-file-one-bus: a YAML stream may hold more than one
+    // `---`-separated document. `Deserializer::from_str` yields one
+    // `Deserializer` per document, so count them before deserializing.
+    let count = serde_norway::Deserializer::from_str(yaml).count();
+    if count > 1 {
+        return Err(NetcfgError::MultipleBuses { count });
+    }
+
     let dto: dto::NetworkConfigDto = serde_norway::from_str(yaml)?;
     Ok(dto.into())
 }
