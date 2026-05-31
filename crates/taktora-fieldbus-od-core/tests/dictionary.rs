@@ -1,3 +1,5 @@
+//! Integration tests for [`taktora_fieldbus_od_core::DictEntry`] and [`taktora_fieldbus_od_core::Access`].
+
 use taktora_fieldbus_od_core::{Access, DataType, DictEntry};
 
 #[test]
