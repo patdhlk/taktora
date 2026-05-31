@@ -13,7 +13,8 @@ categories   = { workspace = true }
 description  = "Parser and in-memory IR for the EtherCAT network-config YAML (build-host codegen toolchain)."
 
 [dependencies]
-taktora-ethercat-esi = { workspace = true }
+taktora-ethercat-esi      = { workspace = true }
+taktora-fieldbus-od-core  = { workspace = true }
 serde        = { workspace = true, features = ["std", "derive"] }
 serde_norway = { workspace = true }
 thiserror    = { workspace = true }

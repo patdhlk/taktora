@@ -15,6 +15,8 @@ use core::time::Duration;
 
 use serde::Deserialize;
 
+pub use taktora_fieldbus_od_core::Identity;
+
 /// The fully parsed network configuration — the IR root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkConfig {
@@ -107,17 +109,6 @@ pub struct PdoEntry {
     pub bit_offset: u16,
     /// Bit length of the entry.
     pub bit_length: u16,
-}
-
-/// Expected device identity, used for verification.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct Identity {
-    /// Vendor identifier.
-    pub vendor_id: u32,
-    /// Product code.
-    pub product_code: u32,
-    /// Revision number.
-    pub revision: u32,
 }
 
 /// Direction of a process-data channel.
@@ -342,13 +333,24 @@ mod dto {
         Ok(PathBuf::from(reference))
     }
 
-    /// Convert an `taktora_ethercat_esi::PdoEntry` into a netcfg [`PdoEntry`].
-    const fn convert_pdo(entry: &taktora_ethercat_esi::PdoEntry) -> PdoEntry {
-        PdoEntry {
-            index: entry.index,
-            bit_offset: entry.bit_offset,
-            bit_length: entry.bit_length,
+    /// Flatten a device's structured ESI PDOs (one direction) into netcfg
+    /// process-image [`PdoEntry`]s, assigning cumulative bit offsets in
+    /// document order. Valid for single-assignment devices; alternative-aware
+    /// resolution is a codegen concern and out of scope for the parser layer.
+    fn flatten_esi_pdos(pdos: &[taktora_ethercat_esi::Pdo]) -> Vec<PdoEntry> {
+        let mut out = Vec::new();
+        let mut bit_offset: u16 = 0;
+        for pdo in pdos {
+            for entry in &pdo.entries {
+                out.push(PdoEntry {
+                    index: entry.index,
+                    bit_offset,
+                    bit_length: entry.bit_length,
+                });
+                bit_offset = bit_offset.saturating_add(entry.bit_length);
+            }
         }
+        out
     }
 
     impl From<BusConfigDto> for BusConfig {
@@ -396,8 +398,8 @@ mod dto {
                         .next()
                         .expect("checked count == 1");
 
-                    let rx: Vec<PdoEntry> = device.rx_pdos.iter().map(convert_pdo).collect();
-                    let tx: Vec<PdoEntry> = device.tx_pdos.iter().map(convert_pdo).collect();
+                    let rx = flatten_esi_pdos(&device.rx_pdos);
+                    let tx = flatten_esi_pdos(&device.tx_pdos);
                     // If the device ALSO carries inline pdos:, the two
                     // descriptions must agree. The ESI is the source of
                     // truth, so an exact match is redundant-but-legal and a
@@ -406,13 +408,9 @@ mod dto {
                     if has_inline && (pdos.rx != rx || pdos.tx != tx) {
                         return Err(NetcfgError::EsiContradiction { label });
                     }
-                    // Keep an explicit YAML identity; otherwise map the
-                    // ESI identity into the device.
-                    let identity = identity.or(Some(Identity {
-                        vendor_id: device.identity.vendor_id,
-                        product_code: device.identity.product_code,
-                        revision: device.identity.revision,
-                    }));
+                    // Keep an explicit YAML identity; otherwise carry the
+                    // ESI identity into the device (same type — od-core Identity).
+                    let identity = identity.or(Some(device.identity));
                     (DeviceSource::Esi { path, rx, tx }, identity)
                 }
                 None => (

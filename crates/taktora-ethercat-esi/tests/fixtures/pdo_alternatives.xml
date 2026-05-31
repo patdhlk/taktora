@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<EtherCATInfo>
+  <Vendor><Id>#x00000002</Id></Vendor>
+  <Descriptions><Devices>
+    <Device>
+      <Type ProductCode="#x00010000" RevisionNo="#x00000001">ALT</Type>
+      <TxPdo Sm="3" Fixed="0" Mandatory="0">
+        <Index>#x1a00</Index>
+        <Name>Standard</Name>
+        <Entry><Index>#x6000</Index><SubIndex>1</SubIndex><BitLen>16</BitLen></Entry>
+      </TxPdo>
+      <TxPdo Sm="3" Fixed="0" Mandatory="0">
+        <Index>#x1a01</Index>
+        <Name>Compact</Name>
+        <Entry><Index>#x6000</Index><SubIndex>1</SubIndex><BitLen>8</BitLen></Entry>
+      </TxPdo>
+    </Device>
+  </Devices></Descriptions>
+</EtherCATInfo>

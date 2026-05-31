@@ -1,0 +1,237 @@
+//! Opaque capture of unrecognised vendor-extension XML.
+//!
+//! Uses the low-level `quick_xml::reader::Reader` event API (quick-xml 0.40)
+//! because serde-derive silently discards unknown elements, which would defeat
+//! `REQ_0505` (faithful capture of vendor extensions). The serde pass in
+//! [`crate::parse`] handles the known schema; this module makes a second,
+//! read-only pass over the same `&str` to harvest the device-level elements the
+//! schema does not recognise.
+
+use quick_xml::events::Event;
+use quick_xml::reader::Reader;
+
+use crate::error::EsiError;
+use crate::position::LineIndex;
+
+/// An opaque XML element preserved verbatim (name, attributes, text, children).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawXml {
+    /// Element name as quick-xml reports it (qualified, e.g. `Beckhoff:Foo`).
+    pub name: String,
+    /// Attributes as `(name, value)` pairs, in document order.
+    pub attributes: Vec<(String, String)>,
+    /// Direct text content, when present.
+    pub text: Option<String>,
+    /// Child elements, recursively.
+    pub children: Vec<Self>,
+}
+
+/// Direct `<Device>` children that belong to the known schema and are therefore
+/// NOT captured as vendor extensions. Everything else under a `<Device>` is
+/// captured verbatim.
+const KNOWN_DEVICE_CHILDREN: &[&str] = &[
+    "Type",
+    "Name",
+    "GroupType",
+    "Sm",
+    "Mailbox",
+    "TxPdo",
+    "RxPdo",
+    "Dc",
+    "Profile",
+    "Info",
+    "Image16x14",
+    "ImageFile16x14",
+    "Fmmu",
+    "Su",
+];
+
+/// Strip any namespace prefix from a qualified element name (`Beckhoff:Foo` ->
+/// `Foo`). Used only for the known-child membership test; the captured
+/// [`RawXml::name`] keeps the qualified form quick-xml provides.
+fn local_name(qualified: &str) -> &str {
+    qualified.rsplit(':').next().unwrap_or(qualified)
+}
+
+/// Walk the document and, for each `<Device>` (in document order), collect a
+/// `Vec<RawXml>` of its DIRECT child elements whose local name is not in
+/// [`KNOWN_DEVICE_CHILDREN`]. Returns one `Vec<RawXml>` per device, in the same
+/// order the serde pass produces them.
+///
+/// This pass is read-only and runs only after the serde deserialize already
+/// succeeded, so any reader error here is unexpected; it is surfaced as
+/// [`EsiError::Value`] with a located span rather than fabricating a `DeError`.
+pub fn capture_device_extensions(xml: &str) -> Result<Vec<Vec<RawXml>>, EsiError> {
+    let index = LineIndex::new(xml);
+    let mut reader = Reader::from_str(xml);
+    let mut per_device: Vec<Vec<RawXml>> = Vec::new();
+
+    // `depth` is the nesting level of the *next* event relative to the document
+    // root (root Start lands at depth 0). `device_depth` is the depth of the
+    // currently-open `<Device>`, if any.
+    let mut depth: i32 = 0;
+    let mut device_depth: Option<i32> = None;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(start)) => {
+                let name = decode_name(&start, &reader, &index)?;
+                let is_device = local_name(&name) == "Device";
+                // A direct child of the open device sits one level deeper.
+                let in_device_child = device_depth.is_some_and(|d| depth == d + 1);
+
+                if in_device_child && !is_known_child(&name) {
+                    // Materialise the whole subtree, consuming through its End.
+                    let subtree = read_subtree(&mut reader, &index, &start, &name)?;
+                    if let Some(exts) = per_device.last_mut() {
+                        exts.push(subtree);
+                    }
+                    // read_subtree consumed the matching End; depth is unchanged.
+                    continue;
+                }
+
+                if is_device && device_depth.is_none() {
+                    device_depth = Some(depth);
+                    per_device.push(Vec::new());
+                }
+                depth += 1;
+            }
+            Ok(Event::Empty(start)) => {
+                let name = decode_name(&start, &reader, &index)?;
+                let in_device_child = device_depth.is_some_and(|d| depth == d + 1);
+                if in_device_child && !is_known_child(&name) {
+                    let attributes = decode_attributes(&start, &reader, &index)?;
+                    if let Some(exts) = per_device.last_mut() {
+                        exts.push(RawXml {
+                            name,
+                            attributes,
+                            text: None,
+                            children: Vec::new(),
+                        });
+                    }
+                }
+                // Empty elements do not change depth.
+            }
+            Ok(Event::End(_)) => {
+                depth -= 1;
+                if device_depth.is_some_and(|d| depth == d) {
+                    // Closed the open <Device>.
+                    device_depth = None;
+                }
+            }
+            Ok(_) => {}
+            Err(e) => return Err(reader_error(&reader, &index, &e)),
+        }
+    }
+
+    Ok(per_device)
+}
+
+fn is_known_child(qualified_name: &str) -> bool {
+    KNOWN_DEVICE_CHILDREN.contains(&local_name(qualified_name))
+}
+
+/// Recursively materialise the element whose `Start` was just read, consuming
+/// events up to and including its matching `End`. `start`/`name` describe that
+/// opening tag.
+fn read_subtree(
+    reader: &mut Reader<&[u8]>,
+    index: &LineIndex,
+    start: &quick_xml::events::BytesStart<'_>,
+    name: &str,
+) -> Result<RawXml, EsiError> {
+    let attributes = decode_attributes(start, reader, index)?;
+    let mut node = RawXml {
+        name: name.to_owned(),
+        attributes,
+        text: None,
+        children: Vec::new(),
+    };
+
+    loop {
+        match reader.read_event() {
+            // unbalanced (Eof); serde already validated, so unreachable in practice
+            Ok(Event::Eof | Event::End(_)) => break,
+            Ok(Event::Start(child_start)) => {
+                let child_name = decode_name(&child_start, reader, index)?;
+                let child = read_subtree(reader, index, &child_start, &child_name)?;
+                node.children.push(child);
+            }
+            Ok(Event::Empty(child_start)) => {
+                let child_name = decode_name(&child_start, reader, index)?;
+                let attrs = decode_attributes(&child_start, reader, index)?;
+                node.children.push(RawXml {
+                    name: child_name,
+                    attributes: attrs,
+                    text: None,
+                    children: Vec::new(),
+                });
+            }
+            Ok(Event::Text(text)) => {
+                let decoded = text
+                    .decode()
+                    .map_err(|e| value_error(index, reader.error_position(), &e))?;
+                if !decoded.trim().is_empty() {
+                    node.text = Some(decoded.into_owned());
+                }
+            }
+            Ok(_) => {}
+            Err(e) => return Err(reader_error(reader, index, &e)),
+        }
+    }
+
+    Ok(node)
+}
+
+/// Decode an element's name to an owned `String` (qualified, prefix kept).
+fn decode_name(
+    start: &quick_xml::events::BytesStart<'_>,
+    reader: &Reader<&[u8]>,
+    index: &LineIndex,
+) -> Result<String, EsiError> {
+    let qname = start.name();
+    let decoder = reader.decoder();
+    decoder
+        .decode(qname.as_ref())
+        .map(std::borrow::Cow::into_owned)
+        .map_err(|e| value_error(index, reader.error_position(), &e))
+}
+
+/// Decode all attributes of an element into `(name, value)` pairs, unescaping
+/// values.
+fn decode_attributes(
+    start: &quick_xml::events::BytesStart<'_>,
+    reader: &Reader<&[u8]>,
+    index: &LineIndex,
+) -> Result<Vec<(String, String)>, EsiError> {
+    let decoder = reader.decoder();
+    let mut out = Vec::new();
+    for attr in start.attributes() {
+        let attr = attr.map_err(|e| value_error(index, reader.error_position(), &e))?;
+        let key = decoder
+            .decode(attr.key.as_ref())
+            .map_err(|e| value_error(index, reader.error_position(), &e))?
+            .into_owned();
+        let value = attr
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+            .map_err(|e| value_error(index, reader.error_position(), &e))?
+            .into_owned();
+        out.push((key, value));
+    }
+    Ok(out)
+}
+
+/// Build a located [`EsiError::Value`] from the reader's current error position.
+fn reader_error(reader: &Reader<&[u8]>, index: &LineIndex, e: &quick_xml::Error) -> EsiError {
+    value_error(index, reader.error_position(), e)
+}
+
+fn value_error(index: &LineIndex, byte_pos: u64, e: &dyn std::fmt::Display) -> EsiError {
+    let offset = usize::try_from(byte_pos).unwrap_or(usize::MAX);
+    EsiError::Value {
+        path: "vendor_extensions".to_owned(),
+        span: Some(index.span(offset)),
+        reason: e.to_string(),
+    }
+}

@@ -1,5 +1,5 @@
 [package]
-name         = "taktora-ethercat-esi"
+name         = "taktora-fieldbus-od-core"
 version      = "0.1.0"
 edition      = { workspace = true }
 rust-version = { workspace = true }
@@ -10,14 +10,10 @@ homepage     = { workspace = true }
 readme       = { workspace = true }
 keywords     = { workspace = true }
 categories   = { workspace = true }
-description  = "Parser for EtherCAT ESI (slave information) XML into a faithful typed IR (identity, PDOs, sync managers, mailbox, distributed clocks, object dictionary)."
-exclude      = ["tests/fixtures/vendor/*.xml"]
+description  = "Shared object-dictionary IR for fieldbus device descriptions (Identity, DataType, dictionary entries)."
 
 [dependencies]
-taktora-fieldbus-od-core = { workspace = true }
-serde     = { workspace = true, features = ["std", "derive"] }
-quick-xml = { workspace = true }
-thiserror = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"] }
 
 [lints.rust]
 unsafe_code  = "deny"

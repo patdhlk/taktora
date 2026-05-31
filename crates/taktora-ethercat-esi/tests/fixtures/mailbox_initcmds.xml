@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<EtherCATInfo>
+  <Vendor><Id>#x00000002</Id></Vendor>
+  <Descriptions><Devices>
+    <Device>
+      <Type ProductCode="#x00020000" RevisionNo="#x00000001">MB</Type>
+      <Mailbox>
+        <CoE/>
+      </Mailbox>
+      <Dc/>
+      <Profile>
+        <Dictionary>
+          <InitCmds>
+            <InitCmd>
+              <Transition>PS</Transition>
+              <Index>#x1c12</Index>
+              <SubIndex>0</SubIndex>
+              <Data>00</Data>
+              <Comment>clear RxPDO assign</Comment>
+            </InitCmd>
+          </InitCmds>
+        </Dictionary>
+      </Profile>
+    </Device>
+  </Devices></Descriptions>
+</EtherCATInfo>

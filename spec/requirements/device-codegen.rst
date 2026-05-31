@@ -73,7 +73,7 @@ ESI parser
 
 .. feat:: ESI parser
    :id: FEAT_0051
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0050
 
    A pure parser crate. Reads ESI XML, emits a typed in-memory IR.
@@ -83,8 +83,9 @@ ESI parser
 
 .. req:: Pure parse function with no I/O
    :id: REQ_0500
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0400
 
    The crate shall expose ``parse(xml: &str) -> Result<EsiFile,
    EsiError>``. The function shall perform no filesystem or network
@@ -92,7 +93,7 @@ ESI parser
 
 .. req:: no_std + alloc compatible
    :id: REQ_0501
-   :status: open
+   :status: rejected
    :satisfies: FEAT_0051
 
    The crate shall be ``#![no_std]`` with an ``alloc`` dependency so
@@ -100,10 +101,19 @@ ESI parser
    tooling, or a hosted CLI without pulling in a default-features
    ``std`` surface.
 
+   **Superseded (2026-05): std/POSIX baseline.** The parser cluster now
+   targets ``std`` — taktora targets a POSIX OS today, and the ``no_std``
+   constraint forced a hand-rolled error type (no ``core::error::Error``)
+   and blocked ``thiserror``-derived errors carrying source positions
+   (:need:`REQ_0506`). See :need:`ADR_0097`. ``no_std`` support is
+   deferred, not abandoned; the runtime-trait crate (:need:`FEAT_0054`)
+   posture is revisited in its own round.
+
 .. req:: quick-xml + serde backend
    :id: REQ_0502
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0400
 
    The crate shall implement parsing on top of ``quick-xml`` with
    ``serde`` deserialisation. Hand-written ``Read``-based parsing is
@@ -111,8 +121,9 @@ ESI parser
 
 .. req:: Parser does not depend on ethercrab or codegen
    :id: REQ_0503
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0402
 
    The ``ethercat-esi`` crate shall not declare ``ethercrab`` or
    any codegen crate as a dependency. A downstream tool that only
@@ -120,8 +131,9 @@ ESI parser
 
 .. req:: IR carries identity, PDO maps, mailbox, DC, and OD
    :id: REQ_0504
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0400
 
    The IR shall represent, per device: ``Identity`` (vendor id,
    product code, revision), ``Vec<SyncManager>``, ``Vec<Pdo>`` for
@@ -132,10 +144,22 @@ ESI parser
    inspect it; codegen-side emission of OD tables is feature-gated
    per :need:`REQ_0533`.
 
+   PDOs are captured structurally per declared ``<TxPdo>`` /
+   ``<RxPdo>`` element — including PDO assignment alternatives and
+   padding entries — and the parser does not resolve a flattened
+   process image (no bit offsets are stored in the IR). ``Identity``,
+   ``DataType``, and ``DictEntry`` are provided by the shared
+   ``taktora-fieldbus-od-core`` crate and re-exported (the OD-core
+   lift of :need:`ADR_0078`). Implemented in
+   ``crates/taktora-ethercat-esi/src/model.rs``; verified by
+   ``tests/identity.rs``, ``pdos.rs``, ``sync_managers.rs``,
+   ``mailbox.rs``, and ``dc_and_od.rs``.
+
 .. req:: Vendor-specific extensions captured as opaque blobs
    :id: REQ_0505
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0403
 
    Vendor-specific ESI extensions (e.g. Beckhoff ``<Vendor:...>``
    elements) shall be retained in the IR as opaque ``RawXml`` blobs
@@ -145,12 +169,21 @@ ESI parser
 
 .. req:: Parse errors carry line and column
    :id: REQ_0506
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0404
 
    ``EsiError`` variants raised during parsing shall carry the
    source line and column of the offending construct so build-time
    diagnostics point at the failing ESI file location.
+
+   Syntax errors carry the source line and column (a ``Span``).
+   Semantic value errors carry the offending element path and, where
+   the parser can recover a position, a span; some semantic errors
+   carry no position because the underlying ``quick-xml`` deserializer
+   does not expose one. Implemented in
+   ``crates/taktora-ethercat-esi/src/error.rs`` +
+   ``src/position.rs``; verified by ``tests/errors.rs``.
 
 IR and codegen backend trait
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

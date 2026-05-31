@@ -1,0 +1,619 @@
+//! Private serde-derive DTOs mirroring the ESI XML shape, plus conversion to
+//! the public IR. Integral ESI fields arrive as `String` (because of the `#x`
+//! hex form) and are converted via [`parse_esi_uint`].
+
+use serde::Deserialize;
+use taktora_fieldbus_od_core::{DataType, Identity};
+
+use crate::error::EsiError;
+use crate::model::{
+    CoeInfo, DcOpMode, DistributedClock, EsiDevice, EsiFile, InitCmd, Mailbox, Pdo, PdoEntry,
+    Transition, Vendor,
+};
+
+// ── integer / bool helpers ────────────────────────────────────────────────────
+
+/// Parse an ESI integer: `#x`/`#X`-prefixed hex, or plain decimal.
+pub fn parse_esi_uint(raw: &str, path: &str) -> Result<u32, EsiError> {
+    let t = raw.trim();
+    let parsed = t
+        .strip_prefix("#x")
+        .or_else(|| t.strip_prefix("#X"))
+        .map_or_else(
+            || t.parse::<u32>().ok(),
+            |hex| u32::from_str_radix(hex, 16).ok(),
+        );
+    parsed.ok_or_else(|| EsiError::Number {
+        raw: t.to_owned(),
+        path: path.to_owned(),
+    })
+}
+
+fn parse_esi_u16(raw: &str, path: &str) -> Result<u16, EsiError> {
+    u16::try_from(parse_esi_uint(raw, path)?).map_err(|_| EsiError::Number {
+        raw: raw.trim().to_owned(),
+        path: path.to_owned(),
+    })
+}
+
+fn parse_esi_u8(raw: &str, path: &str) -> Result<u8, EsiError> {
+    u8::try_from(parse_esi_uint(raw, path)?).map_err(|_| EsiError::Number {
+        raw: raw.trim().to_owned(),
+        path: path.to_owned(),
+    })
+}
+
+fn parse_esi_bool(raw: Option<&String>) -> bool {
+    matches!(raw.map(|s| s.trim()), Some("1" | "true" | "TRUE"))
+}
+
+// ── top-level DTOs ────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct EtherCatInfo {
+    #[serde(rename = "Vendor")]
+    vendor: VendorDto,
+    #[serde(rename = "Descriptions")]
+    descriptions: Descriptions,
+}
+
+#[derive(Deserialize)]
+struct VendorDto {
+    #[serde(rename = "Id")]
+    id: String,
+    #[serde(rename = "Name", default)]
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Descriptions {
+    #[serde(rename = "Devices")]
+    devices: Devices,
+}
+
+#[derive(Deserialize)]
+struct Devices {
+    #[serde(rename = "Device", default)]
+    device: Vec<DeviceDto>,
+}
+
+#[derive(Deserialize)]
+struct DeviceDto {
+    #[serde(rename = "Type")]
+    ty: TypeDto,
+    #[serde(rename = "Name", default)]
+    name: Option<String>,
+    #[serde(rename = "GroupType", default)]
+    group_type: Option<String>,
+    #[serde(rename = "Sm", default)]
+    sm: Vec<SmDto>,
+    #[serde(rename = "TxPdo", default)]
+    tx_pdo: Vec<PdoDto>,
+    #[serde(rename = "RxPdo", default)]
+    rx_pdo: Vec<PdoDto>,
+    #[serde(rename = "Mailbox", default)]
+    mailbox: Option<MailboxDto>,
+    #[serde(rename = "Profile", default)]
+    profile: Option<ProfileDto>,
+    #[serde(rename = "Dc", default)]
+    dc: Option<DcDto>,
+}
+
+#[derive(Deserialize)]
+struct TypeDto {
+    #[serde(rename = "@ProductCode")]
+    product_code: String,
+    #[serde(rename = "@RevisionNo")]
+    revision_no: String,
+    #[serde(rename = "$text", default)]
+    text: Option<String>,
+}
+
+// ── sync manager DTO ──────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct SmDto {
+    #[serde(rename = "@StartAddress")]
+    start_address: String,
+    #[serde(rename = "@ControlByte")]
+    control_byte: String,
+    #[serde(rename = "@Enable", default)]
+    enable: Option<String>,
+}
+
+// ── PDO DTOs ──────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct PdoDto {
+    #[serde(rename = "@Sm", default)]
+    sm: Option<String>,
+    #[serde(rename = "@Fixed", default)]
+    fixed: Option<String>,
+    #[serde(rename = "@Mandatory", default)]
+    mandatory: Option<String>,
+    #[serde(rename = "Index")]
+    index: String,
+    #[serde(rename = "Name", default)]
+    name: Option<String>,
+    #[serde(rename = "Exclude", default)]
+    exclude: Vec<String>,
+    #[serde(rename = "Entry", default)]
+    entry: Vec<EntryDto>,
+}
+
+#[derive(Deserialize)]
+struct EntryDto {
+    #[serde(rename = "Index")]
+    index: String,
+    #[serde(rename = "SubIndex", default)]
+    sub_index: Option<String>,
+    #[serde(rename = "BitLen")]
+    bit_len: String,
+    #[serde(rename = "Name", default)]
+    name: Option<String>,
+    #[serde(rename = "DataType", default)]
+    data_type: Option<String>,
+}
+
+// ── mailbox DTOs ──────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct MailboxDto {
+    #[serde(rename = "CoE", default)]
+    coe: Option<CoeDto>,
+    #[serde(rename = "EoE", default)]
+    eoe: Option<Empty>,
+    #[serde(rename = "FoE", default)]
+    foe: Option<Empty>,
+    #[serde(rename = "SoE", default)]
+    soe: Option<Empty>,
+    #[serde(rename = "VoE", default)]
+    voe: Option<Empty>,
+}
+
+#[derive(Deserialize)]
+struct Empty {}
+
+#[derive(Deserialize)]
+struct CoeDto {
+    #[serde(rename = "@SdoInfo", default)]
+    sdo_info: Option<String>,
+    #[serde(rename = "@PdoAssign", default)]
+    pdo_assign: Option<String>,
+    #[serde(rename = "@PdoConfig", default)]
+    pdo_config: Option<String>,
+    #[serde(rename = "@CompleteAccess", default)]
+    complete_access: Option<String>,
+}
+
+// ── profile / dictionary / init-cmds DTOs ────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ProfileDto {
+    #[serde(rename = "Dictionary", default)]
+    dictionary: Option<DictionaryDto>,
+}
+
+#[derive(Deserialize)]
+struct DictionaryDto {
+    #[serde(rename = "InitCmds", default)]
+    init_cmds: Option<InitCmdsDto>,
+    #[serde(rename = "Objects", default)]
+    objects: Option<ObjectsDto>,
+}
+
+#[derive(Deserialize)]
+struct InitCmdsDto {
+    #[serde(rename = "InitCmd", default)]
+    init_cmd: Vec<InitCmdDto>,
+}
+
+#[derive(Deserialize)]
+struct InitCmdDto {
+    #[serde(rename = "Transition", default)]
+    transition: Vec<String>,
+    #[serde(rename = "Index")]
+    index: String,
+    #[serde(rename = "SubIndex", default)]
+    sub_index: Option<String>,
+    #[serde(rename = "Data", default)]
+    data: Option<String>,
+    #[serde(rename = "Comment", default)]
+    comment: Option<String>,
+}
+
+// ── object dictionary DTOs ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ObjectsDto {
+    #[serde(rename = "Object", default)]
+    object: Vec<ObjectDto>,
+}
+
+#[derive(Deserialize)]
+struct ObjectDto {
+    #[serde(rename = "Index")]
+    index: String,
+    #[serde(rename = "Name", default)]
+    name: Option<String>,
+    #[serde(rename = "Type", default)]
+    ty: Option<String>,
+    #[serde(rename = "BitSize", default)]
+    bit_size: Option<String>,
+    #[serde(rename = "Info", default)]
+    info: Option<InfoDto>,
+    #[serde(rename = "Flags", default)]
+    flags: Option<FlagsDto>,
+    #[serde(rename = "SubItem", default)]
+    sub_item: Vec<SubItemDto>,
+}
+
+#[derive(Deserialize)]
+struct SubItemDto {
+    #[serde(rename = "SubIndex", default)]
+    sub_index: Option<String>,
+    #[serde(rename = "Name", default)]
+    name: Option<String>,
+    #[serde(rename = "Type", default)]
+    ty: Option<String>,
+    #[serde(rename = "BitSize", default)]
+    bit_size: Option<String>,
+    #[serde(rename = "Info", default)]
+    info: Option<InfoDto>,
+    #[serde(rename = "Flags", default)]
+    flags: Option<FlagsDto>,
+}
+
+#[derive(Deserialize)]
+struct InfoDto {
+    #[serde(rename = "DefaultData", default)]
+    default_data: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FlagsDto {
+    #[serde(rename = "Access", default)]
+    access: Option<String>,
+    #[serde(rename = "PdoMapping", default)]
+    pdo_mapping: Option<String>,
+}
+
+// ── distributed clock DTOs ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct DcDto {
+    #[serde(rename = "OpMode", default)]
+    op_mode: Vec<OpModeDto>,
+}
+
+#[derive(Deserialize)]
+struct OpModeDto {
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "Desc", default)]
+    desc: Option<String>,
+    #[serde(rename = "AssignActivate")]
+    assign_activate: String,
+    #[serde(rename = "CycleTimeSync0", default)]
+    cycle_time_sync0: Option<CycleTimeDto>,
+    #[serde(rename = "ShiftTimeSync0", default)]
+    shift_time_sync0: Option<String>,
+    #[serde(rename = "CycleTimeSync1", default)]
+    cycle_time_sync1: Option<CycleTimeDto>,
+    #[serde(rename = "ShiftTimeSync1", default)]
+    shift_time_sync1: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CycleTimeDto {
+    #[serde(rename = "$text", default)]
+    value: Option<String>,
+}
+
+// ── sync manager conversion ───────────────────────────────────────────────────
+
+/// Convert a vec of [`SmDto`]s into [`SyncManager`]s, assigning 0-based
+/// indices from declaration order.
+///
+/// Direction is derived from control-byte bits 2..3
+/// (`(control_byte >> 2) & 0x3`):
+/// - `0b01` → [`SmDirection::Input`] (`SubDevice` → master)
+/// - `0b00` → [`SmDirection::Output`] (master → `SubDevice`)
+/// - anything else → [`SmDirection::Unspecified`]
+fn sync_managers_from_dtos(dtos: Vec<SmDto>) -> Result<Vec<crate::model::SyncManager>, EsiError> {
+    use crate::model::{SmDirection, SyncManager};
+    let mut out = Vec::with_capacity(dtos.len());
+    for (i, sm) in dtos.into_iter().enumerate() {
+        let control_byte = parse_esi_u8(&sm.control_byte, "Sm.ControlByte")?;
+        let direction = match (control_byte >> 2) & 0x3 {
+            0b01 => SmDirection::Input,
+            0b00 => SmDirection::Output,
+            _ => SmDirection::Unspecified,
+        };
+        out.push(SyncManager {
+            index: u8::try_from(i).map_err(|_| EsiError::Number {
+                raw: i.to_string(),
+                path: "Sm.index".to_owned(),
+            })?,
+            start_address: parse_esi_u16(&sm.start_address, "Sm.StartAddress")?,
+            control_byte,
+            enable: parse_esi_bool(sm.enable.as_ref()),
+            direction,
+        });
+    }
+    Ok(out)
+}
+
+// ── PDO conversion ────────────────────────────────────────────────────────────
+
+fn pdo_from_dto(dto: PdoDto) -> Result<Pdo, EsiError> {
+    let index = parse_esi_u16(&dto.index, "Pdo.Index")?;
+    let sm = dto
+        .sm
+        .as_deref()
+        .map(|s| parse_esi_u8(s, "Pdo.Sm"))
+        .transpose()?;
+
+    let mut exclude = Vec::with_capacity(dto.exclude.len());
+    for e in &dto.exclude {
+        exclude.push(parse_esi_u16(e, "Pdo.Exclude")?);
+    }
+
+    let mut entries = Vec::with_capacity(dto.entry.len());
+    for e in dto.entry {
+        let sub_index = e
+            .sub_index
+            .as_deref()
+            .map(|s| parse_esi_u8(s, "Entry.SubIndex"))
+            .transpose()?
+            .unwrap_or(0);
+        entries.push(PdoEntry {
+            index: parse_esi_u16(&e.index, "Entry.Index")?,
+            sub_index,
+            bit_length: parse_esi_u16(&e.bit_len, "Entry.BitLen")?,
+            name: e.name,
+            data_type: e.data_type.as_deref().map(DataType::parse_coe_name),
+        });
+    }
+
+    Ok(Pdo {
+        index,
+        name: dto.name,
+        sm,
+        fixed: parse_esi_bool(dto.fixed.as_ref()),
+        mandatory: parse_esi_bool(dto.mandatory.as_ref()),
+        exclude,
+        entries,
+    })
+}
+
+// ── mailbox conversion ────────────────────────────────────────────────────────
+
+fn parse_hex_payload(s: &str) -> Vec<u8> {
+    let cleaned: Vec<u8> = s.bytes().filter(u8::is_ascii_hexdigit).collect();
+    cleaned
+        .chunks(2)
+        .filter_map(|pair| {
+            let hi = char::from(pair[0]).to_digit(16)?;
+            let lo = pair
+                .get(1)
+                .map_or(Some(0), |b| char::from(*b).to_digit(16))?;
+            u8::try_from((hi << 4) | lo).ok()
+        })
+        .collect()
+}
+
+fn mailbox_from_dtos(
+    mb: Option<MailboxDto>,
+    profile: Option<&ProfileDto>,
+) -> Result<Option<Mailbox>, EsiError> {
+    let init_cmds_dto = profile
+        .and_then(|p| p.dictionary.as_ref())
+        .and_then(|d| d.init_cmds.as_ref());
+
+    if mb.is_none() && init_cmds_dto.is_none() {
+        return Ok(None);
+    }
+
+    let mut out = Mailbox::default();
+    if let Some(mb) = mb {
+        out.eoe = mb.eoe.is_some();
+        out.foe = mb.foe.is_some();
+        out.soe = mb.soe.is_some();
+        out.voe = mb.voe.is_some();
+        out.coe = mb.coe.map(|c| CoeInfo {
+            sdo_info: parse_esi_bool(c.sdo_info.as_ref()),
+            pdo_assign: parse_esi_bool(c.pdo_assign.as_ref()),
+            pdo_config: parse_esi_bool(c.pdo_config.as_ref()),
+            complete_access: parse_esi_bool(c.complete_access.as_ref()),
+        });
+    }
+
+    if let Some(cmds) = init_cmds_dto {
+        for c in &cmds.init_cmd {
+            let transition = match c.transition.first().map(String::as_str) {
+                Some("IP") => Transition::Ip,
+                Some("PS") => Transition::Ps,
+                Some("SO") => Transition::So,
+                _ => Transition::Other,
+            };
+            out.init_cmds.push(InitCmd {
+                transition,
+                index: parse_esi_u16(&c.index, "InitCmd.Index")?,
+                sub_index: match &c.sub_index {
+                    Some(s) => parse_esi_u8(s, "InitCmd.SubIndex")?,
+                    None => 0,
+                },
+                data: parse_hex_payload(c.data.as_deref().unwrap_or("")),
+                comment: c.comment.clone(),
+            });
+        }
+    }
+    Ok(Some(out))
+}
+
+// ── distributed clock conversion ──────────────────────────────────────────────
+
+fn dc_from_dto(dto: DcDto) -> Result<DistributedClock, EsiError> {
+    let mut op_modes = Vec::with_capacity(dto.op_mode.len());
+    for op in dto.op_mode {
+        let assign_activate = parse_esi_u16(&op.assign_activate, "Dc.OpMode.AssignActivate")?;
+        let cycle_time_sync0 = op
+            .cycle_time_sync0
+            .and_then(|c| c.value)
+            .as_deref()
+            .and_then(|s| s.parse::<i32>().ok());
+        let shift_time_sync0 = op
+            .shift_time_sync0
+            .as_deref()
+            .and_then(|s| s.parse::<i32>().ok());
+        let cycle_time_sync1 = op
+            .cycle_time_sync1
+            .and_then(|c| c.value)
+            .as_deref()
+            .and_then(|s| s.parse::<i32>().ok());
+        let shift_time_sync1 = op
+            .shift_time_sync1
+            .as_deref()
+            .and_then(|s| s.parse::<i32>().ok());
+        op_modes.push(DcOpMode {
+            name: op.name,
+            desc: op.desc,
+            assign_activate,
+            cycle_time_sync0,
+            shift_time_sync0,
+            cycle_time_sync1,
+            shift_time_sync1,
+        });
+    }
+    Ok(DistributedClock { op_modes })
+}
+
+// ── object dictionary conversion ──────────────────────────────────────────────
+
+fn dictionary_from_profile(
+    profile: Option<&ProfileDto>,
+) -> Result<Vec<taktora_fieldbus_od_core::DictEntry>, EsiError> {
+    use taktora_fieldbus_od_core::{Access, DictEntry};
+
+    let Some(objects) = profile
+        .and_then(|p| p.dictionary.as_ref())
+        .and_then(|d| d.objects.as_ref())
+    else {
+        return Ok(Vec::new());
+    };
+
+    let access_of = |f: &Option<FlagsDto>| -> Access {
+        let (mut read, mut write, mut pdo_mappable) = (false, false, false);
+        if let Some(f) = f {
+            match f.access.as_deref().map(str::trim) {
+                Some("ro") => read = true,
+                Some("wo") => write = true,
+                Some("rw") => {
+                    read = true;
+                    write = true;
+                }
+                _ => {}
+            }
+            if let Some(m) = f.pdo_mapping.as_deref() {
+                pdo_mappable = m.contains('T') || m.contains('R');
+            }
+        }
+        Access {
+            read,
+            write,
+            pdo_mappable,
+        }
+    };
+
+    let bitsize_of = |s: &Option<String>| -> Option<u32> {
+        s.as_deref().and_then(|x| x.trim().parse::<u32>().ok())
+    };
+
+    let mut out = Vec::new();
+    for obj in &objects.object {
+        let index = parse_esi_u16(&obj.index, "Object.Index")?;
+        if obj.sub_item.is_empty() {
+            out.push(DictEntry {
+                index,
+                sub_index: 0,
+                name: obj.name.clone().unwrap_or_default(),
+                data_type: obj
+                    .ty
+                    .as_deref()
+                    .map_or_else(|| DataType::Named(String::new()), DataType::parse_coe_name),
+                bit_size: bitsize_of(&obj.bit_size),
+                access: access_of(&obj.flags),
+                default: obj.info.as_ref().and_then(|i| i.default_data.clone()),
+            });
+        } else {
+            for si in &obj.sub_item {
+                out.push(DictEntry {
+                    index,
+                    sub_index: match &si.sub_index {
+                        Some(s) => parse_esi_u8(s, "SubItem.SubIndex")?,
+                        None => 0,
+                    },
+                    name: si.name.clone().unwrap_or_default(),
+                    data_type: si
+                        .ty
+                        .as_deref()
+                        .map_or_else(|| DataType::Named(String::new()), DataType::parse_coe_name),
+                    bit_size: bitsize_of(&si.bit_size),
+                    access: access_of(&si.flags),
+                    default: si.info.as_ref().and_then(|i| i.default_data.clone()),
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+// ── top-level conversion ──────────────────────────────────────────────────────
+
+impl EtherCatInfo {
+    pub fn into_model(self) -> Result<EsiFile, EsiError> {
+        let vendor_id = parse_esi_uint(&self.vendor.id, "Vendor.Id")?;
+        let vendor = Vendor {
+            id: vendor_id,
+            name: self.vendor.name,
+        };
+
+        let mut devices = Vec::with_capacity(self.descriptions.devices.device.len());
+        for dev in self.descriptions.devices.device {
+            let identity = Identity {
+                vendor_id,
+                product_code: parse_esi_uint(&dev.ty.product_code, "Device.Type.ProductCode")?,
+                revision: parse_esi_uint(&dev.ty.revision_no, "Device.Type.RevisionNo")?,
+            };
+
+            let mut tx_pdos = Vec::with_capacity(dev.tx_pdo.len());
+            for p in dev.tx_pdo {
+                tx_pdos.push(pdo_from_dto(p)?);
+            }
+            let mut rx_pdos = Vec::with_capacity(dev.rx_pdo.len());
+            for p in dev.rx_pdo {
+                rx_pdos.push(pdo_from_dto(p)?);
+            }
+
+            // IMPORTANT: pass &dev.profile (borrow) — Task 11 also reads it.
+            let mailbox = mailbox_from_dtos(dev.mailbox, dev.profile.as_ref())?;
+            let dc = dev.dc.map(dc_from_dto).transpose()?;
+
+            devices.push(EsiDevice {
+                identity,
+                name: dev.name,
+                product_type: dev.ty.text,
+                group_type: dev.group_type,
+                sync_managers: sync_managers_from_dtos(dev.sm)?,
+                tx_pdos,
+                rx_pdos,
+                mailbox,
+                dc,
+                dictionary: dictionary_from_profile(dev.profile.as_ref())?,
+                vendor_extensions: Vec::new(),
+            });
+        }
+        Ok(EsiFile { vendor, devices })
+    }
+}
