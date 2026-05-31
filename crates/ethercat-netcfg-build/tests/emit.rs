@@ -35,3 +35,23 @@ fn emit_generates_network_module_into_out_dir() {
         "generated source contains PDO_MAP"
     );
 }
+
+/// `TEST_0831` / `REQ_0831` — `emit` reports the network.yaml as a
+/// rerun-if-changed dependency so a config edit triggers regeneration.
+/// (The per-vendored-ESI-file part of `REQ_0831` lands once ESI
+/// resolution exists; here only the YAML source is a dependency.)
+#[test]
+fn emit_reports_network_yaml_as_rerun_dependency() {
+    let out_dir = tempfile::tempdir().expect("create fake OUT_DIR");
+    let src_dir = tempfile::tempdir().expect("create yaml dir");
+    let yaml_path = src_dir.path().join("network.yaml");
+    fs::write(&yaml_path, NETWORK_YAML).expect("write network.yaml");
+
+    let outcome = ethercat_netcfg_build::emit(&yaml_path, out_dir.path()).expect("emit succeeds");
+
+    assert!(
+        outcome.rerun_if_changed.contains(&yaml_path),
+        "rerun_if_changed lists the network.yaml: {:?}",
+        outcome.rerun_if_changed
+    );
+}
