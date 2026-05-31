@@ -107,11 +107,11 @@ channel LED lights) because the example mirrors input to output:
 ```
 ethercat connector health at startup: Connecting
 t=+   540ms  in=0b00000000 -> out=0b00000000  decimal=0
-t=+  6420ms  ethercat health: Connecting -> Up
-t=+ 12030ms  in=0b00000001 -> out=0b00000001  decimal=1
-t=+ 12260ms  in=0b00000000 -> out=0b00000000  decimal=0
-t=+ 14110ms  in=0b00000010 -> out=0b00000010  decimal=2
-t=+ 14380ms  in=0b00000000 -> out=0b00000000  decimal=0
+t=+  1180ms  ethercat health: Connecting -> Up
+t=+  6020ms  in=0b00000001 -> out=0b00000001  decimal=1
+t=+  6260ms  in=0b00000000 -> out=0b00000000  decimal=0
+t=+  7710ms  in=0b00000010 -> out=0b00000010  decimal=2
+t=+  7980ms  in=0b00000000 -> out=0b00000000  decimal=0
 ```
 
 Bring-up usually completes within 1–2 seconds on a Pi 4 or 5. With no
@@ -166,7 +166,7 @@ Same three modes as `ethercat-real-bus`, adapted to the mirror rig.
 1. **Normal mode smoke test.** Confirm bring-up, and that inputs mirror
    to outputs:
    ```bash
-   sudo setcap cap_net_raw=eip target/release/ethercat-wago-coupler
+   sudo setcap cap_net_raw,cap_net_admin=eip target/release/ethercat-wago-coupler
    ./target/release/ethercat-wago-coupler --nic eth0 --mode normal --ticks 1000
    ```
    Pass criterion: `ethercat health: Connecting -> Up`; toggling a 24 V
@@ -202,14 +202,3 @@ Same three modes as `ethercat-real-bus`, adapted to the mirror rig.
 - A minimal `RawByteCodec` defined inline because `JsonCodec` can't
   decode the WAGO raw PDI byte. Purpose-built for this example and
   intentionally not promoted to `taktora-connector-codec`.
-
-## Verify and commit
-
-After writing the file:
-1. Sanity check: confirm the relative link `../ethercat-real-bus` is correct (the sibling example dir exists at `examples/ethercat-real-bus`). Confirm the markdown tables render (pipe-delimited, header separator row present).
-2. There is a repo-wide `typos` pre-commit hook. If the commit is rejected by `typos`, read its output: it may flag a genuine typo (fix it) OR a domain term. Do NOT blindly change WAGO part numbers (750-354, 750-430, 750-530, 750-600) or technical terms. If `typos` flags a legitimate domain word, report it rather than mangling the text.
-
-```bash
-git add examples/ethercat-wago-coupler/README.md
-git commit -m "docs(examples): README for ethercat-wago-coupler"
-```
