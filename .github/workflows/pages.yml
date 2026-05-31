@@ -24,10 +24,10 @@ jobs:
     name: Build spec
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.8"
 
@@ -40,7 +40,7 @@ jobs:
         run: uv run sphinx-build -W -b html . _build/html
 
       - name: Set up Node for mermaid validator
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
