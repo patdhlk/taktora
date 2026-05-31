@@ -76,6 +76,7 @@ jobs:
             examples/zenoh-pubsub-real
             examples/ethercat-mock-loop
             examples/ethercat-real-bus
+            examples/ethercat-wago-coupler
       - name: Check examples
         run: ./scripts/check-examples.sh
 
