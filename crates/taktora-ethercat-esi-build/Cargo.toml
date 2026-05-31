@@ -1,0 +1,36 @@
+[package]
+name         = "taktora-ethercat-esi-build"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "build.rs glue turning EtherCAT ESI XML files into a generated Rust device-driver module in OUT_DIR."
+
+[dependencies]
+taktora-ethercat-esi                   = { workspace = true }
+taktora-ethercat-esi-codegen           = { workspace = true }
+taktora-ethercat-esi-codegen-ethercrab = { workspace = true }
+prettyplease                           = { workspace = true }
+thiserror                              = { workspace = true }
+glob                                   = { workspace = true }
+syn                                    = { workspace = true, features = ["full", "parsing"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"

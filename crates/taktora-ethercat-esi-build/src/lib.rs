@@ -1,0 +1,231 @@
+//! Build-script glue for the `EtherCAT` ESI device-driver toolchain.
+//!
+//! A downstream consumer's `build.rs` calls a one-line [`Builder`] to turn its
+//! `esi/*.xml` files into a generated Rust module in `OUT_DIR`:
+//!
+//! ```no_run
+//! taktora_ethercat_esi_build::Builder::new()
+//!     .glob("esi/*.xml")
+//!     .out_file("devices.rs")
+//!     .build()
+//!     .unwrap();
+//! ```
+//!
+//! [`Builder::build`] reads `OUT_DIR` / `CARGO_MANIFEST_DIR` from the
+//! environment and delegates to the testable seam [`Builder::run`], which does
+//! the glob → parse → merge → generate → format → write work and returns the
+//! matched input paths. `build` then prints the `cargo:rerun-if-changed`
+//! directives for each input plus the build script itself (`REQ_0542`).
+
+#![warn(missing_docs)]
+
+use std::path::{Path, PathBuf};
+
+use taktora_ethercat_esi::{EsiFile, Vendor};
+use taktora_ethercat_esi_codegen::{CodegenBackend, CodegenError, generate};
+
+pub use taktora_ethercat_esi_codegen_ethercrab::EthercrabBackend;
+
+/// Errors raised while turning ESI XML files into a generated module.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum BuildError {
+    /// A required environment variable (`OUT_DIR` / `CARGO_MANIFEST_DIR`) was
+    /// not set. Only reachable from [`Builder::build`]; the testable
+    /// [`Builder::run`] takes both paths as arguments.
+    #[error("environment variable `{0}` is not set")]
+    MissingEnv(&'static str),
+
+    /// The glob pattern could not be compiled.
+    #[error("invalid glob pattern `{pattern}`: {source}")]
+    Glob {
+        /// The offending glob pattern.
+        pattern: String,
+        /// The underlying glob compile error.
+        #[source]
+        source: glob::PatternError,
+    },
+
+    /// Reading an input file or writing the generated module failed.
+    #[error("I/O error for `{path}`: {source}")]
+    Io {
+        /// The path involved in the failed operation.
+        path: PathBuf,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Parsing one of the matched ESI files failed.
+    #[error("failed to parse ESI file `{path}`: {source}")]
+    Parse {
+        /// The ESI file that failed to parse.
+        path: PathBuf,
+        /// The underlying parse error.
+        #[source]
+        source: taktora_ethercat_esi::EsiError,
+    },
+
+    /// Generating Rust tokens from the parsed device set failed.
+    #[error(transparent)]
+    Codegen(#[from] CodegenError),
+
+    /// The generated token stream did not parse as a `syn::File`, so it could
+    /// not be formatted. This indicates a codegen bug rather than user error.
+    #[error("generated tokens did not parse as Rust source: {0}")]
+    Format(#[from] syn::Error),
+}
+
+/// One-line build-script helper: glob ESI XML files, generate a Rust module,
+/// and write it to `OUT_DIR`.
+///
+/// The backend type defaults to [`EthercrabBackend`]; override it with
+/// [`Builder::backend`].
+pub struct Builder<B = EthercrabBackend> {
+    pattern: String,
+    out_file: String,
+    backend: B,
+}
+
+impl Builder<EthercrabBackend> {
+    /// Start a builder with the default [`EthercrabBackend`].
+    ///
+    /// Defaults: pattern `esi/*.xml`, output file `devices.rs`.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            pattern: "esi/*.xml".to_owned(),
+            out_file: "devices.rs".to_owned(),
+            backend: EthercrabBackend,
+        }
+    }
+}
+
+impl Default for Builder<EthercrabBackend> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<B: CodegenBackend> Builder<B> {
+    /// Set the glob pattern, relative to `CARGO_MANIFEST_DIR` (e.g.
+    /// `"esi/*.xml"`).
+    #[must_use]
+    pub fn glob(mut self, pattern: impl Into<String>) -> Self {
+        self.pattern = pattern.into();
+        self
+    }
+
+    /// Set the output file name, written into `OUT_DIR` (e.g. `"devices.rs"`).
+    #[must_use]
+    pub fn out_file(mut self, name: impl Into<String>) -> Self {
+        self.out_file = name.into();
+        self
+    }
+
+    /// Override the default codegen backend.
+    #[must_use]
+    pub fn backend<B2: CodegenBackend>(self, backend: B2) -> Builder<B2> {
+        Builder {
+            pattern: self.pattern,
+            out_file: self.out_file,
+            backend,
+        }
+    }
+
+    /// Run the build from a consumer `build.rs`.
+    ///
+    /// Reads `OUT_DIR` and `CARGO_MANIFEST_DIR` from the environment, runs the
+    /// glob → parse → merge → generate → format → write pipeline via
+    /// [`Builder::run`], then prints the `cargo:rerun-if-changed` directives
+    /// for each matched ESI file and for the build script itself (`REQ_0542`).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`BuildError`] if an environment variable is missing, the glob
+    /// pattern is invalid, an I/O operation fails, an ESI file fails to parse,
+    /// codegen fails, or the generated tokens do not format.
+    pub fn build(&self) -> Result<(), BuildError> {
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .map_err(|_| BuildError::MissingEnv("CARGO_MANIFEST_DIR"))?;
+        let out_dir = std::env::var("OUT_DIR").map_err(|_| BuildError::MissingEnv("OUT_DIR"))?;
+
+        let inputs = self.run(Path::new(&manifest_dir), Path::new(&out_dir))?;
+        for input in &inputs {
+            println!("cargo:rerun-if-changed={}", input.display());
+        }
+        // Re-run when the consumer's build script itself changes (`REQ_0542`).
+        println!(
+            "cargo:rerun-if-changed={}",
+            Path::new(&manifest_dir).join("build.rs").display()
+        );
+        Ok(())
+    }
+
+    /// Testable core: glob `<manifest_dir>/<pattern>`, parse every match (in
+    /// sorted order for determinism), merge into one [`EsiFile`], generate and
+    /// format the module, and write it to `<out_dir>/<out_file>`.
+    ///
+    /// Returns the matched input paths (the `rerun-if-changed` targets). Takes
+    /// both directories as arguments so tests need not mutate the environment.
+    ///
+    /// # Errors
+    ///
+    /// See [`Builder::build`].
+    pub fn run(&self, manifest_dir: &Path, out_dir: &Path) -> Result<Vec<PathBuf>, BuildError> {
+        let pattern = manifest_dir.join(&self.pattern);
+        let pattern = pattern.to_string_lossy();
+
+        let mut inputs: Vec<PathBuf> = glob::glob(&pattern)
+            .map_err(|source| BuildError::Glob {
+                pattern: pattern.into_owned(),
+                source,
+            })?
+            .filter_map(Result::ok)
+            .collect();
+        // Sort for deterministic merge / output across platforms.
+        inputs.sort();
+
+        let combined = Self::merge(&inputs)?;
+        let tokens = generate(&combined, &self.backend)?;
+        let file: syn::File = syn::parse2(tokens)?;
+        let source = prettyplease::unparse(&file);
+
+        let out_path = out_dir.join(&self.out_file);
+        std::fs::write(&out_path, source).map_err(|source| BuildError::Io {
+            path: out_path,
+            source,
+        })?;
+
+        Ok(inputs)
+    }
+
+    /// Read and parse every input, merging all devices into one [`EsiFile`].
+    ///
+    /// The combined vendor is taken from the first input; an empty input set
+    /// yields a default vendor with no devices (a valid empty module).
+    fn merge(inputs: &[PathBuf]) -> Result<EsiFile, BuildError> {
+        let mut vendor: Option<Vendor> = None;
+        let mut devices = Vec::new();
+
+        for path in inputs {
+            let xml = std::fs::read_to_string(path).map_err(|source| BuildError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            let parsed = taktora_ethercat_esi::parse(&xml).map_err(|source| BuildError::Parse {
+                path: path.clone(),
+                source,
+            })?;
+            if vendor.is_none() {
+                vendor = Some(parsed.vendor);
+            }
+            devices.extend(parsed.devices);
+        }
+
+        Ok(EsiFile {
+            vendor: vendor.unwrap_or(Vendor { id: 0, name: None }),
+            devices,
+        })
+    }
+}

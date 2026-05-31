@@ -5,6 +5,7 @@ members = [
     "crates/taktora-ethercat-esi",
     "crates/taktora-ethercat-esi-codegen",
     "crates/taktora-ethercat-esi-codegen-ethercrab",
+    "crates/taktora-ethercat-esi-build",
     "crates/taktora-ethercat-esi-rt",
     "crates/taktora-ethercat-netcfg",
     "crates/taktora-fieldbus-od-core",
@@ -51,6 +52,7 @@ categories   = ["embedded", "concurrency", "network-programming"]
 taktora-ethercat-esi                     = { path = "crates/taktora-ethercat-esi", version = "0.1.0" }
 taktora-ethercat-esi-codegen             = { path = "crates/taktora-ethercat-esi-codegen", version = "0.1.0" }
 taktora-ethercat-esi-codegen-ethercrab   = { path = "crates/taktora-ethercat-esi-codegen-ethercrab", version = "0.1.0" }
+taktora-ethercat-esi-build               = { path = "crates/taktora-ethercat-esi-build", version = "0.1.0" }
 taktora-ethercat-esi-rt                  = { path = "crates/taktora-ethercat-esi-rt", version = "0.1.0" }
 taktora-fieldbus-od-core                 = { path = "crates/taktora-fieldbus-od-core", version = "0.1.0" }
 taktora-ethercat-netcfg                  = { path = "crates/taktora-ethercat-netcfg", version = "0.1.0" }
@@ -95,6 +97,7 @@ quote             = "1"
 syn               = { version = "2", default-features = false, features = ["printing"] }
 prettyplease      = "0.2"
 clap              = { version = "4", features = ["derive"] }
+glob              = "0.3"
 
 # dev-only
 proptest          = "1"
