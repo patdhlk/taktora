@@ -8,7 +8,10 @@ fn syntax_error_carries_line_and_column() {
     let err = parse(MALFORMED).expect_err("malformed XML must error");
     match err {
         EsiError::Xml { span, .. } => {
-            assert_eq!(span.line, 4, "span points at the failing line");
+            // quick-xml 0.40 `error_position()` for this fixture points at the
+            // mismatched `</EtherCATInfo>` on line 5 (the unclosed <Type>/<Device>
+            // tags only surface as an error when the wrong end-tag is hit).
+            assert_eq!(span.line, 5, "span points at the failing line");
         }
         other => panic!("expected Xml error, got {other:?}"),
     }
