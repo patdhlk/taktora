@@ -156,3 +156,31 @@ fn generated_tokens_parse_as_rust() {
     // The emitted token stream must be a syntactically valid Rust file.
     let _file: syn::File = syn::parse2(ts).expect("emitted tokens parse as a Rust file");
 }
+
+/// A device whose `<Type>` sanitises to a Rust keyword (`match`) must resolve to
+/// a keyword-escaped struct ident (`match_`) so that `pub struct #ident;` is
+/// valid Rust rather than a parse error.
+#[test]
+fn keyword_type_resolves_to_escaped_struct_ident() {
+    let xml = r##"<?xml version="1.0" encoding="UTF-8"?>
+<EtherCATInfo>
+  <Vendor><Id>#x00000002</Id><Name>V</Name></Vendor>
+  <Descriptions><Devices>
+    <Device><Type ProductCode="#x00000100" RevisionNo="#x00100000">match</Type></Device>
+  </Devices></Descriptions>
+</EtherCATInfo>"##;
+    let file = esi::parse(xml).expect("parse keyword device");
+
+    let cap = Capture::default();
+    generate(&file, &cap).expect("generate capture");
+    assert_eq!(*cap.struct_ident.borrow(), "match_");
+    // The keyword guard runs uniformly in `sanitise_ident`, so the base ident
+    // carries the escape underscore before uppercasing: `match_` → `MATCH_`,
+    // then the `_REV..` suffix is appended.
+    assert_eq!(*cap.const_ident.borrow(), "MATCH__REV00100000");
+
+    // The emitted `pub struct match_;` must be valid Rust.
+    let backend = RecordingBackend::default();
+    let ts = generate(&file, &backend).expect("generate");
+    let _file: syn::File = syn::parse2(ts).expect("keyword-escaped tokens parse as a Rust file");
+}

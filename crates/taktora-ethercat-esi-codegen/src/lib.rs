@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use proc_macro2::{Ident, Span, TokenStream};
+use proc_macro2::{Ident, TokenStream};
 use taktora_ethercat_esi::{EsiFile, Pdo};
 
 pub use taktora_fieldbus_od_core::Identity;
@@ -58,15 +58,16 @@ pub trait CodegenBackend {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CodegenError {
-    /// A resolved identifier was not a valid Rust identifier. This should not
-    /// occur given the sanitisation policy, but is surfaced rather than panicked.
-    #[error("invalid generated identifier {ident:?}: {source}")]
+    /// A resolved identifier was not a single valid Rust identifier token. This
+    /// should not occur given the sanitisation policy, but is surfaced rather
+    /// than panicked (`Ident::new` would panic on such input).
+    #[error("invalid generated identifier {ident:?}: {reason}")]
     InvalidIdent {
         /// The offending identifier string.
         ident: String,
-        /// The underlying lexing error.
-        #[source]
-        source: proc_macro2::LexError,
+        /// Why the string is not a usable identifier (lexing failure, or it did
+        /// not lex to exactly one bare identifier token).
+        reason: String,
     },
 }
 
@@ -74,20 +75,38 @@ pub enum CodegenError {
 /// as [`CodegenError::InvalidIdent`] rather than panicking.
 ///
 /// `Ident::new` panics on invalid input, so we first validate by lexing the
-/// string and confirming it is exactly one identifier token.
+/// string and confirming it is exactly one identifier token. Anything that does
+/// not lex to a single bare identifier (multiple tokens, a literal, a keyword
+/// token, punctuation) yields [`CodegenError::InvalidIdent`] — we never fall
+/// back to the panicking `Ident::new`.
 fn make_ident(s: &str) -> Result<Ident, CodegenError> {
     use std::str::FromStr as _;
 
     let ts = TokenStream::from_str(s).map_err(|source| CodegenError::InvalidIdent {
         ident: s.to_owned(),
-        source,
+        reason: source.to_string(),
     })?;
     let mut iter = ts.into_iter();
-    if let (Some(proc_macro2::TokenTree::Ident(ident)), None) = (iter.next(), iter.next()) {
-        Ok(ident)
-    } else {
-        Ok(Ident::new(s, Span::call_site()))
+    match (iter.next(), iter.next()) {
+        (Some(proc_macro2::TokenTree::Ident(ident)), None) => Ok(ident),
+        _ => Err(CodegenError::InvalidIdent {
+            ident: s.to_owned(),
+            reason: "did not lex to exactly one identifier token".to_owned(),
+        }),
     }
+}
+
+/// Whether every resolved device has a distinct `const_ident`. Used only by the
+/// debug-assert guarding the (base ident, revision)-uniqueness invariant in
+/// [`resolve_devices`]; isolated so the assertion expression stays side-effect
+/// free.
+#[cfg(debug_assertions)]
+fn const_idents_unique(devices: &[Device<'_>]) -> bool {
+    let mut consts: Vec<String> = devices.iter().map(|d| d.const_ident.to_string()).collect();
+    consts.sort_unstable();
+    let len = consts.len();
+    consts.dedup();
+    consts.len() == len
 }
 
 /// Resolve all parsed devices into borrowing [`Device`]s, applying naming
@@ -101,7 +120,13 @@ fn resolve_devices(esi: &EsiFile) -> Result<Vec<Device<'_>>, CodegenError> {
         *base_counts.entry(naming::base_ident(device)).or_insert(0) += 1;
     }
 
-    esi.devices
+    // INVARIANT: (base ident, revision) is assumed unique within an input set.
+    // Two devices sharing BOTH would resolve to identical `struct_ident` AND
+    // `const_ident`, emitting duplicate `pub struct`/`pub const` that won't
+    // compile. We do not detect or merge true structural duplicates here;
+    // that dedup is deferred to the dedup slice (`REQ_0513`).
+    let resolved: Vec<Device<'_>> = esi
+        .devices
         .iter()
         .map(|device| {
             let collides = base_counts[&naming::base_ident(device)] > 1;
@@ -114,7 +139,14 @@ fn resolve_devices(esi: &EsiFile) -> Result<Vec<Device<'_>>, CodegenError> {
                 rx_pdos: &device.rx_pdos,
             })
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+
+    debug_assert!(
+        const_idents_unique(&resolved),
+        "(base ident, revision) collision: two resolved devices share a const ident"
+    );
+
+    Ok(resolved)
 }
 
 /// Build resolved [`Device`]s from a parsed ESI file and emit the full module.

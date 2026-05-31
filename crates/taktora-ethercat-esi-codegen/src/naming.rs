@@ -23,12 +23,29 @@ fn naming_source(device: &esi::EsiDevice) -> String {
         )
 }
 
+/// Rust keywords (strict + reserved, covering the 2024 edition) that a sanitised
+/// identifier must never equal, since emitting `pub struct match;` is invalid.
+/// A sanitised string landing on any of these gets a trailing `_` (`match` →
+/// `match_`); see [`sanitise_ident`].
+const KEYWORDS: &[&str] = &[
+    // Strict keywords.
+    "as", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn",
+    "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
+    "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
+    "use", "where", "while", "async", "await", // Reserved keywords.
+    "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof", "unsized",
+    "virtual", "yield", "try", "gen",
+];
+
 /// Sanitise an arbitrary product string into a valid Rust identifier (`REQ_0511`).
 ///
 /// Each character that is not a valid Rust identifier character (`[A-Za-z0-9_]`)
 /// is replaced with `_`. If the result would start with a digit it is prefixed
-/// with `_`. Nothing is collapsed, so the mapping is faithful and stable: e.g.
-/// `EL3001-0000` becomes `EL3001_0000`.
+/// with `_`. If the result lands exactly on a Rust keyword (strict or reserved)
+/// a trailing `_` is appended (`match` → `match_`), since the derived ident is
+/// emitted bare (e.g. `pub struct #ident;`) and raw idents (`r#`) can't express
+/// every keyword (`crate`, `self`, `Self`). Nothing else is collapsed, so the
+/// mapping stays faithful and stable: e.g. `EL3001-0000` becomes `EL3001_0000`.
 fn sanitise_ident(raw: &str) -> String {
     let mut out: String = raw
         .chars()
@@ -45,6 +62,10 @@ fn sanitise_ident(raw: &str) -> String {
         out.push('_');
     } else if out.as_bytes()[0].is_ascii_digit() {
         out.insert(0, '_');
+    }
+
+    if KEYWORDS.contains(&out.as_str()) {
+        out.push('_');
     }
 
     out
@@ -114,5 +135,70 @@ mod tests {
         assert_eq!(revision_suffix(0x0011_0000), "REV00110000");
         assert_eq!(revision_suffix(0), "REV00000000");
         assert_eq!(revision_suffix(0xDEAD_BEEF), "REVDEADBEEF");
+    }
+
+    #[test]
+    fn keyword_idents_get_trailing_underscore() {
+        // Lowercase strict keywords would emit invalid `pub struct match;`.
+        assert_eq!(sanitise_ident("match"), "match_");
+        assert_eq!(sanitise_ident("fn"), "fn_");
+        assert_eq!(sanitise_ident("loop"), "loop_");
+        // `Self` is a keyword in its exact casing.
+        assert_eq!(sanitise_ident("Self"), "Self_");
+        // Reserved keywords are escaped too.
+        assert_eq!(sanitise_ident("yield"), "yield_");
+    }
+
+    #[test]
+    fn non_keywords_are_left_unchanged() {
+        // Capitalised forms of keywords are not keywords.
+        assert_eq!(sanitise_ident("Match"), "Match");
+        // A keyword with extra characters is not a keyword.
+        assert_eq!(sanitise_ident("matchbox"), "matchbox");
+        assert_eq!(sanitise_ident("EL3001"), "EL3001");
+    }
+
+    /// Build a minimal device with the given naming-source fields; everything
+    /// else is empty/zero so the test exercises only the source-selection path.
+    fn device(product_type: Option<&str>, name: Option<&str>, product_code: u32) -> esi::EsiDevice {
+        esi::EsiDevice {
+            identity: esi::Identity {
+                vendor_id: 0,
+                product_code,
+                revision: 0,
+            },
+            name: name.map(ToOwned::to_owned),
+            product_type: product_type.map(ToOwned::to_owned),
+            group_type: None,
+            sync_managers: Vec::new(),
+            tx_pdos: Vec::new(),
+            rx_pdos: Vec::new(),
+            mailbox: None,
+            dc: None,
+            dictionary: Vec::new(),
+            vendor_extensions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn naming_source_prefers_product_type() {
+        let dev = device(Some("EL3001-0000"), Some("Human Name"), 0x0BB9_3052);
+        assert_eq!(naming_source(&dev), "EL3001-0000");
+    }
+
+    #[test]
+    fn naming_source_falls_back_to_name() {
+        // product_type None → use <Name>.
+        let dev = device(None, Some("Human Name"), 0x0BB9_3052);
+        assert_eq!(naming_source(&dev), "Human Name");
+        assert_eq!(base_ident(&dev), "Human_Name");
+    }
+
+    #[test]
+    fn naming_source_synthesises_from_product_code() {
+        // Both None → synthesised device_<code:08X>.
+        let dev = device(None, None, 0x0BB9_3052);
+        assert_eq!(naming_source(&dev), "device_0BB93052");
+        assert_eq!(base_ident(&dev), "device_0BB93052");
     }
 }
