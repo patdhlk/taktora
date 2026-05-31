@@ -3,6 +3,7 @@ resolver = "2"
 exclude = ["examples"]
 members = [
     "crates/ethercat-netcfg",
+    "crates/ethercat-netcfg-codegen",
     "crates/taktora-bounded-alloc",
     "crates/taktora-connector-can",
     "crates/taktora-connector-can-tests",
@@ -41,6 +42,7 @@ categories   = ["embedded", "concurrency", "network-programming"]
 # Internal crates — declared with both `path` (for local builds) and `version`
 # (so `cargo publish` strips the path and resolves against crates.io).
 ethercat-netcfg                  = { path = "crates/ethercat-netcfg", version = "0.1.0" }
+ethercat-netcfg-codegen          = { path = "crates/ethercat-netcfg-codegen", version = "0.1.0" }
 taktora-bounded-alloc            = { path = "crates/taktora-bounded-alloc", version = "0.1.3" }
 taktora-connector-can            = { path = "crates/taktora-connector-can", version = "0.1.4" }
 taktora-connector-codec          = { path = "crates/taktora-connector-codec", version = "0.1.4" }
@@ -71,6 +73,10 @@ rand              = { version = "0.8", default-features = false, features = ["st
 tokio             = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 ethercrab         = { version = "0.7", default-features = false, features = ["std"] }
 serde_norway      = "0.9"
+proc-macro2       = "1"
+quote             = "1"
+syn               = { version = "2", default-features = false, features = ["printing"] }
+prettyplease      = "0.2"
 
 # dev-only
 proptest          = "1"
