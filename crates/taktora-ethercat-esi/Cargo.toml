@@ -11,6 +11,7 @@ readme       = { workspace = true }
 keywords     = { workspace = true }
 categories   = { workspace = true }
 description  = "Parser for EtherCAT ESI (slave information) XML into a faithful typed IR (identity, PDOs, sync managers, mailbox, distributed clocks, object dictionary)."
+exclude      = ["tests/fixtures/vendor/*.xml"]
 
 [dependencies]
 taktora-fieldbus-od-core = { workspace = true }

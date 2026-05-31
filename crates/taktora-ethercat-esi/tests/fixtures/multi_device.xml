@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<EtherCATInfo>
+  <Vendor><Id>#x00000002</Id><Name>V</Name></Vendor>
+  <Descriptions><Devices>
+    <Device><Type ProductCode="#x00000100" RevisionNo="#x1">A</Type></Device>
+    <Device><Type ProductCode="#x00000200" RevisionNo="#x1">B</Type></Device>
+  </Devices></Descriptions>
+</EtherCATInfo>
