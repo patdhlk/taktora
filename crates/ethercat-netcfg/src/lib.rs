@@ -1,0 +1,249 @@
+//! Parser and in-memory IR for the `EtherCAT` network-config YAML.
+//!
+//! This crate is the **parse layer** of the `ethercat-netcfg` codegen
+//! toolchain (a build-host tool — `std` is fine). It turns a
+//! `network.yaml` document into the [`NetworkConfig`] IR via the single
+//! public entry point [`parse`].
+//!
+//! It performs *parsing only*. Validation, address assignment, multi-bus
+//! handling, and code generation are deliberately **out of scope** here —
+//! they are handled by later layers of the toolchain.
+
+#![warn(missing_docs)]
+
+use core::time::Duration;
+
+use serde::Deserialize;
+
+/// The fully parsed network configuration — the IR root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkConfig {
+    /// Schema version of the source document.
+    pub schema_version: u16,
+    /// Bus-wide configuration.
+    pub bus: BusConfig,
+    /// Device instances declared on the bus.
+    pub devices: Vec<DeviceInstance>,
+    /// Process-data channel bindings.
+    pub channels: Vec<ChannelBinding>,
+}
+
+/// Bus-wide configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BusConfig {
+    /// Cyclic process-data period.
+    pub cycle_time: Duration,
+    /// Whether distributed clocks are enabled.
+    pub distributed_clocks: bool,
+    /// Upper bound on the number of subdevices.
+    pub max_subdevices: usize,
+    /// Upper bound on the process-data-image size, in bytes.
+    pub max_pdi_bytes: usize,
+    /// Default NIC to bind the bus to, if any.
+    pub default_nic: Option<String>,
+}
+
+/// A single device instance declared on the bus.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceInstance {
+    /// Human-readable label, unique within the config.
+    pub label: String,
+    /// Where the device's PDO description comes from.
+    pub source: DeviceSource,
+    /// Optional expected identity for verification.
+    pub identity: Option<Identity>,
+    /// Optional configured station alias.
+    pub station_alias: Option<u16>,
+    /// Optional explicit configured-address override.
+    pub address_override: Option<u16>,
+}
+
+/// The origin of a device's PDO description.
+///
+/// Only the [`Inline`](DeviceSource::Inline) variant is modelled for now.
+/// An `Esi` variant (sourcing PDOs from an ESI/`EtherCAT` Slave Information
+/// file) is future work and will be added once the `ethercat-esi` crate
+/// exists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceSource {
+    /// PDOs described inline in the network config.
+    Inline {
+        /// Receive (output) PDO entries.
+        rx: Vec<PdoEntry>,
+        /// Transmit (input) PDO entries.
+        tx: Vec<PdoEntry>,
+    },
+}
+
+/// A single PDO entry within an inline device description.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PdoEntry {
+    /// PDO index.
+    pub index: u16,
+    /// Bit offset within the PDO.
+    pub bit_offset: u16,
+    /// Bit length of the entry.
+    pub bit_length: u16,
+}
+
+/// Expected device identity, used for verification.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Identity {
+    /// Vendor identifier.
+    pub vendor_id: u32,
+    /// Product code.
+    pub product_code: u32,
+    /// Revision number.
+    pub revision: u32,
+}
+
+/// Direction of a process-data channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PdoDirection {
+    /// Receive (output, controller -> device).
+    Rx,
+    /// Transmit (input, device -> controller).
+    Tx,
+}
+
+/// A binding from a named channel to a slice of a device's process data.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ChannelBinding {
+    /// Channel name (e.g. a topic).
+    pub name: String,
+    /// Label of the bound device.
+    pub device: String,
+    /// Direction of the channel.
+    pub direction: PdoDirection,
+    /// Bit offset within the device's process image.
+    pub bit_offset: u32,
+    /// Bit length of the channel.
+    pub bit_length: u16,
+    /// Primitive element type of the channel.
+    pub element_type: ElementType,
+    /// Whether overlapping bit ranges are permitted for this channel.
+    #[serde(default)]
+    pub allow_overlap: bool,
+}
+
+/// Primitive inline element types for a channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ElementType {
+    /// Unsigned 8-bit integer.
+    U8,
+    /// Unsigned 16-bit integer.
+    U16,
+    /// Unsigned 32-bit integer.
+    U32,
+    /// Unsigned 64-bit integer.
+    U64,
+}
+
+/// Errors that can occur while [`parse`]-ing a network config.
+#[derive(Debug, thiserror::Error)]
+pub enum NetcfgError {
+    /// The source document could not be deserialized from YAML.
+    #[error("failed to parse network config YAML: {0}")]
+    Yaml(#[from] serde_norway::Error),
+}
+
+/// Parse a network-config YAML document into the [`NetworkConfig`] IR.
+pub fn parse(yaml: &str) -> Result<NetworkConfig, NetcfgError> {
+    let dto: dto::NetworkConfigDto = serde_norway::from_str(yaml)?;
+    Ok(dto.into())
+}
+
+/// Private deserialization DTOs.
+///
+/// These mirror the on-disk YAML shape (including serde defaults and the
+/// `cycle_time_ms` field) and convert into the public IR. Keeping them
+/// separate lets the IR stay free of serde concerns like the
+/// milliseconds-to-[`Duration`] conversion.
+mod dto {
+    use super::{
+        BusConfig, ChannelBinding, DeviceInstance, DeviceSource, Identity, NetworkConfig, PdoEntry,
+    };
+    use core::time::Duration;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    pub struct NetworkConfigDto {
+        schema_version: u16,
+        bus: BusConfigDto,
+        #[serde(default)]
+        devices: Vec<DeviceInstanceDto>,
+        #[serde(default)]
+        channels: Vec<ChannelBinding>,
+    }
+
+    #[derive(Deserialize)]
+    struct BusConfigDto {
+        cycle_time_ms: u64,
+        distributed_clocks: bool,
+        max_subdevices: usize,
+        max_pdi_bytes: usize,
+        #[serde(default)]
+        default_nic: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct DeviceInstanceDto {
+        label: String,
+        #[serde(default)]
+        pdos: PdosDto,
+        #[serde(default)]
+        identity: Option<Identity>,
+        #[serde(default)]
+        station_alias: Option<u16>,
+        #[serde(default)]
+        address_override: Option<u16>,
+    }
+
+    #[derive(Deserialize, Default)]
+    struct PdosDto {
+        #[serde(default)]
+        rx: Vec<PdoEntry>,
+        #[serde(default)]
+        tx: Vec<PdoEntry>,
+    }
+
+    impl From<NetworkConfigDto> for NetworkConfig {
+        fn from(dto: NetworkConfigDto) -> Self {
+            Self {
+                schema_version: dto.schema_version,
+                bus: dto.bus.into(),
+                devices: dto.devices.into_iter().map(Into::into).collect(),
+                channels: dto.channels,
+            }
+        }
+    }
+
+    impl From<BusConfigDto> for BusConfig {
+        fn from(dto: BusConfigDto) -> Self {
+            Self {
+                cycle_time: Duration::from_millis(dto.cycle_time_ms),
+                distributed_clocks: dto.distributed_clocks,
+                max_subdevices: dto.max_subdevices,
+                max_pdi_bytes: dto.max_pdi_bytes,
+                default_nic: dto.default_nic,
+            }
+        }
+    }
+
+    impl From<DeviceInstanceDto> for DeviceInstance {
+        fn from(dto: DeviceInstanceDto) -> Self {
+            Self {
+                label: dto.label,
+                source: DeviceSource::Inline {
+                    rx: dto.pdos.rx,
+                    tx: dto.pdos.tx,
+                },
+                identity: dto.identity,
+                station_alias: dto.station_alias,
+                address_override: dto.address_override,
+            }
+        }
+    }
+}
