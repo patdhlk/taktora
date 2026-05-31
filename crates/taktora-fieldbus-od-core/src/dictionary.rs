@@ -1,0 +1,1 @@
+//! Object-dictionary entry model.
