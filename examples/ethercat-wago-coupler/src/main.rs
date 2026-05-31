@@ -42,15 +42,19 @@ const N: usize = 256;
 /// EtherCAT config tool reports a different address, edit this.
 const SUBDEV: u16 = 0x1000;
 
-/// 750-430: 8 digital input bits as one Tx PDI byte at bit offset 0.
+/// 750-430: bit offset of the 8 digital inputs within the coupler's Tx
+/// process image. Offset 0 — they are first in the Tx image.
 const DI_BIT_OFFSET: u32 = 0;
+/// 750-430: number of digital input bits (one PDI byte).
 const DI_BITS: u16 = 8;
 
-/// 750-530: 8 digital output bits as one Rx PDI byte at bit offset 0.
-/// Inputs and outputs both start at offset 0 because they sit in
-/// separate Tx and Rx process images. Adjust if your config tool
-/// reports different offsets (e.g. extra modules ahead of these).
+/// 750-530: bit offset of the 8 digital outputs within the coupler's
+/// Rx process image. Offset 0 — inputs and outputs both start at 0
+/// because they sit in separate Tx and Rx process images. Adjust if
+/// your config tool reports different offsets (e.g. extra modules
+/// ahead of these).
 const DO_BIT_OFFSET: u32 = 0;
+/// 750-530: number of digital output bits (one PDI byte).
 const DO_BITS: u16 = 8;
 
 /// Bus topology bounds passed to `EthercrabBusDriver`. Generous for a
@@ -128,8 +132,8 @@ impl PayloadCodec for RawByteCodec {
 enum Mode {
     /// Default: 10 ms cycle, runs until --ticks or Ctrl-C.
     Normal,
-    /// Long-run mode. Logs health at 1/4 Hz; prints pass/fail summary
-    /// on exit.
+    /// Long-run mode. The health pump checks at 4 Hz (250 ms) and logs
+    /// health transitions; prints a pass/fail summary on exit.
     Endurance,
     /// Drill mode. Runs for `--window` seconds; expects operator to
     /// unplug/replug mid-run; prints pass/fail.
