@@ -69,6 +69,21 @@ pub enum CodegenError {
         /// not lex to exactly one bare identifier token).
         reason: String,
     },
+
+    /// A PDO entry used a data type the backend cannot yet emit a typed field
+    /// for (e.g. a string or a complex/named type). Reported rather than
+    /// silently dropped so the device author sees the gap.
+    #[error("unsupported entry data type for entry {index:#06x}:{sub_index} ({field}): {reason}")]
+    UnsupportedEntryType {
+        /// PDO entry index.
+        index: u16,
+        /// PDO entry sub-index.
+        sub_index: u8,
+        /// The resolved field name the entry would have produced.
+        field: String,
+        /// Why the type is unsupported (the offending type name / category).
+        reason: String,
+    },
 }
 
 /// Parse an identifier string into a [`proc_macro2::Ident`], surfacing failures
@@ -94,6 +109,23 @@ fn make_ident(s: &str) -> Result<Ident, CodegenError> {
             reason: "did not lex to exactly one identifier token".to_owned(),
         }),
     }
+}
+
+/// Resolve a raw PDO-entry name into a `snake_case` Rust field identifier,
+/// applying this crate's naming policy (`REQ_0511`).
+///
+/// The raw string is word-segmented and lower-cased, then char-sanitised and
+/// keyword-escaped through the same rules used for type identifiers, so the
+/// result is always a valid bare identifier (e.g. `Underrange` → `underrange`,
+/// `Value` → `value`). Backends call this rather than re-deriving naming.
+///
+/// # Errors
+///
+/// Returns [`CodegenError::InvalidIdent`] if the sanitised string somehow does
+/// not lex to exactly one identifier token — which the sanitisation policy is
+/// designed to prevent, but is surfaced rather than panicked.
+pub fn field_ident(raw: &str) -> Result<Ident, CodegenError> {
+    make_ident(&naming::snake_field_string(raw))
 }
 
 /// Whether every resolved device has a distinct `const_ident`. Used only by the

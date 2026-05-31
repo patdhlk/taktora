@@ -76,6 +76,44 @@ pub fn base_ident(device: &esi::EsiDevice) -> String {
     sanitise_ident(&naming_source(device))
 }
 
+/// Convert an arbitrary raw string into a `snake_case` field identifier
+/// (`REQ_0511`).
+///
+/// The raw name is lower-cased and word-segmented, then char-sanitised and
+/// keyword-escaped through the same [`sanitise_ident`] rules used for type
+/// names, so the result is always a valid, bare Rust identifier.
+///
+/// Word boundaries are inserted on a lower→upper transition (`UnderRange`
+/// becomes `under_range`) and on every run of non-alphanumeric characters
+/// (`AI 1` becomes `ai_1`); existing underscores are preserved. This keeps the
+/// mapping faithful and stable: `Underrange` becomes `underrange`, `Value`
+/// becomes `value`, `AI TxPDO-Map` becomes `ai_tx_pdo_map`.
+pub fn snake_field_string(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len() + 4);
+    let mut prev_lower_or_digit = false;
+    for c in raw.chars() {
+        if c.is_ascii_uppercase() {
+            if prev_lower_or_digit {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+            prev_lower_or_digit = false;
+        } else if c.is_ascii_alphanumeric() {
+            out.push(c);
+            prev_lower_or_digit = true;
+        } else {
+            // Any separator run collapses to a single underscore.
+            if !out.ends_with('_') && !out.is_empty() {
+                out.push('_');
+            }
+            prev_lower_or_digit = false;
+        }
+    }
+    // Run the result through the shared char-sanitise + leading-digit +
+    // keyword-escape policy so the field ident is always valid and bare.
+    sanitise_ident(out.trim_matches('_'))
+}
+
 /// The full-width revision suffix for a revision number (`REQ_0512`): `REV{rev:08X}`.
 pub fn revision_suffix(revision: u32) -> String {
     format!("REV{revision:08X}")
@@ -192,6 +230,26 @@ mod tests {
         let dev = device(None, Some("Human Name"), 0x0BB9_3052);
         assert_eq!(naming_source(&dev), "Human Name");
         assert_eq!(base_ident(&dev), "Human_Name");
+    }
+
+    #[test]
+    fn snake_field_basic_names() {
+        assert_eq!(snake_field_string("Underrange"), "underrange");
+        assert_eq!(snake_field_string("Value"), "value");
+    }
+
+    #[test]
+    fn snake_field_segments_camel_and_separators() {
+        assert_eq!(snake_field_string("UnderRange"), "under_range");
+        assert_eq!(snake_field_string("AI TxPDO-Map"), "ai_tx_pdo_map");
+        assert_eq!(snake_field_string("foo  bar"), "foo_bar");
+    }
+
+    #[test]
+    fn snake_field_escapes_keywords_and_leading_digits() {
+        assert_eq!(snake_field_string("Type"), "type_");
+        assert_eq!(snake_field_string("1Ch"), "_1_ch");
+        assert_eq!(snake_field_string(""), "_");
     }
 
     #[test]
