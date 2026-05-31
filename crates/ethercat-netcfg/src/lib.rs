@@ -212,6 +212,18 @@ pub enum NetcfgError {
         /// Number of devices found in the ESI file.
         count: usize,
     },
+
+    /// An `esi:` reference is a remote (`http://` / `https://`) URL. Builds
+    /// are hermetic and never fetch over the network at parse time
+    /// (`REQ_0834`); the ESI must be vendored locally and referenced as a
+    /// local file (or `file://` URL).
+    #[error(
+        "esi reference `{reference}` is a remote URL; vendor it locally with `netcfg fetch` and reference the vendored file"
+    )]
+    RemoteEsiNotVendored {
+        /// The offending remote reference, as named in the network config.
+        reference: String,
+    },
 }
 
 impl From<ethercat_esi::EsiError> for NetcfgError {
@@ -273,7 +285,7 @@ mod dto {
     struct DeviceInstanceDto {
         label: String,
         #[serde(default)]
-        esi: Option<PathBuf>,
+        esi: Option<String>,
         #[serde(default)]
         pdos: PdosDto,
         #[serde(default)]
@@ -308,6 +320,26 @@ mod dto {
                 channels: self.channels,
             })
         }
+    }
+
+    /// Resolve an `esi:` reference to a LOCAL filesystem path (`REQ_0834`).
+    ///
+    /// Scheme handling for hermetic builds:
+    /// - `http://` / `https://` → [`NetcfgError::RemoteEsiNotVendored`]; no
+    ///   network access — the ESI must be vendored locally.
+    /// - `file://` → strip the scheme; the remainder is a local path. For the
+    ///   common `file:///absolute/path` form this yields `/absolute/path`.
+    /// - anything else → the reference is itself a local path (unchanged).
+    fn esi_local_path(reference: &str) -> Result<PathBuf, NetcfgError> {
+        if reference.starts_with("http://") || reference.starts_with("https://") {
+            return Err(NetcfgError::RemoteEsiNotVendored {
+                reference: reference.to_owned(),
+            });
+        }
+        if let Some(rest) = reference.strip_prefix("file://") {
+            return Ok(PathBuf::from(rest));
+        }
+        Ok(PathBuf::from(reference))
     }
 
     /// Convert an `ethercat_esi::PdoEntry` into a netcfg [`PdoEntry`].
@@ -348,7 +380,8 @@ mod dto {
             } = self;
 
             let (source, identity) = match esi {
-                Some(path) => {
+                Some(reference) => {
+                    let path = esi_local_path(&reference)?;
                     let xml = std::fs::read_to_string(&path)?;
                     let esi_file = ethercat_esi::parse(&xml)?;
                     let count = esi_file.devices.len();
