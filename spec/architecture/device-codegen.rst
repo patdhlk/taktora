@@ -429,6 +429,53 @@ requirement or feature it answers.
    revisited in its own round. The parser gains located,
    ``core::error::Error``-implementing errors.
 
+.. arch-decision:: Object-safe EsiDevice, identity reuse, ethercrab behind SdoWrite
+   :id: ADR_0098
+   :status: accepted
+   :refines: FEAT_0054
+   :links: ADR_0078, ADR_0097
+
+   **Context.** The runtime-trait surface as first specified carried
+   three latent contradictions. (1) :need:`REQ_0530` put
+   ``const IDENTITY`` on the ``EsiDevice`` trait, but an associated
+   const makes a trait ``dyn``-incompatible — directly breaking the
+   ``Box<dyn EsiDevice>`` registry factories :need:`REQ_0525`
+   mandates. (2) :need:`BB_0063` had ``ethercat-esi-rt`` depend on
+   ``ethercrab`` *and* be ``no_std``, which is impossible (ethercrab
+   is a ``std`` async-networking crate) and would force every
+   ``EsiDevice`` consumer — a simulator, a TwinCAT importer — to
+   compile ethercrab's full stack, defeating :need:`REQ_0532` /
+   :need:`QG_0013`. (3) The spec named a fresh ``SubDeviceIdentity``
+   type alongside the already-adopted od-core ``Identity``
+   (:need:`ADR_0078`) and ethercrab's own ``SubDeviceIdentity``,
+   re-opening the type-triplication the OD-core lift had just closed.
+
+   **Decision.** Resolve all three at the trait crate:
+
+   * ``EsiDevice`` is **object-safe** — identity is the method
+     ``fn identity(&self) -> Identity``, not an associated const. The
+     static identity value lives in the standalone ``const`` of
+     :need:`REQ_0522`; the registry keys on that const and stores
+     ``Box<dyn EsiDevice>`` factories.
+   * ``EsiConfigurable::configure`` is **generic over a minimal**
+     ``SdoWrite`` **trait** (:need:`REQ_0535`) instead of naming
+     ``SubDevicePreOperational``. ``ethercat-esi-rt`` thus has no
+     ethercrab dependency; the concrete
+     ``impl SdoWrite for SubDevicePreOperational`` lives in the
+     backend (:need:`REQ_0520`).
+   * Identity is the shared od-core ``Identity``
+     (vendor_id / product_code / revision); no ``SubDeviceIdentity``
+     is minted. Mapping onto ethercrab's wire identity (which adds
+     ``serial``) is the connector adapter's job (:need:`BB_0067`).
+
+   **Consequences.** ✅ The ``Box<dyn EsiDevice>`` registry compiles.
+   ✅ ``EsiDevice`` consumers pay nothing for ethercrab. ✅ Generated
+   ``configure`` is unit-testable against a mock ``SdoWrite``.
+   ✅ One identity type across the toolchain. ❌ Deviates from the
+   literal wording of :need:`REQ_0530` / :need:`REQ_0531` /
+   :need:`REQ_0522` / :need:`REQ_0512`, now reworded to match. ❌ A
+   thin extra trait (``SdoWrite``) and one generic on ``configure``.
+
 ----
 
 5. Building block view
@@ -474,10 +521,16 @@ requirement or feature it answers.
    :implements: FEAT_0054
 
    The minimal trait crate consumed by generated devices and
-   adapters. Owns ``EsiDevice``, ``EsiConfigurable``,
-   ``SubDeviceIdentity``, ``EsiError``. Depends on ``ethercrab``
-   (for ``SubDevicePreOperational``) and ``bitvec``. ``no_std`` +
-   ``alloc``. Deliberately thin so the contract is small.
+   adapters. Owns the object-safe ``EsiDevice``, ``EsiConfigurable``,
+   the ``SdoWrite`` abstraction (:need:`REQ_0535`), and a *runtime*
+   ``EsiError``; re-exports ``Identity`` from
+   ``taktora-fieldbus-od-core`` rather than minting a
+   ``SubDeviceIdentity``. Depends on ``bitvec`` only — **no
+   ethercrab dependency**: the ethercrab ``SubDevicePreOperational``
+   is reached through the ``SdoWrite`` trait, whose concrete impl
+   lives in the backend (:need:`BB_0062`). ``std`` baseline today,
+   ``no_std`` revisited per :need:`ADR_0097` reasoning. Deliberately
+   thin so the contract is small. See :need:`ADR_0098`.
 
 .. building-block:: ethercat-esi-build (build.rs glue)
    :id: BB_0064
@@ -641,7 +694,9 @@ the rest of the toolchain orbits.
 --------------------------
 
 All decisions are captured in section 4 (Solution strategy) as ADR
-records :need:`ADR_0070` through :need:`ADR_0077`. This section is
+records :need:`ADR_0070` through :need:`ADR_0077`, plus the
+std-baseline :need:`ADR_0097` and the runtime-trait resolution
+:need:`ADR_0098`. This section is
 deliberately a pointer rather than a duplicate — arc42's
 recommendation when decisions are dense in the solution strategy
 narrative.
