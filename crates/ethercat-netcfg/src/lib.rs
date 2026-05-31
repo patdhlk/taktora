@@ -191,6 +191,18 @@ pub enum NetcfgError {
     #[error("failed to parse referenced ESI file: {0}")]
     Esi(ethercat_esi::EsiError),
 
+    /// A device declares both an `esi:` reference and inline `pdos:`, but the
+    /// ESI-resolved entries disagree with the inline entries.
+    ///
+    /// The ESI and the inline description are both available only after ESI
+    /// resolution, so the contradiction is detected here in `parse` rather
+    /// than in the downstream codegen validation pass.
+    #[error("device `{label}` declares an esi: reference that contradicts its inline pdos:")]
+    EsiContradiction {
+        /// Label of the offending device.
+        label: String,
+    },
+
     /// A referenced ESI file describes more than one device, so the parser
     /// cannot unambiguously pick one (multi-device selection is deferred).
     #[error("ESI file {path:?} describes {count} devices; cannot select unambiguously")]
@@ -351,8 +363,16 @@ mod dto {
                         .next()
                         .expect("checked count == 1");
 
-                    let rx = device.rx_pdos.iter().map(convert_pdo).collect();
-                    let tx = device.tx_pdos.iter().map(convert_pdo).collect();
+                    let rx: Vec<PdoEntry> = device.rx_pdos.iter().map(convert_pdo).collect();
+                    let tx: Vec<PdoEntry> = device.tx_pdos.iter().map(convert_pdo).collect();
+                    // If the device ALSO carries inline pdos:, the two
+                    // descriptions must agree. The ESI is the source of
+                    // truth, so an exact match is redundant-but-legal and a
+                    // mismatch is a contradiction (REQ_0824).
+                    let has_inline = !pdos.rx.is_empty() || !pdos.tx.is_empty();
+                    if has_inline && (pdos.rx != rx || pdos.tx != tx) {
+                        return Err(NetcfgError::EsiContradiction { label });
+                    }
                     // Keep an explicit YAML identity; otherwise map the
                     // ESI identity into the device.
                     let identity = identity.or(Some(Identity {

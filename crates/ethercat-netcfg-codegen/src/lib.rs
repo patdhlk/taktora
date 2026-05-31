@@ -288,9 +288,11 @@ pub fn generate(config: &NetworkConfig) -> Result<String, CodegenError> {
     validate(config)?;
     let pdo_map = pdo_map_tokens(config);
     let routing = routing_const_tokens(config);
+    let identities = identity_table_tokens(config);
     let tokens = quote! {
         #pdo_map
         #routing
+        #identities
     };
     let file: syn::File = syn::parse2(tokens)?;
     Ok(prettyplease::unparse(&file))
@@ -397,6 +399,55 @@ fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
 
     quote! {
         pub static PDO_MAP: &[taktora_connector_ethercat::SubDeviceMap] = &[
+            #(#entries),*
+        ];
+    }
+}
+
+/// Emit the self-contained `ExpectedIdentity` struct and the
+/// `EXPECTED_IDENTITIES` static a future runtime bring-up check consumes
+/// (`REQ_0838`).
+///
+/// The struct is emitted verbatim (not referenced from
+/// `taktora-connector-ethercat`, which has no suitable type) so the
+/// generated module stays self-contained and always compiles. One entry per
+/// device whose `identity` is `Some`, in bus order; devices with no known
+/// identity contribute nothing. The struct def and an (possibly empty)
+/// static are always emitted to keep the generated surface stable.
+fn identity_table_tokens(config: &NetworkConfig) -> TokenStream {
+    let entries = config
+        .devices
+        .iter()
+        .enumerate()
+        .filter_map(|(index, device)| {
+            let identity = device.identity.as_ref()?;
+            let address = device_address(index, device);
+            let vendor_id = identity.vendor_id;
+            let product_code = identity.product_code;
+            let revision = identity.revision;
+            let station_alias = device
+                .station_alias
+                .map_or_else(|| quote!(None), |alias| quote!(Some(#alias)));
+            Some(quote! {
+                ExpectedIdentity {
+                    address: #address,
+                    vendor_id: #vendor_id,
+                    product_code: #product_code,
+                    revision: #revision,
+                    station_alias: #station_alias,
+                }
+            })
+        });
+
+    quote! {
+        pub struct ExpectedIdentity {
+            pub address: u16,
+            pub vendor_id: u32,
+            pub product_code: u32,
+            pub revision: u32,
+            pub station_alias: Option<u16>,
+        }
+        pub static EXPECTED_IDENTITIES: &[ExpectedIdentity] = &[
             #(#entries),*
         ];
     }
