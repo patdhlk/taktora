@@ -29,8 +29,6 @@ pub struct RawXml {
 /// Direct `<Device>` children that belong to the known schema and are therefore
 /// NOT captured as vendor extensions. Everything else under a `<Device>` is
 /// captured verbatim.
-// Pre-placed for Task 12 — will be used when vendor-extension wiring lands.
-#[allow(dead_code)]
 const KNOWN_DEVICE_CHILDREN: &[&str] = &[
     "Type",
     "Name",
@@ -51,7 +49,6 @@ const KNOWN_DEVICE_CHILDREN: &[&str] = &[
 /// Strip any namespace prefix from a qualified element name (`Beckhoff:Foo` ->
 /// `Foo`). Used only for the known-child membership test; the captured
 /// [`RawXml::name`] keeps the qualified form quick-xml provides.
-#[allow(dead_code)]
 fn local_name(qualified: &str) -> &str {
     qualified.rsplit(':').next().unwrap_or(qualified)
 }
@@ -64,8 +61,6 @@ fn local_name(qualified: &str) -> &str {
 /// This pass is read-only and runs only after the serde deserialize already
 /// succeeded, so any reader error here is unexpected; it is surfaced as
 /// [`EsiError::Value`] with a located span rather than fabricating a `DeError`.
-// Pre-placed for Task 12 — will be wired into parse() when vendor-extension support lands.
-#[allow(dead_code)]
 pub fn capture_device_extensions(xml: &str) -> Result<Vec<Vec<RawXml>>, EsiError> {
     let index = LineIndex::new(xml);
     let mut reader = Reader::from_str(xml);
@@ -133,7 +128,6 @@ pub fn capture_device_extensions(xml: &str) -> Result<Vec<Vec<RawXml>>, EsiError
     Ok(per_device)
 }
 
-#[allow(dead_code)]
 fn is_known_child(qualified_name: &str) -> bool {
     KNOWN_DEVICE_CHILDREN.contains(&local_name(qualified_name))
 }
@@ -141,7 +135,6 @@ fn is_known_child(qualified_name: &str) -> bool {
 /// Recursively materialise the element whose `Start` was just read, consuming
 /// events up to and including its matching `End`. `start`/`name` describe that
 /// opening tag.
-#[allow(dead_code)]
 fn read_subtree(
     reader: &mut Reader<&[u8]>,
     index: &LineIndex,
@@ -192,7 +185,6 @@ fn read_subtree(
 }
 
 /// Decode an element's name to an owned `String` (qualified, prefix kept).
-#[allow(dead_code)]
 fn decode_name(
     start: &quick_xml::events::BytesStart<'_>,
     reader: &Reader<&[u8]>,
@@ -208,7 +200,6 @@ fn decode_name(
 
 /// Decode all attributes of an element into `(name, value)` pairs, unescaping
 /// values.
-#[allow(dead_code)]
 fn decode_attributes(
     start: &quick_xml::events::BytesStart<'_>,
     reader: &Reader<&[u8]>,
@@ -232,12 +223,10 @@ fn decode_attributes(
 }
 
 /// Build a located [`EsiError::Value`] from the reader's current error position.
-#[allow(dead_code)]
 fn reader_error(reader: &Reader<&[u8]>, index: &LineIndex, e: &quick_xml::Error) -> EsiError {
     value_error(index, reader.error_position(), e)
 }
 
-#[allow(dead_code)]
 fn value_error(index: &LineIndex, byte_pos: u64, e: &dyn std::fmt::Display) -> EsiError {
     let offset = usize::try_from(byte_pos).unwrap_or(usize::MAX);
     EsiError::Value {
