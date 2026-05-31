@@ -79,6 +79,54 @@ fn run_succeeds_with_empty_glob() {
 }
 
 #[test]
+fn run_merges_and_sorts_multiple_files() {
+    let manifest = tempfile::tempdir().expect("manifest tempdir");
+    let out = tempfile::tempdir().expect("out tempdir");
+
+    // Two single-device files derived from the EL3001-like fixture, each with a
+    // distinct product code and type name so they yield distinct device
+    // structs. File names sort non-trivially: `a_device.xml` must come before
+    // `b_device.xml` regardless of glob iteration order.
+    let dev_a = EL3001_LIKE
+        .replace("#x0bb93052", "#x0aaa0001")
+        .replace("EL3001-like", "DeviceAlpha");
+    let dev_b = EL3001_LIKE
+        .replace("#x0bb93052", "#x0bbb0002")
+        .replace("EL3001-like", "DeviceBeta");
+    // Write in reverse-sorted order to prove `run` sorts the inputs itself.
+    write_esi(manifest.path(), "b_device.xml", &dev_b);
+    write_esi(manifest.path(), "a_device.xml", &dev_a);
+
+    let inputs = Builder::new()
+        .glob("esi/*.xml")
+        .out_file("devices.rs")
+        .run(manifest.path(), out.path())
+        .expect("run should succeed");
+
+    // Both files are returned, in sorted order (`a_*` before `b_*`).
+    let expected_a = manifest.path().join("esi").join("a_device.xml");
+    let expected_b = manifest.path().join("esi").join("b_device.xml");
+    assert_eq!(
+        inputs,
+        vec![expected_a, expected_b],
+        "inputs must be both files in sorted order",
+    );
+
+    // The generated module carries a device struct merged from each file.
+    let generated = out.path().join("devices.rs");
+    let source = fs::read_to_string(&generated).expect("read generated");
+    syn::parse_str::<syn::File>(&source).expect("merged module must be valid Rust");
+    assert!(
+        source.contains("pub struct DeviceAlpha"),
+        "missing first device struct in:\n{source}",
+    );
+    assert!(
+        source.contains("pub struct DeviceBeta"),
+        "missing second device struct in:\n{source}",
+    );
+}
+
+#[test]
 fn run_reports_parse_error_with_file_path() {
     let manifest = tempfile::tempdir().expect("manifest tempdir");
     let out = tempfile::tempdir().expect("out tempdir");

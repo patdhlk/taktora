@@ -81,6 +81,11 @@ pub enum BuildError {
 ///
 /// The backend type defaults to [`EthercrabBackend`]; override it with
 /// [`Builder::backend`].
+///
+/// The glob may match ESI files from multiple vendors: codegen keys every
+/// device off its own per-device `Identity`, so file-level vendor is not
+/// consulted; the combined `EsiFile.vendor` is kept from the first input only
+/// for completeness.
 pub struct Builder<B = EthercrabBackend> {
     pattern: String,
     out_file: String,
@@ -181,8 +186,16 @@ impl<B: CodegenBackend> Builder<B> {
                 pattern: pattern.into_owned(),
                 source,
             })?
-            .filter_map(Result::ok)
-            .collect();
+            // A path matched the pattern but failed to stat (permissions, a
+            // broken symlink, ...). Surface it as an actionable I/O error
+            // rather than silently dropping the input.
+            .map(|entry| {
+                entry.map_err(|err| BuildError::Io {
+                    path: err.path().to_path_buf(),
+                    source: err.into_error(),
+                })
+            })
+            .collect::<Result<_, _>>()?;
         // Sort for deterministic merge / output across platforms.
         inputs.sort();
 
@@ -202,8 +215,13 @@ impl<B: CodegenBackend> Builder<B> {
 
     /// Read and parse every input, merging all devices into one [`EsiFile`].
     ///
-    /// The combined vendor is taken from the first input; an empty input set
-    /// yields a default vendor with no devices (a valid empty module).
+    /// The combined [`EsiFile::vendor`] is taken from the first input purely for
+    /// completeness (and to future-proof an `emit_module_root`); codegen
+    /// currently ignores file-level vendor entirely, since each device's
+    /// `Identity` (`taktora_ethercat_esi_codegen::Identity`) carries its own
+    /// vendor/product/revision. Globbing ESI files from multiple vendors is
+    /// therefore permitted and harmless. An empty input set yields a default
+    /// vendor with no devices (a valid empty module).
     fn merge(inputs: &[PathBuf]) -> Result<EsiFile, BuildError> {
         let mut vendor: Option<Vendor> = None;
         let mut devices = Vec::new();
