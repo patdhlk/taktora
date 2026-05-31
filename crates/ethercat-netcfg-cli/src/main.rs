@@ -4,11 +4,11 @@
 //! the library so it stays unit-testable; `main` only parses arguments,
 //! prints the result, and maps errors to a non-zero exit code.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use ethercat_netcfg_cli::run_expand;
+use ethercat_netcfg_cli::{run_expand, run_fetch};
 
 /// `EtherCAT` network-config toolchain CLI.
 #[derive(Debug, Parser)]
@@ -26,7 +26,20 @@ enum Commands {
         /// Path to the network.yaml to expand.
         yaml: PathBuf,
     },
-    // `Fetch` (vendor ESI resolution) slots in here — phase 4.
+    /// Vendor the ESI files referenced by a network.yaml into a local
+    /// directory and pin each by SHA-256 in a JSON lockfile.
+    Fetch {
+        /// Path to the network.yaml to fetch ESI files for.
+        yaml: PathBuf,
+        /// Directory to vendor ESI files into (default: `vendor/esi`
+        /// next to the network.yaml).
+        #[arg(long)]
+        vendor_dir: Option<PathBuf>,
+        /// Lockfile path (default: `network.lock` next to the
+        /// network.yaml).
+        #[arg(long)]
+        lockfile: Option<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -43,5 +56,24 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Commands::Fetch {
+            yaml,
+            vendor_dir,
+            lockfile,
+        } => {
+            let parent = yaml.parent().unwrap_or_else(|| Path::new("."));
+            let vendor_dir = vendor_dir.unwrap_or_else(|| parent.join("vendor").join("esi"));
+            let lockfile = lockfile.unwrap_or_else(|| parent.join("network.lock"));
+            match run_fetch(&yaml, &vendor_dir, &lockfile) {
+                Ok(lock) => {
+                    println!("pinned {} ESI file(s)", lock.entries.len());
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
     }
 }

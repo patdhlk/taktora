@@ -21,10 +21,14 @@ ethercat-netcfg         = { workspace = true }
 ethercat-netcfg-codegen = { workspace = true }
 clap                    = { workspace = true, features = ["derive"] }
 thiserror               = { workspace = true }
+serde                   = { workspace = true, features = ["std", "derive"] }
+serde_json              = { workspace = true, features = ["std"] }
+sha2                    = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 syn      = { workspace = true, features = ["full", "parsing"] }
+sha2     = { workspace = true }
 
 [lints.rust]
 unsafe_code  = "deny"
