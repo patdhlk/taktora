@@ -2,6 +2,7 @@
 resolver = "2"
 exclude = ["examples"]
 members = [
+    "crates/ethercat-esi",
     "crates/ethercat-netcfg",
     "crates/ethercat-netcfg-build",
     "crates/ethercat-netcfg-cli",
@@ -43,6 +44,7 @@ categories   = ["embedded", "concurrency", "network-programming"]
 [workspace.dependencies]
 # Internal crates — declared with both `path` (for local builds) and `version`
 # (so `cargo publish` strips the path and resolves against crates.io).
+ethercat-esi                     = { path = "crates/ethercat-esi", version = "0.1.0" }
 ethercat-netcfg                  = { path = "crates/ethercat-netcfg", version = "0.1.0" }
 ethercat-netcfg-build            = { path = "crates/ethercat-netcfg-build", version = "0.1.0" }
 ethercat-netcfg-cli              = { path = "crates/ethercat-netcfg-cli", version = "0.1.0" }
@@ -77,6 +79,7 @@ rand              = { version = "0.8", default-features = false, features = ["st
 tokio             = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 ethercrab         = { version = "0.7", default-features = false, features = ["std"] }
 serde_norway      = "0.9"
+quick-xml         = { version = "0.40", default-features = false, features = ["serialize"] }
 proc-macro2       = "1"
 quote             = "1"
 syn               = { version = "2", default-features = false, features = ["printing"] }
