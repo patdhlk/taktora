@@ -118,10 +118,13 @@ fn channel_const_tokens(channel: &ChannelBinding, addresses: &HashMap<&str, u16>
 fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
     let entries = config.devices.iter().enumerate().map(|(index, device)| {
         let address: u16 = device_address(index, device);
-        // Slice 5 will derive `expected_wkc`; placeholder for now.
-        let expected_wkc: u16 = 0;
 
         let DeviceSource::Inline { rx, tx } = &device.source;
+        // Canonical EtherCAT LRW working-counter rule (REQ_0329): +1 per
+        // SubDevice written to (RxPDOs / outputs), +2 per SubDevice read
+        // from (TxPDOs / inputs). Derivation is the only source — no
+        // override path (ADR_0095 / REQ_0828).
+        let expected_wkc: u16 = u16::from(!rx.is_empty()) + 2 * u16::from(!tx.is_empty());
         let rx_entries = rx.iter().map(pdo_entry_tokens);
         let tx_entries = tx.iter().map(pdo_entry_tokens);
 
