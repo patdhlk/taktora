@@ -52,7 +52,9 @@ channels:
     assert_eq!(device.station_alias, None);
     assert_eq!(device.address_override, None);
 
-    let DeviceSource::Inline { rx, tx } = &device.source;
+    let DeviceSource::Inline { rx, tx } = &device.source else {
+        panic!("inline device should resolve to DeviceSource::Inline");
+    };
     assert!(rx.is_empty());
     assert_eq!(
         tx,

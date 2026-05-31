@@ -59,11 +59,6 @@ pub struct DeviceInstance {
 }
 
 /// The origin of a device's PDO description.
-///
-/// Only the [`Inline`](DeviceSource::Inline) variant is modelled for now.
-/// An `Esi` variant (sourcing PDOs from an ESI/`EtherCAT` Slave Information
-/// file) is future work and will be added once the `ethercat-esi` crate
-/// exists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceSource {
     /// PDOs described inline in the network config.
@@ -73,6 +68,34 @@ pub enum DeviceSource {
         /// Transmit (input) PDO entries.
         tx: Vec<PdoEntry>,
     },
+    /// PDOs resolved from a referenced ESI (`EtherCAT` Slave Information)
+    /// file at parse time (`REQ_0824`).
+    Esi {
+        /// The referenced ESI file, as named in the network config.
+        path: std::path::PathBuf,
+        /// Receive (output) PDO entries, resolved from the ESI file.
+        rx: Vec<PdoEntry>,
+        /// Transmit (input) PDO entries, resolved from the ESI file.
+        tx: Vec<PdoEntry>,
+    },
+}
+
+impl DeviceSource {
+    /// Receive (output) PDO entries, regardless of source variant.
+    #[must_use]
+    pub fn rx(&self) -> &[PdoEntry] {
+        match self {
+            Self::Inline { rx, .. } | Self::Esi { rx, .. } => rx,
+        }
+    }
+
+    /// Transmit (input) PDO entries, regardless of source variant.
+    #[must_use]
+    pub fn tx(&self) -> &[PdoEntry] {
+        match self {
+            Self::Inline { tx, .. } | Self::Esi { tx, .. } => tx,
+        }
+    }
 }
 
 /// A single PDO entry within an inline device description.
@@ -155,6 +178,34 @@ pub enum NetcfgError {
         /// Number of `---`-separated documents found in the stream.
         count: usize,
     },
+
+    /// A referenced ESI file could not be read from the filesystem.
+    #[error("failed to read referenced ESI file: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// A referenced ESI file could not be parsed.
+    ///
+    /// `ethercat_esi::EsiError` is a `no_std` error that only implements
+    /// `Display` (not `std::error::Error`), so it is not threaded as a
+    /// `#[source]`; the message embeds its display form.
+    #[error("failed to parse referenced ESI file: {0}")]
+    Esi(ethercat_esi::EsiError),
+
+    /// A referenced ESI file describes more than one device, so the parser
+    /// cannot unambiguously pick one (multi-device selection is deferred).
+    #[error("ESI file {path:?} describes {count} devices; cannot select unambiguously")]
+    AmbiguousEsiDevice {
+        /// The referenced ESI file.
+        path: std::path::PathBuf,
+        /// Number of devices found in the ESI file.
+        count: usize,
+    },
+}
+
+impl From<ethercat_esi::EsiError> for NetcfgError {
+    fn from(e: ethercat_esi::EsiError) -> Self {
+        Self::Esi(e)
+    }
 }
 
 /// Parse a network-config YAML document into the [`NetworkConfig`] IR.
@@ -168,7 +219,7 @@ pub fn parse(yaml: &str) -> Result<NetworkConfig, NetcfgError> {
     }
 
     let dto: dto::NetworkConfigDto = serde_norway::from_str(yaml)?;
-    Ok(dto.into())
+    dto.resolve()
 }
 
 /// Private deserialization DTOs.
@@ -179,10 +230,12 @@ pub fn parse(yaml: &str) -> Result<NetworkConfig, NetcfgError> {
 /// milliseconds-to-[`Duration`] conversion.
 mod dto {
     use super::{
-        BusConfig, ChannelBinding, DeviceInstance, DeviceSource, Identity, NetworkConfig, PdoEntry,
+        BusConfig, ChannelBinding, DeviceInstance, DeviceSource, Identity, NetcfgError,
+        NetworkConfig, PdoEntry,
     };
     use core::time::Duration;
     use serde::Deserialize;
+    use std::path::PathBuf;
 
     #[derive(Deserialize)]
     pub struct NetworkConfigDto {
@@ -208,6 +261,8 @@ mod dto {
     struct DeviceInstanceDto {
         label: String,
         #[serde(default)]
+        esi: Option<PathBuf>,
+        #[serde(default)]
         pdos: PdosDto,
         #[serde(default)]
         identity: Option<Identity>,
@@ -225,14 +280,30 @@ mod dto {
         tx: Vec<PdoEntry>,
     }
 
-    impl From<NetworkConfigDto> for NetworkConfig {
-        fn from(dto: NetworkConfigDto) -> Self {
-            Self {
-                schema_version: dto.schema_version,
-                bus: dto.bus.into(),
-                devices: dto.devices.into_iter().map(Into::into).collect(),
-                channels: dto.channels,
-            }
+    impl NetworkConfigDto {
+        /// Convert into the IR, resolving any `esi:` device references
+        /// against the filesystem (`REQ_0824`).
+        pub fn resolve(self) -> Result<NetworkConfig, NetcfgError> {
+            let devices = self
+                .devices
+                .into_iter()
+                .map(DeviceInstanceDto::resolve)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(NetworkConfig {
+                schema_version: self.schema_version,
+                bus: self.bus.into(),
+                devices,
+                channels: self.channels,
+            })
+        }
+    }
+
+    /// Convert an `ethercat_esi::PdoEntry` into a netcfg [`PdoEntry`].
+    const fn convert_pdo(entry: &ethercat_esi::PdoEntry) -> PdoEntry {
+        PdoEntry {
+            index: entry.index,
+            bit_offset: entry.bit_offset,
+            bit_length: entry.bit_length,
         }
     }
 
@@ -248,18 +319,65 @@ mod dto {
         }
     }
 
-    impl From<DeviceInstanceDto> for DeviceInstance {
-        fn from(dto: DeviceInstanceDto) -> Self {
-            Self {
-                label: dto.label,
-                source: DeviceSource::Inline {
-                    rx: dto.pdos.rx,
-                    tx: dto.pdos.tx,
-                },
-                identity: dto.identity,
-                station_alias: dto.station_alias,
-                address_override: dto.address_override,
-            }
+    impl DeviceInstanceDto {
+        /// Convert into a [`DeviceInstance`], resolving an `esi:` reference
+        /// (read file, parse, convert PDOs, map identity) when present.
+        ///
+        /// Path resolution is via `std::fs` against the process CWD;
+        /// resolving relative-to-the-yaml-file is build glue and deferred.
+        fn resolve(self) -> Result<DeviceInstance, NetcfgError> {
+            let Self {
+                label,
+                esi,
+                pdos,
+                identity,
+                station_alias,
+                address_override,
+            } = self;
+
+            let (source, identity) = match esi {
+                Some(path) => {
+                    let xml = std::fs::read_to_string(&path)?;
+                    let esi_file = ethercat_esi::parse(&xml)?;
+                    let count = esi_file.devices.len();
+                    // Minimal selection: exactly one device, or it is
+                    // ambiguous (identity-based selection is deferred).
+                    if count != 1 {
+                        return Err(NetcfgError::AmbiguousEsiDevice { path, count });
+                    }
+                    let device = esi_file
+                        .devices
+                        .into_iter()
+                        .next()
+                        .expect("checked count == 1");
+
+                    let rx = device.rx_pdos.iter().map(convert_pdo).collect();
+                    let tx = device.tx_pdos.iter().map(convert_pdo).collect();
+                    // Keep an explicit YAML identity; otherwise map the
+                    // ESI identity into the device.
+                    let identity = identity.or(Some(Identity {
+                        vendor_id: device.identity.vendor_id,
+                        product_code: device.identity.product_code,
+                        revision: device.identity.revision,
+                    }));
+                    (DeviceSource::Esi { path, rx, tx }, identity)
+                }
+                None => (
+                    DeviceSource::Inline {
+                        rx: pdos.rx,
+                        tx: pdos.tx,
+                    },
+                    identity,
+                ),
+            };
+
+            Ok(DeviceInstance {
+                label,
+                source,
+                identity,
+                station_alias,
+                address_override,
+            })
         }
     }
 }

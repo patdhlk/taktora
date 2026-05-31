@@ -9,9 +9,7 @@
 
 use std::collections::HashMap;
 
-use ethercat_netcfg::{
-    ChannelBinding, DeviceInstance, DeviceSource, NetworkConfig, PdoDirection, PdoEntry,
-};
+use ethercat_netcfg::{ChannelBinding, DeviceInstance, NetworkConfig, PdoDirection, PdoEntry};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -146,10 +144,9 @@ pub fn warnings(config: &NetworkConfig) -> Vec<Warning> {
 /// Append one [`Warning::UnmappedGap`] per gap in `device`'s `direction`
 /// process image. Entries are assumed non-overlapping.
 fn gap_warnings_for(device: &DeviceInstance, direction: PdoDirection, out: &mut Vec<Warning>) {
-    let DeviceSource::Inline { rx, tx } = &device.source;
     let entries = match direction {
-        PdoDirection::Rx => rx,
-        PdoDirection::Tx => tx,
+        PdoDirection::Rx => device.source.rx(),
+        PdoDirection::Tx => device.source.tx(),
     };
     if entries.is_empty() {
         return;
@@ -182,10 +179,9 @@ fn gap_warnings_for(device: &DeviceInstance, direction: PdoDirection, out: &mut 
 /// `bit_offset + bit_length` over the device's entries in that direction
 /// (`0` if the entry list for that direction is empty).
 fn image_bits(device: &DeviceInstance, direction: PdoDirection) -> u32 {
-    let DeviceSource::Inline { rx, tx } = &device.source;
     let entries = match direction {
-        PdoDirection::Rx => rx,
-        PdoDirection::Tx => tx,
+        PdoDirection::Rx => device.source.rx(),
+        PdoDirection::Tx => device.source.tx(),
     };
     entries
         .iter()
@@ -379,7 +375,8 @@ fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
     let entries = config.devices.iter().enumerate().map(|(index, device)| {
         let address: u16 = device_address(index, device);
 
-        let DeviceSource::Inline { rx, tx } = &device.source;
+        let rx = device.source.rx();
+        let tx = device.source.tx();
         // Canonical EtherCAT LRW working-counter rule (REQ_0329): +1 per
         // SubDevice written to (RxPDOs / outputs), +2 per SubDevice read
         // from (TxPDOs / inputs). Derivation is the only source — no

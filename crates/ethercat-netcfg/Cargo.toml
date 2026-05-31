@@ -13,9 +13,13 @@ categories   = { workspace = true }
 description  = "Parser and in-memory IR for the EtherCAT network-config YAML (build-host codegen toolchain)."
 
 [dependencies]
+ethercat-esi = { workspace = true }
 serde        = { workspace = true, features = ["std", "derive"] }
 serde_norway = { workspace = true }
 thiserror    = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints.rust]
 unsafe_code  = "deny"
