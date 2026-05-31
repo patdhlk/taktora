@@ -15,6 +15,8 @@ use core::time::Duration;
 
 use serde::Deserialize;
 
+pub use taktora_fieldbus_od_core::Identity;
+
 /// The fully parsed network configuration — the IR root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkConfig {
@@ -107,17 +109,6 @@ pub struct PdoEntry {
     pub bit_offset: u16,
     /// Bit length of the entry.
     pub bit_length: u16,
-}
-
-/// Expected device identity, used for verification.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct Identity {
-    /// Vendor identifier.
-    pub vendor_id: u32,
-    /// Product code.
-    pub product_code: u32,
-    /// Revision number.
-    pub revision: u32,
 }
 
 /// Direction of a process-data channel.
@@ -417,13 +408,9 @@ mod dto {
                     if has_inline && (pdos.rx != rx || pdos.tx != tx) {
                         return Err(NetcfgError::EsiContradiction { label });
                     }
-                    // Keep an explicit YAML identity; otherwise map the
-                    // ESI identity into the device.
-                    let identity = identity.or(Some(Identity {
-                        vendor_id: device.identity.vendor_id,
-                        product_code: device.identity.product_code,
-                        revision: device.identity.revision,
-                    }));
+                    // Keep an explicit YAML identity; otherwise carry the
+                    // ESI identity into the device (same type — od-core Identity).
+                    let identity = identity.or(Some(device.identity));
                     (DeviceSource::Esi { path, rx, tx }, identity)
                 }
                 None => (
