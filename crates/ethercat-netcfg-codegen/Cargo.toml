@@ -23,6 +23,7 @@ thiserror       = { workspace = true }
 [dev-dependencies]
 ethercat-netcfg = { workspace = true }
 syn             = { workspace = true, features = ["full", "parsing"] }
+tempfile        = { workspace = true }
 
 [lints.rust]
 unsafe_code  = "deny"
