@@ -43,6 +43,27 @@ presents this all-digital configuration as a plain 1-input-byte /
 one-line edit — confirm yours with your EtherCAT config tool if the
 mirror doesn't track.
 
+### The address DIP switch does not affect this example
+
+The 750-354 carries an 8-position DIP switch for setting an address
+(ID 1–255). **You can leave it at any value — this example does not use
+it.** EtherCAT has two distinct address concepts, and the DIP switch
+drives the one we don't address by:
+
+- **Configured station address** — assigned by the master *at startup,
+  by bus position*. `ethercrab`'s `init_single_group` hands the first
+  device `0x1000`, the next `0x1001`, and so on. This is what the
+  example matches on (`SUBDEV = 0x1000`), via `configured_address()`.
+- **Station alias** (a.k.a. Explicit Device ID / "second address") —
+  this is what the DIP switch sets. It is stored in the coupler's
+  EEPROM and read back via `ethercrab`'s `alias_address()`. The alias
+  only matters for master features this example doesn't use (Hot
+  Connect, explicit device identification).
+
+So the coupler is `configured_address = 0x1000` whether the DIP switch
+reads `0`, `1`, or `255`. The DIP value and `SUBDEV` are unrelated —
+do **not** set `SUBDEV` to the DIP number.
+
 ## Hardware required
 
 - WAGO **750-354/000-001** EtherCAT fieldbus coupler.
@@ -133,8 +154,11 @@ appears until you touch 24 V to one of the input channels.
   added modules ahead of them, the bit offsets shift. Edit
   `DI_BIT_OFFSET` / `DO_BIT_OFFSET` in `src/main.rs`, and confirm the
   layout with your EtherCAT config tool.
-- **Wrong SubDevice address.** If the coupler isn't the first device
-  `ethercrab` scans, edit `SUBDEV` in `src/main.rs`.
+- **Wrong SubDevice address.** `SUBDEV` is the *configured station
+  address* `ethercrab` assigns by bus position (`0x1000` for the first
+  device), **not** the coupler's address DIP switch (see "The address
+  DIP switch does not affect this example" above). Only edit `SUBDEV`
+  if the coupler isn't the first device `ethercrab` scans.
 
 ## Debugging against in-tree changes
 
