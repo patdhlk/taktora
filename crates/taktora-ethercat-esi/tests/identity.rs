@@ -1,4 +1,4 @@
-//! REQ_0500 (pure parse) + REQ_0504 (identity in IR).
+//! `REQ_0500` (pure parse) + `REQ_0504` (identity in IR).
 use taktora_ethercat_esi::{Identity, parse};
 
 const EL3001: &str = include_str!("fixtures/el3001_like.xml");

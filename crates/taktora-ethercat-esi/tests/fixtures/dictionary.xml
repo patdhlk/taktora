@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<EtherCATInfo>
+  <Vendor><Id>#x00000002</Id></Vendor>
+  <Descriptions><Devices>
+    <Device>
+      <Type ProductCode="#x00030000" RevisionNo="#x00000001">OD</Type>
+      <Profile>
+        <Dictionary>
+          <Objects>
+            <Object>
+              <Index>#x6000</Index>
+              <Name>Inputs</Name>
+              <Type>DT6000</Type>
+              <SubItem>
+                <SubIndex>1</SubIndex>
+                <Name>Underrange</Name>
+                <Type>BOOL</Type>
+                <BitSize>1</BitSize>
+                <Info><DefaultData>#x00</DefaultData></Info>
+                <Flags><Access>ro</Access><PdoMapping>T</PdoMapping></Flags>
+              </SubItem>
+            </Object>
+          </Objects>
+        </Dictionary>
+      </Profile>
+    </Device>
+  </Devices></Descriptions>
+</EtherCATInfo>

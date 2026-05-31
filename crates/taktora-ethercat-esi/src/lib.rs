@@ -30,11 +30,40 @@ pub use taktora_fieldbus_od_core::{Access, DataType, DictEntry, Identity};
 /// interpreted.
 pub fn parse(xml: &str) -> Result<EsiFile, EsiError> {
     let info: dto::EtherCatInfo = quick_xml::de::from_str(xml).map_err(|source| EsiError::Xml {
-        // quick-xml 0.40 DeError does not reliably expose a byte offset on
-        // the deserialize path; map to the start of the document. Task 12
-        // refines syntax-error positions.
-        span: position::LineIndex::new(xml).span(0),
+        // quick-xml 0.40 DeError does not carry a usable byte offset on the
+        // deserialize path. Re-walk the document with the low-level reader to
+        // recover a real line/column for the failing token; fall back to the
+        // document start if the reader finds no syntax fault.
+        span: locate_syntax_error(xml),
         source,
     })?;
-    info.into_model()
+    let mut file = info.into_model()?;
+    let exts = raw_xml::capture_device_extensions(xml)?;
+    for (dev, ext) in file.devices.iter_mut().zip(exts) {
+        dev.vendor_extensions = ext;
+    }
+    Ok(file)
+}
+
+/// Re-walk the XML with the low-level `quick_xml::reader::Reader` to find the
+/// byte offset of the first syntax fault, mapped to a 1-based [`Span`]. quick-xml
+/// 0.40's `error_position()` returns a `u64` byte offset pointing at the start of
+/// the offending token. If no fault is found (deserialize failed for a
+/// non-syntax reason), returns the document start.
+fn locate_syntax_error(xml: &str) -> Span {
+    use quick_xml::events::Event;
+    use quick_xml::reader::Reader;
+
+    let index = position::LineIndex::new(xml);
+    let mut reader = Reader::from_str(xml);
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => return index.span(0),
+            Ok(_) => {}
+            Err(_) => {
+                let offset = usize::try_from(reader.error_position()).unwrap_or(usize::MAX);
+                return index.span(offset);
+            }
+        }
+    }
 }

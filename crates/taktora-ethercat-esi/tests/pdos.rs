@@ -1,4 +1,4 @@
-//! REQ_0504 — structured PDOs with full per-entry metadata, padding entries
+//! `REQ_0504` — structured PDOs with full per-entry metadata, padding entries
 //! preserved, assignment alternatives captured not resolved.
 use taktora_ethercat_esi::{DataType, Pdo, PdoEntry, parse};
 
