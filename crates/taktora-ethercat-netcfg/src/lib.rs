@@ -342,13 +342,24 @@ mod dto {
         Ok(PathBuf::from(reference))
     }
 
-    /// Convert an `taktora_ethercat_esi::PdoEntry` into a netcfg [`PdoEntry`].
-    const fn convert_pdo(entry: &taktora_ethercat_esi::PdoEntry) -> PdoEntry {
-        PdoEntry {
-            index: entry.index,
-            bit_offset: entry.bit_offset,
-            bit_length: entry.bit_length,
+    /// Flatten a device's structured ESI PDOs (one direction) into netcfg
+    /// process-image [`PdoEntry`]s, assigning cumulative bit offsets in
+    /// document order. Valid for single-assignment devices; alternative-aware
+    /// resolution is a codegen concern and out of scope for the parser layer.
+    fn flatten_esi_pdos(pdos: &[taktora_ethercat_esi::Pdo]) -> Vec<PdoEntry> {
+        let mut out = Vec::new();
+        let mut bit_offset: u16 = 0;
+        for pdo in pdos {
+            for entry in &pdo.entries {
+                out.push(PdoEntry {
+                    index: entry.index,
+                    bit_offset,
+                    bit_length: entry.bit_length,
+                });
+                bit_offset = bit_offset.saturating_add(entry.bit_length);
+            }
         }
+        out
     }
 
     impl From<BusConfigDto> for BusConfig {
@@ -396,8 +407,8 @@ mod dto {
                         .next()
                         .expect("checked count == 1");
 
-                    let rx: Vec<PdoEntry> = device.rx_pdos.iter().map(convert_pdo).collect();
-                    let tx: Vec<PdoEntry> = device.tx_pdos.iter().map(convert_pdo).collect();
+                    let rx = flatten_esi_pdos(&device.rx_pdos);
+                    let tx = flatten_esi_pdos(&device.tx_pdos);
                     // If the device ALSO carries inline pdos:, the two
                     // descriptions must agree. The ESI is the source of
                     // truth, so an exact match is redundant-but-legal and a
