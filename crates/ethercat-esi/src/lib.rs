@@ -27,7 +27,7 @@ pub struct EsiDevice {
     pub identity: Identity,
     /// Flattened `TxPDO` entries, in document order.
     pub tx_pdos: Vec<PdoEntry>,
-    /// Flattened `RxPDO` entries (parsed in a later slice; empty for now).
+    /// Flattened `RxPDO` entries, in document order.
     pub rx_pdos: Vec<PdoEntry>,
 }
 
@@ -133,6 +133,8 @@ mod dto {
         ty: Type,
         #[serde(rename = "TxPdo", default)]
         tx_pdo: Vec<Pdo>,
+        #[serde(rename = "RxPdo", default)]
+        rx_pdo: Vec<Pdo>,
     }
 
     #[derive(Deserialize)]
@@ -157,6 +159,30 @@ mod dto {
         bit_len: String,
     }
 
+    /// Flatten a list of PDOs into [`PdoEntry`]s in document order, assigning
+    /// each entry a cumulative `bit_offset` starting from 0 for this direction.
+    fn flatten_pdos(pdos: Vec<Pdo>) -> Result<Vec<PdoEntry>, EsiError> {
+        let mut entries = Vec::new();
+        let mut bit_offset: u16 = 0;
+        for pdo in pdos {
+            for entry in pdo.entry {
+                let index = parse_esi_uint(&entry.index)?
+                    .try_into()
+                    .map_err(|_| EsiError::Number)?;
+                let bit_length: u16 = parse_esi_uint(&entry.bit_len)?
+                    .try_into()
+                    .map_err(|_| EsiError::Number)?;
+                entries.push(PdoEntry {
+                    index,
+                    bit_offset,
+                    bit_length,
+                });
+                bit_offset = bit_offset.saturating_add(bit_length);
+            }
+        }
+        Ok(entries)
+    }
+
     impl EtherCatInfo {
         pub fn into_esi(self) -> Result<EsiFile, EsiError> {
             let vendor_id = parse_esi_uint(&self.vendor.id)?;
@@ -169,29 +195,10 @@ mod dto {
                     revision: parse_esi_uint(&dev.ty.revision_no)?,
                 };
 
-                let mut tx_pdos = Vec::new();
-                let mut bit_offset: u16 = 0;
-                for pdo in dev.tx_pdo {
-                    for entry in pdo.entry {
-                        let index = parse_esi_uint(&entry.index)?
-                            .try_into()
-                            .map_err(|_| EsiError::Number)?;
-                        let bit_length: u16 = parse_esi_uint(&entry.bit_len)?
-                            .try_into()
-                            .map_err(|_| EsiError::Number)?;
-                        tx_pdos.push(PdoEntry {
-                            index,
-                            bit_offset,
-                            bit_length,
-                        });
-                        bit_offset = bit_offset.saturating_add(bit_length);
-                    }
-                }
-
                 devices.push(EsiDevice {
                     identity,
-                    tx_pdos,
-                    rx_pdos: Vec::new(),
+                    tx_pdos: flatten_pdos(dev.tx_pdo)?,
+                    rx_pdos: flatten_pdos(dev.rx_pdo)?,
                 });
             }
 
