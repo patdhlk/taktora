@@ -64,7 +64,7 @@ taktora-log-dlt                  = { path = "crates/taktora-log-dlt", version = 
 
 # External crates
 iceoryx2          = "0.8"
-thiserror         = "1"
+thiserror         = "2"
 bitflags          = "2"
 crossbeam-channel = "0.5"
 crossbeam-utils   = "0.8"
