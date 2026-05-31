@@ -86,6 +86,98 @@ pub enum ValidationError {
     },
 }
 
+/// A non-fatal build-time diagnostic.
+///
+/// Warnings are surfaced to the user (a future build-glue layer turns them
+/// into `cargo:warning=` lines) but never make [`generate`] fail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Warning {
+    /// A bit range inside a device's process image is covered by no PDO
+    /// entry. Legal and often intentional, but never silent.
+    UnmappedGap {
+        /// Label of the device with the gap.
+        device: String,
+        /// Direction (`tx`/`rx`) whose process image has the gap.
+        direction: PdoDirection,
+        /// First unmapped bit (inclusive).
+        start_bit: u32,
+        /// One past the last unmapped bit (exclusive).
+        end_bit: u32,
+    },
+}
+
+impl std::fmt::Display for Warning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnmappedGap {
+                device,
+                direction,
+                start_bit,
+                end_bit,
+            } => {
+                let dir = match direction {
+                    PdoDirection::Tx => "tx",
+                    PdoDirection::Rx => "rx",
+                };
+                write!(
+                    f,
+                    "device '{device}' {dir} process image has an unmapped gap at bits {start_bit}..{end_bit}"
+                )
+            }
+        }
+    }
+}
+
+/// Collect non-fatal diagnostics for a network config.
+///
+/// Currently reports [`Warning::UnmappedGap`] for every unmapped bit range
+/// within each device's process image (`REQ_0837`). Deterministic order: by
+/// device (bus order), then tx before rx, then ascending `start_bit`.
+pub fn warnings(config: &NetworkConfig) -> Vec<Warning> {
+    let mut out = Vec::new();
+    for device in &config.devices {
+        for direction in [PdoDirection::Tx, PdoDirection::Rx] {
+            gap_warnings_for(device, direction, &mut out);
+        }
+    }
+    out
+}
+
+/// Append one [`Warning::UnmappedGap`] per gap in `device`'s `direction`
+/// process image. Entries are assumed non-overlapping.
+fn gap_warnings_for(device: &DeviceInstance, direction: PdoDirection, out: &mut Vec<Warning>) {
+    let DeviceSource::Inline { rx, tx } = &device.source;
+    let entries = match direction {
+        PdoDirection::Rx => rx,
+        PdoDirection::Tx => tx,
+    };
+    if entries.is_empty() {
+        return;
+    }
+
+    let mut ranges: Vec<(u32, u32)> = entries
+        .iter()
+        .map(|e| {
+            let start = u32::from(e.bit_offset);
+            (start, start + u32::from(e.bit_length))
+        })
+        .collect();
+    ranges.sort_by_key(|&(start, _)| start);
+
+    let mut cursor = 0u32;
+    for (start, end) in ranges {
+        if start > cursor {
+            out.push(Warning::UnmappedGap {
+                device: device.label.clone(),
+                direction,
+                start_bit: cursor,
+                end_bit: start,
+            });
+        }
+        cursor = cursor.max(end);
+    }
+}
+
 /// Inline process-image size, in bits, for `direction`: the maximum
 /// `bit_offset + bit_length` over the device's entries in that direction
 /// (`0` if the entry list for that direction is empty).
