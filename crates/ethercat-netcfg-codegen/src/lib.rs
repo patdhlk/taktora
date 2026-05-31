@@ -7,9 +7,13 @@
 
 #![warn(missing_docs)]
 
-use ethercat_netcfg::{DeviceSource, NetworkConfig, PdoEntry};
+use std::collections::HashMap;
+
+use ethercat_netcfg::{
+    ChannelBinding, DeviceInstance, DeviceSource, NetworkConfig, PdoDirection, PdoEntry,
+};
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 
 /// Errors that can occur while [`generate`]-ing Rust source.
 #[derive(Debug, thiserror::Error)]
@@ -26,20 +30,94 @@ pub enum CodegenError {
 /// This slice emits a single item: a `pub static PDO_MAP` of
 /// `taktora_connector_ethercat::SubDeviceMap` entries, one per device.
 pub fn generate(config: &NetworkConfig) -> Result<String, CodegenError> {
-    let tokens = pdo_map_tokens(config);
+    let pdo_map = pdo_map_tokens(config);
+    let routing = routing_const_tokens(config);
+    let tokens = quote! {
+        #pdo_map
+        #routing
+    };
     let file: syn::File = syn::parse2(tokens)?;
     Ok(prettyplease::unparse(&file))
+}
+
+/// Configured station address for a device: `0x1000 + n` by bus position
+/// (mirrors ethercrab's `init_single_group`), unless the device pins an
+/// explicit override.
+fn device_address(index: usize, device: &DeviceInstance) -> u16 {
+    device
+        .address_override
+        .unwrap_or_else(|| 0x1000 + u16::try_from(index).expect("device index fits in u16"))
+}
+
+/// Map every device label to its resolved station address.
+fn address_by_label(config: &NetworkConfig) -> HashMap<&str, u16> {
+    config
+        .devices
+        .iter()
+        .enumerate()
+        .map(|(index, device)| (device.label.as_str(), device_address(index, device)))
+        .collect()
+}
+
+/// Sanitize a channel name into a `SCREAMING_SNAKE_CASE` Rust identifier: every
+/// non-alphanumeric char becomes `_`, ASCII letters are uppercased.
+fn sanitize_ident(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Emit, per channel, a `pub const <NAME>: EthercatRouting` and a matching
+/// `pub const <NAME>_NAME: &str`.
+fn routing_const_tokens(config: &NetworkConfig) -> TokenStream {
+    let addresses = address_by_label(config);
+    let consts = config
+        .channels
+        .iter()
+        .map(|channel| channel_const_tokens(channel, &addresses));
+    quote! {
+        #(#consts)*
+    }
+}
+
+/// Emit the two consts for a single channel binding.
+fn channel_const_tokens(channel: &ChannelBinding, addresses: &HashMap<&str, u16>) -> TokenStream {
+    let ident = format_ident!("{}", sanitize_ident(&channel.name));
+    let name_ident = format_ident!("{}_NAME", sanitize_ident(&channel.name));
+
+    let address: u16 = *addresses
+        .get(channel.device.as_str())
+        .expect("channel device label resolves to a configured device");
+    let direction = match channel.direction {
+        PdoDirection::Tx => quote!(taktora_connector_ethercat::PdoDirection::Tx),
+        PdoDirection::Rx => quote!(taktora_connector_ethercat::PdoDirection::Rx),
+    };
+    let bit_offset = channel.bit_offset;
+    let bit_length = channel.bit_length;
+    let name = &channel.name;
+
+    quote! {
+        pub const #ident: taktora_connector_ethercat::EthercatRouting =
+            taktora_connector_ethercat::EthercatRouting::new(
+                #address,
+                #direction,
+                #bit_offset,
+                #bit_length,
+            );
+        pub const #name_ident: &str = #name;
+    }
 }
 
 /// Build the `static PDO_MAP` token stream.
 fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
     let entries = config.devices.iter().enumerate().map(|(index, device)| {
-        // Configured station address: `0x1000 + n` by bus position
-        // (mirrors ethercrab's `init_single_group`), unless the device
-        // pins an explicit override.
-        let address: u16 = device
-            .address_override
-            .unwrap_or_else(|| 0x1000 + u16::try_from(index).expect("device index fits in u16"));
+        let address: u16 = device_address(index, device);
         // Slice 5 will derive `expected_wkc`; placeholder for now.
         let expected_wkc: u16 = 0;
 
