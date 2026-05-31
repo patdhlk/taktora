@@ -28,6 +28,41 @@ pub enum CliError {
     /// Serializing the lockfile to JSON failed.
     #[error("failed to serialize lockfile: {0}")]
     Json(#[from] serde_json::Error),
+    /// A referenced ESI device has no matching lockfile entry.
+    #[error("ESI reference is not pinned in the lockfile: {reference}")]
+    Unpinned {
+        /// The unpinned ESI reference.
+        reference: String,
+    },
+    /// A referenced ESI file's content hash no longer matches its pin.
+    #[error("ESI content hash drift for {reference}: pinned {expected}, found {actual}")]
+    HashMismatch {
+        /// The drifting ESI reference.
+        reference: String,
+        /// The SHA-256 hex pinned in the lockfile.
+        expected: String,
+        /// The SHA-256 hex of the current file content.
+        actual: String,
+    },
+    /// A referenced ESI device's revision no longer matches its pin.
+    #[error("ESI revision drift for {reference}: pinned {expected}, found {actual}")]
+    RevisionMismatch {
+        /// The drifting ESI reference.
+        reference: String,
+        /// The revision pinned in the lockfile.
+        expected: u32,
+        /// The revision resolved from the current ESI file.
+        actual: u32,
+    },
+}
+
+/// Compute the lowercase-hex SHA-256 over `bytes`.
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hex = String::with_capacity(64);
+    for byte in Sha256::digest(bytes) {
+        write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hex
 }
 
 /// A vendored-and-pinned ESI lockfile: the result of `netcfg fetch`.
@@ -82,11 +117,7 @@ pub fn run_fetch(
         };
 
         let bytes = std::fs::read(path)?;
-
-        let mut hex = String::with_capacity(64);
-        for byte in Sha256::digest(&bytes) {
-            write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
-        }
+        let hex = sha256_hex(&bytes);
 
         std::fs::create_dir_all(vendor_dir)?;
         let file_name = path
@@ -109,4 +140,51 @@ pub fn run_fetch(
     let json = serde_json::to_string_pretty(&lockfile)?;
     std::fs::write(lockfile_path, json)?;
     Ok(lockfile)
+}
+
+/// Verify that every ESI-sourced device in the config at `yaml_path` still
+/// matches its pin in the lockfile at `lockfile_path` (`REQ_0835`).
+///
+/// For each `DeviceSource::Esi` device this checks that a matching
+/// [`LockEntry`] exists, that the file's current SHA-256 matches the pin,
+/// and that the device's resolved revision matches the pinned revision.
+/// Any drift is a loud error.
+pub fn run_verify(yaml_path: &Path, lockfile_path: &Path) -> Result<(), CliError> {
+    let yaml = std::fs::read_to_string(yaml_path)?;
+    let config = ethercat_netcfg::parse(&yaml)?;
+
+    let lockfile_json = std::fs::read_to_string(lockfile_path)?;
+    let lockfile: Lockfile = serde_json::from_str(&lockfile_json)?;
+
+    for device in &config.devices {
+        let ethercat_netcfg::DeviceSource::Esi { path, .. } = &device.source else {
+            continue;
+        };
+        let reference = path.display().to_string();
+
+        let Some(entry) = lockfile.entries.iter().find(|e| e.reference == reference) else {
+            return Err(CliError::Unpinned { reference });
+        };
+
+        let bytes = std::fs::read(path)?;
+        let actual = sha256_hex(&bytes);
+        if actual != entry.sha256 {
+            return Err(CliError::HashMismatch {
+                reference,
+                expected: entry.sha256.clone(),
+                actual,
+            });
+        }
+
+        let revision = device.identity.as_ref().map_or(0, |id| id.revision);
+        if revision != entry.revision {
+            return Err(CliError::RevisionMismatch {
+                reference,
+                expected: entry.revision,
+                actual: revision,
+            });
+        }
+    }
+
+    Ok(())
 }

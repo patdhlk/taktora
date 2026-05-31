@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use ethercat_netcfg_cli::{run_expand, run_fetch};
+use ethercat_netcfg_cli::{run_expand, run_fetch, run_verify};
 
 /// `EtherCAT` network-config toolchain CLI.
 #[derive(Debug, Parser)]
@@ -35,6 +35,16 @@ enum Commands {
         /// next to the network.yaml).
         #[arg(long)]
         vendor_dir: Option<PathBuf>,
+        /// Lockfile path (default: `network.lock` next to the
+        /// network.yaml).
+        #[arg(long)]
+        lockfile: Option<PathBuf>,
+    },
+    /// Verify that the ESI files referenced by a network.yaml still match
+    /// their pins in the lockfile, failing loudly on any drift.
+    Verify {
+        /// Path to the network.yaml to verify.
+        yaml: PathBuf,
         /// Lockfile path (default: `network.lock` next to the
         /// network.yaml).
         #[arg(long)]
@@ -67,6 +77,20 @@ fn main() -> ExitCode {
             match run_fetch(&yaml, &vendor_dir, &lockfile) {
                 Ok(lock) => {
                     println!("pinned {} ESI file(s)", lock.entries.len());
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Commands::Verify { yaml, lockfile } => {
+            let parent = yaml.parent().unwrap_or_else(|| Path::new("."));
+            let lockfile = lockfile.unwrap_or_else(|| parent.join("network.lock"));
+            match run_verify(&yaml, &lockfile) {
+                Ok(()) => {
+                    println!("verify: all ESI pins match");
                     ExitCode::SUCCESS
                 }
                 Err(err) => {
