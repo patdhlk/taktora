@@ -197,7 +197,7 @@ mod dto {
         identity: Option<Identity>,
         #[serde(default)]
         station_alias: Option<u16>,
-        #[serde(default)]
+        #[serde(default, rename = "address")]
         address_override: Option<u16>,
     }
 

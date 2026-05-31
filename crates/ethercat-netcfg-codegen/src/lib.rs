@@ -33,10 +33,13 @@ pub fn generate(config: &NetworkConfig) -> Result<String, CodegenError> {
 
 /// Build the `static PDO_MAP` token stream.
 fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
-    let entries = config.devices.iter().map(|device| {
-        // Slice 3 will derive the real configured address; for now emit
-        // a placeholder.
-        let address: u16 = 0x1000;
+    let entries = config.devices.iter().enumerate().map(|(index, device)| {
+        // Configured station address: `0x1000 + n` by bus position
+        // (mirrors ethercrab's `init_single_group`), unless the device
+        // pins an explicit override.
+        let address: u16 = device
+            .address_override
+            .unwrap_or_else(|| 0x1000 + u16::try_from(index).expect("device index fits in u16"));
         // Slice 5 will derive `expected_wkc`; placeholder for now.
         let expected_wkc: u16 = 0;
 
