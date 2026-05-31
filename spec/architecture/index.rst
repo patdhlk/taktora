@@ -17,6 +17,7 @@ detailed-design notes that predate the arc42 adoption.
    device-codegen
    canopen-codegen
    logging
+   ethercat-netcfg
    safety
 
 Building blocks

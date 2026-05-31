@@ -27,6 +27,12 @@ top-level features:
   logging facade (``taktora-log``) with a default AUTOSAR DLT
   backend (``taktora-log-dlt``) and a clean swap path for
   ``log4rs`` / ``env_logger`` / bespoke loggers. See :doc:`logging`.
+* :need:`FEAT_0080` "EtherCAT network-config codegen toolchain" —
+  build-time layered crates that translate an integrator-authored
+  ``network.yaml`` (bus topology + channel wiring) into the
+  ``&'static`` bus tables ``taktora-connector-ethercat`` consumers
+  hand-write today, composing on top of the ESI device toolchain.
+  See :doc:`ethercat-netcfg`.
 
 Each ``req`` directive ``:satisfies:`` one ``feat`` parent; each
 capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
@@ -40,6 +46,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    device-codegen
    canopen-codegen
    logging
+   ethercat-netcfg
 
 Requirements at a glance
 ------------------------
