@@ -10,11 +10,13 @@ homepage     = { workspace = true }
 readme       = { workspace = true }
 keywords     = { workspace = true }
 categories   = { workspace = true }
-description  = "no_std parser for EtherCAT ESI (slave information) XML into a typed IR (identity + PDO entries)."
+description  = "Parser for EtherCAT ESI (slave information) XML into a faithful typed IR (identity, PDOs, sync managers, mailbox, distributed clocks, object dictionary)."
 
 [dependencies]
-serde     = { workspace = true, features = ["alloc", "derive"] }
+taktora-fieldbus-od-core = { workspace = true }
+serde     = { workspace = true, features = ["std", "derive"] }
 quick-xml = { workspace = true }
+thiserror = { workspace = true }
 
 [lints.rust]
 unsafe_code  = "deny"
