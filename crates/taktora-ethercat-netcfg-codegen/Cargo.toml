@@ -1,0 +1,37 @@
+[package]
+name         = "taktora-ethercat-netcfg-codegen"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Code generator turning the taktora-ethercat-netcfg IR into Rust source (PDO maps, routing tables) for the taktora-connector-ethercat runtime."
+
+[dependencies]
+taktora-ethercat-netcfg = { workspace = true }
+proc-macro2     = { workspace = true }
+quote           = { workspace = true }
+syn             = { workspace = true, features = ["full", "parsing"] }
+prettyplease    = { workspace = true }
+thiserror       = { workspace = true }
+
+[dev-dependencies]
+taktora-ethercat-netcfg = { workspace = true }
+syn             = { workspace = true, features = ["full", "parsing"] }
+tempfile        = { workspace = true }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"
