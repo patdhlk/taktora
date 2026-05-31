@@ -191,7 +191,7 @@ Same three modes as `ethercat-real-bus`, adapted to the mirror rig.
 
 ## What this shows
 
-- `EthercrabBusDriver::new(&PDU_STORAGE, opts)` — real-bus driver
+- `EthercrabBusDriver::new(&EXAMPLE_PDU_STORAGE, opts)` — real-bus driver
   construction (`bus-integration` feature).
 - The `Connecting → Up` health handshake via
   `Connector::subscribe_health`.
