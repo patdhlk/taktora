@@ -265,7 +265,11 @@ pub fn pdo_variant_struct_ident(
 /// debug-assert guarding the (base ident, revision)-uniqueness invariant in
 /// [`resolve_devices`]; isolated so the assertion expression stays side-effect
 /// free.
-#[cfg(debug_assertions)]
+///
+/// NOT `#[cfg(debug_assertions)]`-gated: `debug_assert!` expands to
+/// `if cfg!(debug_assertions) { … }`, whose body is type-checked even in release
+/// builds, so this function must exist in release too (the `if false` reference
+/// keeps it from tripping `dead_code`).
 fn const_idents_unique(devices: &[Device<'_>]) -> bool {
     let mut consts: Vec<String> = devices.iter().map(|d| d.const_ident.to_string()).collect();
     consts.sort_unstable();
