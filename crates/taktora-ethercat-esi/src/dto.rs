@@ -133,6 +133,13 @@ struct TypeDto {
     // Some real files carry placeholder `<Type>` elements with neither a
     // product code nor a revision (e.g. abstract module slots); default both
     // to 0 rather than reject the whole document.
+    //
+    // TODO(FEAT_0051 follow-up): a <Type> with no ProductCode/RevisionNo is a
+    // placeholder/abstract slot, not a real addressable device. Defaulting
+    // identity to 0 here is provisional tolerance; codegen keys on identity, so
+    // the cleaner long-term behaviour is to SKIP such devices rather than emit a
+    // zero-identity (which would collide across placeholders). Tracked for the
+    // real-device codegen slices.
     #[serde(rename = "@ProductCode", default)]
     product_code: Option<String>,
     #[serde(rename = "@RevisionNo", default)]
