@@ -160,6 +160,24 @@ fn pascal_segment(raw: &str) -> String {
     out
 }
 
+/// `PascalCase` a raw label string for use as an identifier segment (e.g. a
+/// multi-group disambiguator like `Sm3`). Shares the segmentation used for PDO
+/// struct/variant segments so labels render consistently.
+pub fn pdo_struct_segment_raw(raw: &str) -> String {
+    sanitise_ident(&pascal_segment(raw))
+}
+
+/// The PascalCase-ish variant segment for one alternative PDO inside a
+/// `<Dev>PdoAssignment` enum (`REQ_0523`).
+///
+/// Named PDOs derive from their `<Name>` (`"Standard"` → `Standard`,
+/// `"Compact"` → `Compact`); an unnamed PDO falls back to its mapping index
+/// (`0x1A00` → `Pdo1a00`). Shares the segmentation used for sub-struct idents,
+/// so a variant and its embedded struct segment agree.
+pub fn pdo_variant_segment(name: Option<&str>, index: u16) -> String {
+    pdo_struct_segment(name, index)
+}
+
 /// The full-width revision suffix for a revision number (`REQ_0512`): `REV{rev:08X}`.
 pub fn revision_suffix(revision: u32) -> String {
     format!("REV{revision:08X}")

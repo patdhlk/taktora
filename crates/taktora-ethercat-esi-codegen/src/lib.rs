@@ -84,6 +84,17 @@ pub enum CodegenError {
         /// Why the type is unsupported (the offending type name / category).
         reason: String,
     },
+
+    /// A PDO-assignment alternative group resolved to zero alternatives. A
+    /// backend cannot emit a choice enum with no variants (nor a `Default`), so
+    /// this is surfaced rather than emitting uncompilable tokens. The grouping
+    /// only ever produces non-empty groups, so this guards an internal
+    /// invariant (`REQ_0523`).
+    #[error("alternative group for enum {enum_ident:?} has no alternatives")]
+    EmptyAlternativeGroup {
+        /// The enum identifier the empty group would have produced.
+        enum_ident: String,
+    },
 }
 
 /// Parse an identifier string into a [`proc_macro2::Ident`], surfacing failures
@@ -160,6 +171,75 @@ pub fn pdo_struct_ident(
 ) -> Result<Ident, CodegenError> {
     let segment = naming::pdo_struct_segment(name, index);
     make_ident(&format!("{device_struct}{segment}"))
+}
+
+/// Resolve the enum identifier for a PDO-assignment alternative group
+/// (`REQ_0523`).
+///
+/// A device with a single alternative group names it `<Dev>PdoAssignment`
+/// (`label: None`). A device with multiple groups disambiguates each by a
+/// caller-supplied `PascalCase` label segment (e.g. derived from the shared sync
+/// manager / direction), yielding `<Dev>PdoAssignment<Label>`.
+///
+/// # Errors
+///
+/// Returns [`CodegenError::InvalidIdent`] if the concatenation does not lex to
+/// exactly one identifier token (the sanitisation policy prevents this).
+pub fn pdo_assignment_enum_ident(
+    device_struct: &Ident,
+    label: Option<&str>,
+) -> Result<Ident, CodegenError> {
+    let suffix = label.map_or_else(String::new, naming::pdo_struct_segment_raw);
+    make_ident(&format!("{device_struct}PdoAssignment{suffix}"))
+}
+
+/// Resolve the device-struct field identifier holding a PDO-assignment enum
+/// (`REQ_0523`).
+///
+/// A single alternative group uses the bare `pdo` field; multiple groups
+/// disambiguate with a caller-supplied snake-case label (`pdo_sm3`).
+///
+/// # Errors
+///
+/// Returns [`CodegenError::InvalidIdent`] if the result does not lex to exactly
+/// one identifier token (the sanitisation policy prevents this).
+pub fn pdo_assignment_field_ident(label: Option<&str>) -> Result<Ident, CodegenError> {
+    label.map_or_else(
+        || make_ident("pdo"),
+        |label| field_ident(&format!("pdo_{label}")),
+    )
+}
+
+/// Resolve the enum-variant identifier for one alternative PDO (`REQ_0523`).
+///
+/// The variant is a `PascalCase` rendering of the PDO `<Name>` (`"Standard"` →
+/// `Standard`), or its mapping index when unnamed (`0x1A00` → `Pdo1a00`).
+///
+/// # Errors
+///
+/// Returns [`CodegenError::InvalidIdent`] if the rendered segment does not lex
+/// to exactly one identifier token (the sanitisation policy prevents this).
+pub fn pdo_variant_ident(name: Option<&str>, index: u16) -> Result<Ident, CodegenError> {
+    make_ident(&naming::pdo_variant_segment(name, index))
+}
+
+/// Resolve the per-variant struct identifier `<Dev>Pdo<Variant>` holding one
+/// alternative PDO's typed entries (`REQ_0524`).
+///
+/// The variant segment renders the PDO `<Name>` in `PascalCase` (`ALT` +
+/// `Standard` → `ALTPdoStandard`), or its index when unnamed.
+///
+/// # Errors
+///
+/// Returns [`CodegenError::InvalidIdent`] if the concatenation does not lex to
+/// exactly one identifier token (the sanitisation policy prevents this).
+pub fn pdo_variant_struct_ident(
+    device_struct: &Ident,
+    name: Option<&str>,
+    index: u16,
+) -> Result<Ident, CodegenError> {
+    let segment = naming::pdo_variant_segment(name, index);
+    make_ident(&format!("{device_struct}Pdo{segment}"))
 }
 
 /// Whether every resolved device has a distinct `const_ident`. Used only by the

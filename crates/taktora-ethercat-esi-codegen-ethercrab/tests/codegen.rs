@@ -265,6 +265,114 @@ fn el3602_emits_two_channels_with_running_offsets() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// PDO assignment ALTERNATIVES: sum types (T9, REQ_0523/0524).
+// ---------------------------------------------------------------------------
+
+/// The synthetic ALT device has two non-fixed, non-mandatory `TxPdos` sharing
+/// Sm=3 ("Standard" 16-bit, "Compact" 8-bit), no `<Exclude>` → one alternative
+/// group of two. Codegen must emit a `<Dev>PdoAssignment` sum type, one
+/// `<Dev>Pdo<Variant>` struct per alternative, an enum-typed `pdo` field, and a
+/// manual `Default` picking the first variant.
+fn alt_source() -> String {
+    let xml = include_str!("../../taktora-ethercat-esi/tests/fixtures/pdo_alternatives.xml");
+    source_from_xml(xml)
+}
+
+#[test]
+fn alt_emits_pdo_assignment_enum_with_one_variant_per_alternative() {
+    let src = alt_source();
+    let sq = squash(&src);
+
+    // The sum type with one variant per alternative, each embedding its struct.
+    assert!(
+        src.contains("pub enum ALTPdoAssignment"),
+        "missing ALTPdoAssignment enum:\n{src}"
+    );
+    assert!(
+        sq.contains("Standard(ALTPdoStandard)"),
+        "missing Standard variant embedding its struct:\n{src}"
+    );
+    assert!(
+        sq.contains("Compact(ALTPdoCompact)"),
+        "missing Compact variant embedding its struct:\n{src}"
+    );
+}
+
+#[test]
+fn alt_emits_per_variant_structs_with_typed_entries() {
+    let src = alt_source();
+    let sq = squash(&src);
+
+    // Standard: a 16-bit entry → u16 field; Compact: an 8-bit entry → u8.
+    assert!(
+        src.contains("pub struct ALTPdoStandard"),
+        "missing ALTPdoStandard struct:\n{src}"
+    );
+    assert!(
+        src.contains("pub struct ALTPdoCompact"),
+        "missing ALTPdoCompact struct:\n{src}"
+    );
+    // The shared entry name disambiguation is per-struct, so the field exists in
+    // each. 16-bit untyped → u16; 8-bit untyped → u8.
+    assert!(
+        sq.contains(":u16"),
+        "Standard variant should hold a u16 entry:\n{src}"
+    );
+    assert!(
+        sq.contains(":u8"),
+        "Compact variant should hold a u8 entry:\n{src}"
+    );
+}
+
+#[test]
+fn alt_device_field_is_the_enum_with_manual_default() {
+    let src = alt_source();
+    let sq = squash(&src);
+
+    // The device struct carries the enum-typed `pdo` field.
+    assert!(
+        sq.contains("pubpdo:ALTPdoAssignment"),
+        "missing enum-typed pdo field on device:\n{src}"
+    );
+
+    // Manual Default picks the first alternative (Standard).
+    assert!(
+        sq.contains("implDefaultforALTPdoAssignment"),
+        "missing manual Default impl:\n{src}"
+    );
+    assert!(
+        sq.contains("Self::Standard(Default::default())"),
+        "Default should pick the first variant (Standard):\n{src}"
+    );
+}
+
+#[test]
+fn alt_decode_inputs_matches_active_variant() {
+    let src = alt_source();
+    let sq = squash(&src);
+
+    // decode_inputs matches the enum field and reads the active variant's entry.
+    assert!(
+        sq.contains("match&mutself.pdo"),
+        "decode_inputs should match the enum field:\n{src}"
+    );
+    assert!(
+        sq.contains("ALTPdoAssignment::Standard("),
+        "decode should have a Standard arm:\n{src}"
+    );
+    assert!(
+        sq.contains("ALTPdoAssignment::Compact("),
+        "decode should have a Compact arm:\n{src}"
+    );
+    // The active variant's entry is read at the running offset (0, no always-on
+    // PDOs precede it in this direction).
+    assert!(
+        sq.contains("load_le::<u16>()") && sq.contains("load_le::<u8>()"),
+        "each arm should load its own variant's entry:\n{src}"
+    );
+}
+
 /// Regression: a device with exactly one input PDO (and zero output PDOs) keeps
 /// the FLAT shape — no sub-struct, fields directly on the device struct.
 #[test]
@@ -283,4 +391,18 @@ fn single_pdo_device_stays_flat() {
         sq.contains("pubunderrange:bool") && sq.contains("pubvalue:i16"),
         "flat fields must remain on the device struct:\n{src}"
     );
+}
+
+/// The ALT alternatives module must be syntactically valid Rust. `source_from_xml`
+/// already round-trips the tokens through `syn::parse2::<syn::File>`, so reaching
+/// a non-empty pretty-printed string proves the emitted tokens parse. (A full
+/// compile + decode check rides on the landing-pad crate, which compiles every
+/// generated module via `build.rs`; the synthetic ALT device is covered here at
+/// the token-validity level per the T9 scope.)
+#[test]
+fn alt_output_is_valid_rust() {
+    let src = alt_source();
+    assert!(!src.is_empty(), "ALT module should produce source");
+    // Re-parse the pretty-printed output as a final guard.
+    let _: syn::File = syn::parse_str(&src).expect("ALT module is valid Rust");
 }
