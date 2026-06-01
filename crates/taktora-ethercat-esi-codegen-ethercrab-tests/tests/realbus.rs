@@ -173,11 +173,13 @@ fn el3602_decode_buffer_too_short() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn registry_has_all_four_devices() {
+fn registry_has_all_devices() {
+    // Four demo devices (EL1008/EL2004/EL3602/EL3001_like) plus the synthetic
+    // ALT alternatives fixture = five esi/*.xml devices.
     assert_eq!(
         REGISTRY.len(),
-        4,
-        "all four esi/*.xml devices should register"
+        5,
+        "all five esi/*.xml devices should register"
     );
 }
 

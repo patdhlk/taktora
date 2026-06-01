@@ -296,6 +296,91 @@ impl taktora_ethercat_esi_rt::EsiDevice for EL3001_like {
         Ok(())
     }
 }
+#[allow(non_camel_case_types)]
+#[derive(Debug, Default, Clone)]
+pub struct ALTPdoStandard {
+    pub entry_6000_1: u16,
+}
+#[allow(non_camel_case_types)]
+#[derive(Debug, Default, Clone)]
+pub struct ALTPdoCompact {
+    pub entry_6000_1: u8,
+}
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone)]
+pub enum ALTPdoAssignment {
+    Standard(ALTPdoStandard),
+    Compact(ALTPdoCompact),
+}
+impl Default for ALTPdoAssignment {
+    fn default() -> Self {
+        Self::Standard(Default::default())
+    }
+}
+#[allow(non_camel_case_types)]
+#[derive(Debug, Default, Clone)]
+pub struct ALT {
+    pub pdo: ALTPdoAssignment,
+}
+pub const ALT_REV00000001: taktora_ethercat_esi_rt::Identity = taktora_ethercat_esi_rt::Identity {
+    vendor_id: 2u32,
+    product_code: 65536u32,
+    revision: 1u32,
+};
+impl taktora_ethercat_esi_rt::EsiDevice for ALT {
+    fn identity(&self) -> taktora_ethercat_esi_rt::Identity {
+        ALT_REV00000001
+    }
+    fn input_len(&self) -> usize {
+        2usize
+    }
+    fn output_len(&self) -> usize {
+        0usize
+    }
+    fn decode_inputs(
+        &mut self,
+        bits: &taktora_ethercat_esi_rt::BitSlice<u8, taktora_ethercat_esi_rt::Lsb0>,
+    ) -> Result<(), taktora_ethercat_esi_rt::EsiError> {
+        use bitvec::field::BitField as _;
+        const NEED: usize = 0usize;
+        if bits.len() < NEED {
+            return Err(taktora_ethercat_esi_rt::EsiError::BufferTooShort {
+                expected_bits: NEED,
+                got_bits: bits.len(),
+            });
+        }
+        match &mut self.pdo {
+            ALTPdoAssignment::Standard(v) => {
+                const NEED: usize = 16usize;
+                if bits.len() < NEED {
+                    return Err(taktora_ethercat_esi_rt::EsiError::BufferTooShort {
+                        expected_bits: NEED,
+                        got_bits: bits.len(),
+                    });
+                }
+                v.entry_6000_1 = bits[0usize..16usize].load_le::<u16>();
+            }
+            ALTPdoAssignment::Compact(v) => {
+                const NEED: usize = 8usize;
+                if bits.len() < NEED {
+                    return Err(taktora_ethercat_esi_rt::EsiError::BufferTooShort {
+                        expected_bits: NEED,
+                        got_bits: bits.len(),
+                    });
+                }
+                v.entry_6000_1 = bits[0usize..8usize].load_le::<u8>();
+            }
+        }
+        Ok(())
+    }
+    fn encode_outputs(
+        &self,
+        bits: &mut taktora_ethercat_esi_rt::BitSlice<u8, taktora_ethercat_esi_rt::Lsb0>,
+    ) -> Result<(), taktora_ethercat_esi_rt::EsiError> {
+        let _ = bits;
+        Ok(())
+    }
+}
 /// All devices generated in this module, keyed by EtherCAT identity.
 /// A linear scan over this slice is reducible to a `HashMap` lookup.
 pub static REGISTRY: &[(
@@ -320,6 +405,10 @@ pub static REGISTRY: &[(
             Box::new(EL3001_like::default())
                 as Box<dyn taktora_ethercat_esi_rt::EsiDevice>
         },
+    ),
+    (
+        ALT_REV00000001,
+        || Box::new(ALT::default()) as Box<dyn taktora_ethercat_esi_rt::EsiDevice>,
     ),
 ];
 /// Construct a fresh device instance for the given identity, if known.

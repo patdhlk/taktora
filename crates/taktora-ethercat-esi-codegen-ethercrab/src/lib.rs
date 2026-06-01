@@ -233,7 +233,8 @@ fn group_alternatives<'a>(candidates: &[&'a Pdo]) -> Vec<Vec<&'a Pdo>> {
 /// alternative's entries are laid out starting at `base_offset` (the running
 /// offset after this direction's always-on PDOs), since exactly one alternative
 /// occupies that space at runtime. `label` disambiguates the enum/field idents
-/// when a direction has more than one group.
+/// across groups; the caller passes `None` for the single-group case (the only
+/// shape currently emitted — see [`resolve_alt_groups`]).
 fn resolve_alt_group(
     group: &[&Pdo],
     device_struct: &Ident,
@@ -259,35 +260,39 @@ fn resolve_alt_group(
 }
 
 /// Resolve a direction's alternative groups. Always-on PDOs (already resolved)
-/// occupy `base_offset` bits; each alternative group's variants start there.
-/// When a direction has a single group it is unlabelled (bare `pdo` /
-/// `<Dev>PdoAssignment`); multiple groups are labelled by sync manager so their
-/// idents stay distinct.
+/// occupy `base_offset` bits; the alternative group's variants start there.
+///
+/// The spec-required shape is one alternative group per direction (the master
+/// selects a single PDO assignment via 0x1C12/0x1C13), so the single group is
+/// unlabelled (bare `pdo` / `<Dev>PdoAssignment`). A direction that resolves to
+/// MORE THAN ONE group is rejected with
+/// [`CodegenError::MultipleAlternativeGroups`] rather than miscompiled (see the
+/// inline `TODO`).
 fn resolve_alt_groups(
     candidates: &[&Pdo],
     device_struct: &Ident,
     base_offset: usize,
+    direction: &'static str,
 ) -> Result<Vec<ResolvedAltGroup>, CodegenError> {
     let groups = group_alternatives(candidates);
-    let multi = groups.len() > 1;
+    // TODO: support more than one alternative group per direction by sequencing
+    // each group's `base_offset` after the previous group's widest variant
+    // (instead of giving every group the same `base_offset`). Until then a
+    // multi-group direction is rejected: `direction_len` SUMS the widest-per-
+    // group while `resolve_alt_group` lays every group at the same offset, so
+    // two groups would alias the same bits (silent data corruption).
+    if groups.len() > 1 {
+        return Err(CodegenError::MultipleAlternativeGroups {
+            device: device_struct.to_string(),
+            direction,
+        });
+    }
+    // Single-group (the only spec-required case) stays unlabelled: bare `pdo` /
+    // `<Dev>PdoAssignment`.
     groups
         .iter()
-        .enumerate()
-        .map(|(i, group)| {
-            let label = multi.then(|| group_label(group, i));
-            resolve_alt_group(group, device_struct, base_offset, label.as_deref())
-        })
+        .map(|group| resolve_alt_group(group, device_struct, base_offset, None))
         .collect()
-}
-
-/// A stable label for a multi-group direction: the shared sync manager (`sm3`)
-/// when the group shares one, else a positional fallback (`g0`). Used to
-/// disambiguate enum/field idents across groups.
-fn group_label(group: &[&Pdo], position: usize) -> String {
-    group
-        .first()
-        .and_then(|p| p.sm)
-        .map_or_else(|| format!("g{position}"), |sm| format!("sm{sm}"))
 }
 
 /// The `self.<…>` access path for a field: bare `self.<field>` in the flat
@@ -380,8 +385,8 @@ impl CodegenBackend for EthercrabBackend {
         let (inputs, input_base_bits) = resolve_direction(&in_fixed, struct_ident)?;
         let (outputs, output_base_bits) = resolve_direction(&out_fixed, struct_ident)?;
 
-        let in_groups = resolve_alt_groups(&in_alt, struct_ident, input_base_bits)?;
-        let out_groups = resolve_alt_groups(&out_alt, struct_ident, output_base_bits)?;
+        let in_groups = resolve_alt_groups(&in_alt, struct_ident, input_base_bits, "Tx")?;
+        let out_groups = resolve_alt_groups(&out_alt, struct_ident, output_base_bits, "Rx")?;
 
         // A direction with more than one always-on PDO is split into per-PDO
         // sub-structs so that entry names repeated across channels (e.g. each
@@ -1037,6 +1042,54 @@ mod tests {
         let (_, candidates) = partition_pdos(&pdos);
         let groups = group_alternatives(&candidates);
         assert_eq!(groups.len(), 2, "two SMs → two groups");
+    }
+
+    /// A direction that resolves to MORE THAN ONE alternative group is rejected
+    /// with [`CodegenError::MultipleAlternativeGroups`] rather than miscompiled.
+    /// Shape: two non-fixed/non-mandatory PDOs on Sm 3 linked by `<Exclude>`
+    /// (group A) plus two more on Sm 4 with no cross-exclude (group B) — two
+    /// distinct SM groups in the same Tx direction.
+    #[test]
+    fn multiple_alt_groups_in_one_direction_are_rejected() {
+        let tx_pdos = vec![
+            // Group A: Sm 3, A0 <-> A1 exclude each other.
+            alt_pdo(0x1A00, "A0", Some(3), false, false, vec![0x1A01]),
+            alt_pdo(0x1A01, "A1", Some(3), false, false, vec![0x1A00]),
+            // Group B: Sm 4, no cross-exclude into group A.
+            alt_pdo(0x1A10, "B0", Some(4), false, false, vec![]),
+            alt_pdo(0x1A11, "B1", Some(4), false, false, vec![]),
+        ];
+        // Sanity: the grouping rule resolves this shape to exactly two groups.
+        let (_, candidates) = partition_pdos(&tx_pdos);
+        assert_eq!(
+            group_alternatives(&candidates).len(),
+            2,
+            "expected 2 groups"
+        );
+
+        let device = Device {
+            struct_ident: field_ident("multi_alt").expect("ident"),
+            const_ident: field_ident("MULTI_ALT").expect("ident"),
+            identity: Identity {
+                vendor_id: 0x0000_0002,
+                product_code: 0x0001_0000,
+                revision: 0x0000_0001,
+            },
+            name: Some("MultiAlt"),
+            tx_pdos: &tx_pdos,
+            rx_pdos: &[],
+        };
+
+        let err = EthercrabBackend
+            .emit_device(&device)
+            .expect_err("two Tx alternative groups must be rejected");
+        match err {
+            CodegenError::MultipleAlternativeGroups { device, direction } => {
+                assert_eq!(device, "multi_alt");
+                assert_eq!(direction, "Tx");
+            }
+            other => panic!("expected MultipleAlternativeGroups, got {other:?}"),
+        }
     }
 
     /// `<Exclude>` connected components refine grouping: PDOs that exclude each

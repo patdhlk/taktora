@@ -95,6 +95,25 @@ pub enum CodegenError {
         /// The enum identifier the empty group would have produced.
         enum_ident: String,
     },
+
+    /// A single direction (`Tx`/`Rx`) resolved to MORE THAN ONE PDO-assignment
+    /// alternative group. The spec-required shape is one alternative group per
+    /// direction (the master picks one PDO assignment via 0x1C12/0x1C13).
+    /// Emitting more than one group is currently miscompiled: every group is
+    /// laid out at the same `base_offset`, so two groups in one direction would
+    /// alias the same bits at decode/encode time (silent data corruption).
+    /// Until per-group offset threading exists this is rejected as a hard error
+    /// rather than emitting wrong codegen (`REQ_0523`/`REQ_0524`).
+    #[error(
+        "device {device:?} resolves more than one alternative group in the {direction} direction; \
+         multiple alternative groups per direction are not yet supported"
+    )]
+    MultipleAlternativeGroups {
+        /// The device whose direction over-resolved.
+        device: String,
+        /// The offending direction (`"Tx"` for inputs, `"Rx"` for outputs).
+        direction: &'static str,
+    },
 }
 
 /// Parse an identifier string into a [`proc_macro2::Ident`], surfacing failures
