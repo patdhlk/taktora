@@ -1,1 +1,11 @@
 /target
+
+# Drop-in vendor ESI catalogs are large (multi-MB) and not committed. Ignore
+# every ESI file under esi/ ...
+esi/*.xml
+# ... but keep the two trimmed real-device fixtures so the demo builds
+# standalone from a clean checkout. A user can drop the full Beckhoff catalog
+# files (e.g. `Beckhoff EL1xxx.xml`, `Beckhoff EL2xxx.xml`) into `esi/` to
+# generate the whole device set; those large files stay local-only.
+!esi/beckhoff_el1008.xml
+!esi/beckhoff_el2004.xml

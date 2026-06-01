@@ -1,10 +1,32 @@
 # ethercat-real-bus
 
-Drives a **real** Beckhoff EK1100 + EL1008 from a Linux host (a
-Raspberry Pi is the canonical target) via
+Drives a **real** Beckhoff EK1100 + EL1008 + EL2004 from a Linux host
+(a Raspberry Pi is the canonical target) via
 `taktora-connector-ethercat`'s `EthercrabBusDriver`. Reads the EL1008's
-8 digital input bits at a 10 ms cadence and prints the byte every
-time it changes.
+8 digital input bits at a 10 ms cadence and prints them — both as the
+raw byte and as the named channels decoded by an ESI-generated typed
+driver — every time they change, and toggles the EL2004's first output
+on a 500 ms cadence through the matching generated output driver.
+
+## ESI-generated typed drivers
+
+The example does **not** hand-decode PDI bits. At build time, `build.rs`
+runs `taktora-ethercat-esi-build` over the trimmed Beckhoff ESI files in
+[`esi/`](esi/) and generates `$OUT_DIR/devices.rs`, which `src/main.rs`
+pulls in via `mod generated { include!(...); }`. The EL1008 input byte
+is fed through `generated::EL1008::decode_inputs`, exposing named fields
+(`dev.channel_1.input … channel_8`); the EL2004 output is built by
+setting `el2004.channel_1.output` and calling
+`generated::EL2004::encode_outputs`. The hand-written PDO routing widths
+(8 / 4 bits) are cross-checked against the generated drivers'
+byte-rounded `input_len()` / `output_len()` at startup.
+
+Two **trimmed** real-device fixtures ship committed
+(`esi/beckhoff_el1008.xml`, `esi/beckhoff_el2004.xml`) so the demo
+builds standalone from a clean checkout and the Pi build stays fast. To
+generate the whole Beckhoff catalog instead, drop the full vendor files
+(e.g. `Beckhoff EL1xxx.xml`, `Beckhoff EL2xxx.xml`) into `esi/` — codegen
+handles them, and `.gitignore` keeps those large files local-only.
 
 This is the real-hardware sibling of
 [`ethercat-mock-loop`](../ethercat-mock-loop). CI compiles it but
@@ -82,30 +104,25 @@ Pi 5 walking a 24 V probe across the eight input channels in order —
 captured on the documented topology plus an extra EL2004 between the
 EL1008 and the end cap:
 
+Each change line now carries both the raw byte and the ESI-decoded
+named channels:
+
 ```
 0 [W] "Config::global_config()"
  | No config file was loaded, a config with default values will be used.
 ethercat connector health at startup: Connecting
-t=+   531ms  bits=0b00000000  decimal=0
+t=+   531ms  bits=0b00000000  decimal=0  ch1=0 ch2=0 ch3=0 ch4=0 ch5=0 ch6=0 ch7=0 ch8=0
 ethercat connector health: Connecting -> Up
 ethercat connector health: Up -> Degraded
-t=+ 23510ms  bits=0b00000001  decimal=1
-t=+ 23650ms  bits=0b00000000  decimal=0
-t=+ 25360ms  bits=0b00000010  decimal=2
-t=+ 25780ms  bits=0b00000000  decimal=0
-t=+ 27170ms  bits=0b00000100  decimal=4
-t=+ 27460ms  bits=0b00000000  decimal=0
-t=+ 28580ms  bits=0b00001000  decimal=8
-t=+ 28840ms  bits=0b00000000  decimal=0
-t=+ 30190ms  bits=0b00010000  decimal=16
-t=+ 30410ms  bits=0b00000000  decimal=0
-t=+ 31370ms  bits=0b00100000  decimal=32
-t=+ 31610ms  bits=0b00000000  decimal=0
-t=+ 33730ms  bits=0b01000000  decimal=64
-t=+ 33960ms  bits=0b00000000  decimal=0
-t=+ 34730ms  bits=0b10000000  decimal=128
-t=+ 34881ms  bits=0b00000000  decimal=0
+t=+ 23510ms  bits=0b00000001  decimal=1  ch1=1 ch2=0 ch3=0 ch4=0 ch5=0 ch6=0 ch7=0 ch8=0
+t=+ 23650ms  bits=0b00000000  decimal=0  ch1=0 ch2=0 ch3=0 ch4=0 ch5=0 ch6=0 ch7=0 ch8=0
+t=+ 25360ms  bits=0b00000010  decimal=2  ch1=0 ch2=1 ch3=0 ch4=0 ch5=0 ch6=0 ch7=0 ch8=0
+t=+ 28580ms  bits=0b00001000  decimal=8  ch1=0 ch2=0 ch3=0 ch4=1 ch5=0 ch6=0 ch7=0 ch8=0
+t=+ 34730ms  bits=0b10000000  decimal=128 ch1=0 ch2=0 ch3=0 ch4=0 ch5=0 ch6=0 ch7=0 ch8=1
 ```
+
+(`ch1` is bit 0, `ch8` is bit 7 — Lsb0 ordering, matching the EL1008's
+Tx PDO. The EL2004's first output toggles on its own 500 ms cadence.)
 
 Bring-up usually completes within 1–2 seconds on a Pi 4 or 5. With
 no inputs wired the EL1008 just reports all zeros — bring-up still
@@ -200,3 +217,10 @@ The drill exercises the bus-level recovery path against real silicon.
   decode the EL1008's raw PDI byte. The codec is purpose-built for
   this example and intentionally not promoted to the workspace's
   `taktora-connector-codec`.
+- The ESI device-codegen spine end-to-end: `taktora-ethercat-esi-build`
+  in `build.rs` turning `esi/*.xml` into typed `EsiDevice`
+  implementations, layered on top of the raw byte channels —
+  `EL1008::decode_inputs` for named input channels and
+  `EL2004::encode_outputs` for the toggled output. The connector,
+  routing, modes, health pump, and `RawByteCodec` are unchanged; the
+  typed layer sits on top.

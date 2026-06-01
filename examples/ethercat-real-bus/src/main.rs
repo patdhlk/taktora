@@ -13,6 +13,7 @@ use core::time::Duration;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use bitvec::view::BitView;
 use clap::Parser;
 use taktora_connector_core::{ChannelDescriptor, ConnectorError, PayloadCodec};
 use taktora_connector_ethercat::{
@@ -20,7 +21,25 @@ use taktora_connector_ethercat::{
     connector::EthercatState, declare_pdu_storage,
 };
 use taktora_connector_host::Connector;
+use taktora_ethercat_esi_rt::{EsiDevice, Lsb0};
 use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+
+/// ESI-generated typed device drivers. `build.rs` runs
+/// `taktora-ethercat-esi-build` over `esi/*.xml` and writes
+/// `$OUT_DIR/devices.rs`; this module `include!`s it. The `allow`s mirror the
+/// codegen landing-pad crate — generated code is not held to this binary's
+/// lint bar.
+#[allow(
+    missing_docs,
+    non_camel_case_types,
+    dead_code,
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery
+)]
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/devices.rs"));
+}
 
 /// Channel capacity (iceoryx2 service buffer slots).
 const N: usize = 256;
@@ -174,26 +193,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(EthercatState::new(opts.clone()));
     let mut connector = EthercatConnector::new(state, driver, RawByteCodec)?;
 
+    // Cross-check the hand-written routing bit-widths against the
+    // ESI-generated drivers' byte-rounded process-image sizes. EL1008 = 8
+    // input bits = 1 byte; EL2004 = 4 output bits = 1 byte. If a future ESI
+    // edit changes a device's PDI size, this trips at startup instead of
+    // silently mis-routing PDOs.
+    debug_assert_eq!(
+        generated::EL1008::default().input_len(),
+        usize::from(ROUTING_BITS).div_ceil(8),
+        "EL1008 input_len disagrees with ROUTING_BITS",
+    );
+    debug_assert_eq!(
+        generated::EL2004::default().output_len(),
+        usize::from(ROUTING_BITS_EL2004).div_ceil(8),
+        "EL2004 output_len disagrees with ROUTING_BITS_EL2004",
+    );
+
     // 4. Routing — EL1008 inputs at configured station address
     //    `0x1001`, bit offset 0, 8 bits. PdoDirection::Tx means the
     //    SubDevice writes (Tx) and the master reads.
     let routing = EthercatRouting::new(SUBDEV, PdoDirection::Tx, 0, ROUTING_BITS);
-    let desc =
-        ChannelDescriptor::<EthercatRouting, N>::new("ethercat.el1008.inputs", routing)?;
+    let desc = ChannelDescriptor::<EthercatRouting, N>::new("ethercat.el1008.inputs", routing)?;
     let reader = connector.create_reader::<u8, N>(&desc)?;
 
     // 4b. EL2004 outputs routing: configured station address 0x1002,
     //     PdoDirection::Rx (master writes), bit offset 0, 4 bits.
-    let routing_el2004 = EthercatRouting::new(
-        SUBDEV_EL2004,
-        PdoDirection::Rx,
-        0,
-        ROUTING_BITS_EL2004,
-    );
-    let desc_el2004 = ChannelDescriptor::<EthercatRouting, N>::new(
-        "ethercat.el2004.outputs",
-        routing_el2004,
-    )?;
+    let routing_el2004 =
+        EthercatRouting::new(SUBDEV_EL2004, PdoDirection::Rx, 0, ROUTING_BITS_EL2004);
+    let desc_el2004 =
+        ChannelDescriptor::<EthercatRouting, N>::new("ethercat.el2004.outputs", routing_el2004)?;
     let writer_el2004 = connector.create_writer::<u8, N>(&desc_el2004)?;
 
     // 5. Executor.
@@ -223,7 +251,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut last = last_value_for_item.lock().expect("poisoned");
                 if last.as_ref().copied() != Some(v) {
                     let elapsed_ms = started_at.elapsed().as_millis();
-                    println!("t=+{elapsed_ms:>6}ms  bits=0b{v:08b}  decimal={v}");
+                    // Typed layer: decode the raw PDI byte into the
+                    // ESI-generated EL1008 driver and print the NAMED channels
+                    // alongside the raw bits. The driver's bit layout comes
+                    // straight from `esi/beckhoff_el1008.xml`. A decode error
+                    // is logged and skipped — never panic in the hot loop.
+                    let mut dev = generated::EL1008::default();
+                    match dev.decode_inputs([v].view_bits::<Lsb0>()) {
+                        Ok(()) => {
+                            println!(
+                                "t=+{elapsed_ms:>6}ms  bits=0b{v:08b}  decimal={v}  \
+                                 ch1={} ch2={} ch3={} ch4={} ch5={} ch6={} ch7={} ch8={}",
+                                dev.channel_1.input as u8,
+                                dev.channel_2.input as u8,
+                                dev.channel_3.input as u8,
+                                dev.channel_4.input as u8,
+                                dev.channel_5.input as u8,
+                                dev.channel_6.input as u8,
+                                dev.channel_7.input as u8,
+                                dev.channel_8.input as u8,
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "t=+{elapsed_ms:>6}ms  EL1008 decode failed for \
+                                 bits=0b{v:08b}: {e}"
+                            );
+                        }
+                    }
                     *last = Some(v);
                 }
             }
@@ -236,15 +291,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 7. Toggle EL2004 output bit 0 on a 500 ms cadence. Demonstrates
     //    with_subdevice_outputs_mut end-to-end against the real bus.
-    let mut output_state = 0_u8;
+    let mut state_bool = false;
     exec.add(item_with_triggers(
         |d| -> Result<(), ExecutorError> {
             d.interval(OUTPUT_TOGGLE_PERIOD);
             Ok(())
         },
         move |_ctx| -> ExecuteResult {
-            output_state ^= 0b0000_0001;
-            let _ = writer_el2004.send(&output_state);
+            state_bool = !state_bool;
+            // Typed layer: drive channel 1 of the ESI-generated EL2004 and let
+            // it encode the output PDI byte. Channels 2..4 stay false. The bit
+            // layout comes straight from `esi/beckhoff_el2004.xml`.
+            let mut el2004 = generated::EL2004::default();
+            el2004.channel_1.output = state_bool;
+            let mut buf = [0u8; 1];
+            match el2004.encode_outputs(buf.view_bits_mut::<Lsb0>()) {
+                Ok(()) => {
+                    let _ = writer_el2004.send(&buf[0]);
+                }
+                Err(e) => eprintln!("EL2004 encode failed: {e}"),
+            }
             Ok(ControlFlow::Continue)
         },
     ))?;
@@ -352,5 +418,35 @@ mod tests {
         let mut buf: [u8; 0] = [];
         let result = RawByteCodec.encode(&42_u8, &mut buf);
         assert!(result.is_err());
+    }
+
+    /// Exercise ONLY the ESI-generated typed layer: decode a known EL1008 PDI
+    /// byte into named channels, then set an EL2004 channel and encode it back
+    /// to a byte. This runs without the bus (no `bus-integration`/ethercrab),
+    /// proving the codegen spine compiles and round-trips on any host.
+    #[test]
+    fn esi_typed_layer_round_trips() {
+        // EL1008: 0b1010_1010 in Lsb0 -> ch1=0 ch2=1 ch3=0 ch4=1 ...
+        let mut el1008 = generated::EL1008::default();
+        el1008
+            .decode_inputs([0b1010_1010u8].view_bits::<Lsb0>())
+            .expect("EL1008 decode should succeed");
+        assert!(!el1008.channel_1.input);
+        assert!(el1008.channel_2.input);
+        assert!(!el1008.channel_7.input);
+        assert!(el1008.channel_8.input);
+        assert_eq!(el1008.input_len(), 1);
+        assert_eq!(el1008.output_len(), 0);
+
+        // EL2004: set channel 1 only -> bit0 high -> 0b0000_0001.
+        let mut el2004 = generated::EL2004::default();
+        el2004.channel_1.output = true;
+        let mut buf = [0u8; 1];
+        el2004
+            .encode_outputs(buf.view_bits_mut::<Lsb0>())
+            .expect("EL2004 encode should succeed");
+        assert_eq!(buf[0], 0b0000_0001);
+        assert_eq!(el2004.output_len(), 1);
+        assert_eq!(el2004.input_len(), 0);
     }
 }
