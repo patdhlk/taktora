@@ -18,6 +18,16 @@ fn write_esi(manifest: &Path, name: &str, contents: &str) {
     fs::write(esi_dir.join(name), contents).expect("write esi file");
 }
 
+/// Write raw `bytes` to `<manifest>/esi/<name>`, creating the `esi` dir.
+///
+/// Used to lay down a file with a specific (non-UTF-8) byte encoding so the
+/// build helper's decode path is exercised, not the test's UTF-8 assumptions.
+fn write_esi_bytes(manifest: &Path, name: &str, bytes: &[u8]) {
+    let esi_dir = manifest.join("esi");
+    fs::create_dir_all(&esi_dir).expect("create esi dir");
+    fs::write(esi_dir.join(name), bytes).expect("write esi bytes");
+}
+
 #[test]
 fn run_generates_valid_module_for_single_file() {
     let manifest = tempfile::tempdir().expect("manifest tempdir");
@@ -123,6 +133,119 @@ fn run_merges_and_sorts_multiple_files() {
     assert!(
         source.contains("pub struct DeviceBeta"),
         "missing second device struct in:\n{source}",
+    );
+}
+
+/// An EL3001-like device whose `<Name>` carries a non-ASCII character (`±`).
+/// `{ENC}` is a placeholder for the encoding declaration, and `{PM}` for the
+/// raw byte(s) encoding `±` in that encoding. The device `Type` content
+/// (`EL2004`) and `ProductCode` drive the generated ident, which stays ASCII.
+const PM_NAME_TEMPLATE: &str = r##"<?xml version="1.0" encoding="{ENC}"?>
+<EtherCATInfo>
+  <Vendor>
+    <Id>#x00000002</Id>
+    <Name>Synthetic Vendor</Name>
+  </Vendor>
+  <Descriptions>
+    <Devices>
+      <Device Physics="YY">
+        <Type ProductCode="#x07d43052" RevisionNo="#x00100000">EL2004</Type>
+        <Name>EL2004 4Ch. Dig. Output {PM}10</Name>
+        <GroupType>DigOut</GroupType>
+        <Sm StartAddress="#x1000" ControlByte="#x26" Enable="1">MBoxOut</Sm>
+        <Sm StartAddress="#x1080" ControlByte="#x22" Enable="1">MBoxIn</Sm>
+        <Sm StartAddress="#x1100" ControlByte="#x00" Enable="1">Outputs</Sm>
+        <Mailbox>
+          <CoE SdoInfo="1" PdoAssign="0" PdoConfig="0" CompleteAccess="0"/>
+        </Mailbox>
+        <RxPdo Sm="2" Fixed="1" Mandatory="1">
+          <Index>#x1600</Index>
+          <Name>Channel 1</Name>
+          <Entry>
+            <Index>#x7000</Index>
+            <SubIndex>1</SubIndex>
+            <BitLen>1</BitLen>
+            <Name>Output</Name>
+            <DataType>BOOL</DataType>
+          </Entry>
+        </RxPdo>
+      </Device>
+    </Devices>
+  </Descriptions>
+</EtherCATInfo>
+"##;
+
+/// Real Beckhoff ESI files declare `encoding="ISO-8859-1"` and store high bytes
+/// (e.g. `±` = `0xB1`) as single Latin-1 bytes, not UTF-8. The build helper must
+/// honour the declared encoding when decoding, so a Latin-1 file is ingested and
+/// generates a well-formed (ASCII-ident) device.
+#[test]
+fn run_ingests_iso_8859_1_encoded_file() {
+    let manifest = tempfile::tempdir().expect("manifest tempdir");
+    let out = tempfile::tempdir().expect("out tempdir");
+
+    // Build the document as ISO-8859-1 bytes: ASCII text plus a literal 0xB1
+    // for `±`. Splicing at the byte level guarantees the file is NOT valid
+    // UTF-8 (0xB1 alone is an invalid UTF-8 continuation byte).
+    let text = PM_NAME_TEMPLATE
+        .replace("{ENC}", "ISO-8859-1")
+        .replace("{PM}", "\u{0001}"); // sentinel we replace byte-wise below
+    let mut bytes: Vec<u8> = Vec::with_capacity(text.len());
+    for b in text.bytes() {
+        if b == 0x01 {
+            bytes.push(0xB1); // `±` in ISO-8859-1
+        } else {
+            bytes.push(b);
+        }
+    }
+    assert!(
+        std::str::from_utf8(&bytes).is_err(),
+        "fixture must be invalid UTF-8 to truly exercise the decode path",
+    );
+    write_esi_bytes(manifest.path(), "el2004.xml", &bytes);
+
+    let inputs = Builder::new()
+        .glob("esi/*.xml")
+        .out_file("devices.rs")
+        .run(manifest.path(), out.path())
+        .expect("ISO-8859-1 file should be ingested");
+
+    let expected_input = manifest.path().join("esi").join("el2004.xml");
+    assert!(inputs.contains(&expected_input), "input should be listed");
+
+    let generated = out.path().join("devices.rs");
+    let source = fs::read_to_string(&generated).expect("read generated");
+    syn::parse_str::<syn::File>(&source).expect("generated source must be valid Rust");
+    assert!(
+        source.contains("pub struct EL2004"),
+        "missing device struct in:\n{source}",
+    );
+}
+
+/// The same document saved as UTF-8 (with `±` as the two-byte UTF-8 sequence)
+/// must still parse — regression guard for the default / UTF-8 decode path.
+#[test]
+fn run_ingests_utf8_encoded_file_with_non_ascii() {
+    let manifest = tempfile::tempdir().expect("manifest tempdir");
+    let out = tempfile::tempdir().expect("out tempdir");
+
+    let text = PM_NAME_TEMPLATE
+        .replace("{ENC}", "UTF-8")
+        .replace("{PM}", "\u{00B1}"); // `±` as a proper UTF-8 char
+    write_esi(manifest.path(), "el2004.xml", &text);
+
+    let _ = Builder::new()
+        .glob("esi/*.xml")
+        .out_file("devices.rs")
+        .run(manifest.path(), out.path())
+        .expect("UTF-8 file should be ingested");
+
+    let generated = out.path().join("devices.rs");
+    let source = fs::read_to_string(&generated).expect("read generated");
+    syn::parse_str::<syn::File>(&source).expect("generated source must be valid Rust");
+    assert!(
+        source.contains("pub struct EL2004"),
+        "missing device struct in:\n{source}",
     );
 }
 

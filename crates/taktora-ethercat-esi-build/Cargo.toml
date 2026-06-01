@@ -19,6 +19,7 @@ taktora-ethercat-esi-codegen-ethercrab = { workspace = true }
 prettyplease                           = { workspace = true }
 thiserror                              = { workspace = true }
 glob                                   = { workspace = true }
+encoding_rs                            = { workspace = true }
 syn                                    = { workspace = true, features = ["full", "parsing"] }
 
 [dev-dependencies]

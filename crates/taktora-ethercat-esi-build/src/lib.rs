@@ -56,6 +56,19 @@ pub enum BuildError {
         source: std::io::Error,
     },
 
+    /// Decoding a matched ESI file's bytes into UTF-8 (honouring its declared
+    /// `<?xml … encoding?>`) produced malformed sequences. Treated as a hard
+    /// error — a real Beckhoff/vendor ESI file should decode cleanly under its
+    /// own declared encoding, so `had_errors` signals a corrupt file or a wrong
+    /// declaration rather than something to silently lossy-decode past.
+    #[error("failed to decode ESI file `{path}` as `{encoding}`: malformed byte sequence")]
+    Decode {
+        /// The ESI file that failed to decode.
+        path: PathBuf,
+        /// The encoding label used to decode (declared, or `UTF-8` by default).
+        encoding: &'static str,
+    },
+
     /// Parsing one of the matched ESI files failed.
     #[error("failed to parse ESI file `{path}`: {source}")]
     Parse {
@@ -213,6 +226,27 @@ impl<B: CodegenBackend> Builder<B> {
         Ok(inputs)
     }
 
+    /// Decode an ESI file's raw bytes into UTF-8, honouring the encoding named
+    /// in its `<?xml … encoding="LABEL"?>` declaration.
+    ///
+    /// The declaration is ASCII, so [`sniff_encoding`] scans the leading bytes
+    /// for `encoding="…"` and maps the label via
+    /// [`encoding_rs::Encoding::for_label`]; an absent declaration or an unknown
+    /// label falls back to UTF-8. [`encoding_rs::Encoding::decode`] strips a BOM
+    /// if present and signals malformed input via `had_errors`, which is treated
+    /// as a hard [`BuildError::Decode`] (see that variant's docs).
+    fn decode(path: &Path, bytes: &[u8]) -> Result<String, BuildError> {
+        let encoding = sniff_encoding(bytes);
+        let (text, _, had_errors) = encoding.decode(bytes);
+        if had_errors {
+            return Err(BuildError::Decode {
+                path: path.to_path_buf(),
+                encoding: encoding.name(),
+            });
+        }
+        Ok(text.into_owned())
+    }
+
     /// Read and parse every input, merging all devices into one [`EsiFile`].
     ///
     /// The combined [`EsiFile::vendor`] is taken from the first input purely for
@@ -227,10 +261,15 @@ impl<B: CodegenBackend> Builder<B> {
         let mut devices = Vec::new();
 
         for path in inputs {
-            let xml = std::fs::read_to_string(path).map_err(|source| BuildError::Io {
+            // Real Beckhoff ESI files are not UTF-8 (they declare
+            // `encoding="ISO-8859-1"` and carry Latin-1 high bytes), so read
+            // raw bytes and decode per the file's own declaration before the
+            // parser — which is UTF-8-only by contract (`REQ_0500`) — sees it.
+            let bytes = std::fs::read(path).map_err(|source| BuildError::Io {
                 path: path.clone(),
                 source,
             })?;
+            let xml = Self::decode(path, &bytes)?;
             let parsed = taktora_ethercat_esi::parse(&xml).map_err(|source| BuildError::Parse {
                 path: path.clone(),
                 source,
@@ -246,4 +285,44 @@ impl<B: CodegenBackend> Builder<B> {
             devices,
         })
     }
+}
+
+/// Sniff the encoding from an XML declaration's `encoding="LABEL"` attribute.
+///
+/// The XML declaration is required to be ASCII regardless of the document
+/// encoding, so it is safe to scan the leading bytes directly. Only the first
+/// `SNIFF_LEN` bytes are inspected (the declaration, if any, is at the very
+/// start). The extracted label is resolved via
+/// [`encoding_rs::Encoding::for_label`]; a missing declaration, a malformed one,
+/// or an unknown label all fall back to UTF-8.
+fn sniff_encoding(bytes: &[u8]) -> &'static encoding_rs::Encoding {
+    /// How many leading bytes to scan for the XML declaration.
+    const SNIFF_LEN: usize = 200;
+
+    let head = &bytes[..bytes.len().min(SNIFF_LEN)];
+    sniff_label(head)
+        .and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes()))
+        .unwrap_or(encoding_rs::UTF_8)
+}
+
+/// Extract the value of an `encoding="…"` (or `encoding='…'`) attribute from the
+/// ASCII prefix of an XML declaration, if present.
+fn sniff_label(head: &[u8]) -> Option<&str> {
+    let text = std::str::from_utf8(head).ok().or_else(|| {
+        // A high byte appears before the (ASCII) declaration ends — unusual, but
+        // still try the ASCII-clean leading run so a declaration is not missed.
+        let ascii_end = head.iter().position(|&b| b >= 0x80).unwrap_or(head.len());
+        std::str::from_utf8(&head[..ascii_end]).ok()
+    })?;
+
+    let after = &text[text.find("encoding")?.saturating_add("encoding".len())..];
+    let after = after.trim_start();
+    let after = after.strip_prefix('=')?.trim_start();
+    let quote = after.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let rest = &after[quote.len_utf8()..];
+    let end = rest.find(quote)?;
+    Some(&rest[..end])
 }

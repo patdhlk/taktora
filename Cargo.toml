@@ -98,6 +98,7 @@ proc-macro2       = "1"
 quote             = "1"
 syn               = { version = "2", default-features = false, features = ["printing"] }
 prettyplease      = "0.2"
+encoding_rs       = "0.8"
 clap              = { version = "4", features = ["derive"] }
 glob              = "0.3"
 
