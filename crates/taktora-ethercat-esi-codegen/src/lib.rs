@@ -128,6 +128,40 @@ pub fn field_ident(raw: &str) -> Result<Ident, CodegenError> {
     make_ident(&naming::snake_field_string(raw))
 }
 
+/// Resolve a PDO into its `snake_case` device-struct field identifier
+/// (`REQ_0511`), used when a multi-PDO device gets one sub-struct field per PDO.
+///
+/// Named PDOs derive from `<Name>` (`"Channel 1"` → `channel_1`); an unnamed PDO
+/// falls back to its mapping index (`0x1A00` → `pdo_1a00`).
+///
+/// # Errors
+///
+/// Returns [`CodegenError::InvalidIdent`] if the sanitised string does not lex
+/// to exactly one identifier token (the sanitisation policy prevents this).
+pub fn pdo_field_ident(name: Option<&str>, index: u16) -> Result<Ident, CodegenError> {
+    make_ident(&naming::pdo_field_string(name, index))
+}
+
+/// Resolve a per-PDO sub-struct identifier as `<device_struct><PdoSegment>`
+/// (`REQ_0511`).
+///
+/// The segment is a PascalCase-ish rendering of the PDO `<Name>` (`"Channel 1"`
+/// → `Channel1`, giving `EL2004Channel1`) or, when unnamed, its mapping index
+/// (`0x1A00` → `Pdo1a00`).
+///
+/// # Errors
+///
+/// Returns [`CodegenError::InvalidIdent`] if the concatenation does not lex to
+/// exactly one identifier token (the sanitisation policy prevents this).
+pub fn pdo_struct_ident(
+    device_struct: &Ident,
+    name: Option<&str>,
+    index: u16,
+) -> Result<Ident, CodegenError> {
+    let segment = naming::pdo_struct_segment(name, index);
+    make_ident(&format!("{device_struct}{segment}"))
+}
+
 /// Whether every resolved device has a distinct `const_ident`. Used only by the
 /// debug-assert guarding the (base ident, revision)-uniqueness invariant in
 /// [`resolve_devices`]; isolated so the assertion expression stays side-effect

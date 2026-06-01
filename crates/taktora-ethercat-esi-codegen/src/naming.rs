@@ -114,6 +114,52 @@ pub fn snake_field_string(raw: &str) -> String {
     sanitise_ident(out.trim_matches('_'))
 }
 
+/// The `snake_case` field identifier string for a PDO sub-struct field
+/// (`REQ_0511`).
+///
+/// Named PDOs derive from their `<Name>` (`"Channel 1"` → `channel_1`); an
+/// unnamed PDO falls back to its mapping index (`0x1A00` → `pdo_1a00`). The
+/// result is run through the same field-name sanitisation as entry fields, so
+/// it is always a valid, bare Rust identifier.
+pub fn pdo_field_string(name: Option<&str>, index: u16) -> String {
+    name.map_or_else(|| format!("pdo_{index:04x}"), snake_field_string)
+}
+
+/// The PascalCase-ish struct-name segment appended to a device struct ident to
+/// form a per-PDO sub-struct ident (`REQ_0511`).
+///
+/// Named PDOs derive from their `<Name>` with separators dropped and each word
+/// capitalised (`"Channel 1"` → `Channel1`, `"AI Inputs Channel 2"` →
+/// `AiInputsChannel2`); an unnamed PDO falls back to its mapping index
+/// (`0x1A00` → `Pdo1a00`). The result is char-sanitised so the concatenation
+/// `<Dev><Segment>` stays a valid identifier.
+pub fn pdo_struct_segment(name: Option<&str>, index: u16) -> String {
+    let raw = name.map_or_else(|| format!("Pdo{index:04x}"), pascal_segment);
+    sanitise_ident(&raw)
+}
+
+/// Build a PascalCase-ish segment from a raw name: split on every run of
+/// non-alphanumeric characters and on lower→upper boundaries, capitalise each
+/// word's first character, and concatenate. Digits stay attached to the word
+/// they follow (`"Channel 1"` → `Channel1`).
+fn pascal_segment(raw: &str) -> String {
+    // Reuse the snake segmentation, then PascalCase each underscore-delimited
+    // word so the two helpers segment identically.
+    let snake = snake_field_string(raw);
+    let mut out = String::with_capacity(snake.len());
+    for word in snake.split('_').filter(|w| !w.is_empty()) {
+        let mut chars = word.chars();
+        if let Some(first) = chars.next() {
+            out.extend(first.to_uppercase());
+            out.push_str(chars.as_str());
+        }
+    }
+    if out.is_empty() {
+        out.push('_');
+    }
+    out
+}
+
 /// The full-width revision suffix for a revision number (`REQ_0512`): `REV{rev:08X}`.
 pub fn revision_suffix(revision: u32) -> String {
     format!("REV{revision:08X}")
@@ -250,6 +296,28 @@ mod tests {
         assert_eq!(snake_field_string("Type"), "type_");
         assert_eq!(snake_field_string("1Ch"), "_1_ch");
         assert_eq!(snake_field_string(""), "_");
+    }
+
+    #[test]
+    fn pdo_field_from_name_and_index() {
+        assert_eq!(pdo_field_string(Some("Channel 1"), 0x1600), "channel_1");
+        assert_eq!(
+            pdo_field_string(Some("AI Inputs Channel 2"), 0x1A01),
+            "ai_inputs_channel_2"
+        );
+        // Unnamed PDO falls back to its index.
+        assert_eq!(pdo_field_string(None, 0x1A00), "pdo_1a00");
+    }
+
+    #[test]
+    fn pdo_struct_segment_from_name_and_index() {
+        assert_eq!(pdo_struct_segment(Some("Channel 1"), 0x1600), "Channel1");
+        assert_eq!(
+            pdo_struct_segment(Some("AI Inputs Channel 2"), 0x1A01),
+            "AiInputsChannel2"
+        );
+        // Unnamed PDO falls back to its index.
+        assert_eq!(pdo_struct_segment(None, 0x1A00), "Pdo1a00");
     }
 
     #[test]
