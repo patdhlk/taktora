@@ -1,0 +1,41 @@
+[package]
+name         = "taktora-motion-core"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Allocation-free, no_std real-time motion trajectory core (profiles, virtual master, electronic gearing) for the taktora runtime."
+
+[dependencies]
+# `libm` supplies the `f64` transcendentals (`sqrt`, `fabs`, `fmod`) that
+# `core` does not provide under `no_std`. Bit-reproducible across host and
+# target, which keeps the trajectory output identical on the dev box and the
+# deployment board (matters for the differential oracle and HIL replay).
+libm = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"
+# `f64::mul_add` (FMA) lives in `std`, not `core`, so it is unavailable under
+# `no_std`; fusing would also change rounding versus the `libm` reference and
+# break the bit-reproducible-across-targets posture this crate depends on.
+suboptimal_flops        = "allow"
+# The S-curve uses the conventional kinematic time symbols (Ta/Tv/Tj and their
+# a_max-reached variants); they are deliberately similar.
+similar_names           = "allow"
