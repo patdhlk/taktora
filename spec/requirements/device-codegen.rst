@@ -297,7 +297,7 @@ ethercrab backend
    sanitised product ident (per :need:`REQ_0511` and
    :need:`REQ_0512`), deriving ``Debug + Default + Clone``.
 
-.. req:: SubDeviceIdentity const emitted per device
+.. req:: Identity const emitted per device
    :id: REQ_0522
    :status: open
    :satisfies: FEAT_0053
@@ -343,7 +343,7 @@ ethercrab backend
    The module root emitted by ``emit_module_root`` shall expose a
    ``registry!()`` declarative macro (or equivalent generated
    ``static`` table) that maps each emitted device's
-   ``SubDeviceIdentity`` to a factory closure returning
+   ``Identity`` to a factory closure returning
    ``Box<dyn EsiDevice>``. Identity-based dispatch in downstream
    code (e.g. ``taktora-connector-ethercat``) shall be reducible to a
    ``HashMap`` lookup against this table.

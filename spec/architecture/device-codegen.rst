@@ -683,7 +683,7 @@ requirement or feature it answers.
 
 The crosscutting axes are owned by section 1 (quality goals) and
 section 2 (constraints). The two persistent runtime concepts —
-the ``EsiDevice`` trait and the ``SubDeviceIdentity`` const — both
+the ``EsiDevice`` trait and the per-device ``Identity`` const — both
 live in :need:`BB_0063` and are referenced from generated code,
 adapters, and dispatch registries alike. They are the contract
 the rest of the toolchain orbits.
