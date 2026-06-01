@@ -12,7 +12,8 @@ use crate::state::{AxisState, AxisStatus};
 ///
 /// Superimposed motion is *not* an arm here — it cannot be (a `Motion` holding
 /// a `Motion` would need `Box`): it is realized as an additive corrective
-/// overlay on the [`Axis`](crate::Axis) itself (see [`Axis::superimpose`]). The
+/// overlay on the [`Axis`](crate::Axis) itself (see
+/// [`Axis::superimpose`](crate::Axis::superimpose)). The
 /// enum is `#[non_exhaustive]` so future generators slot in without a breaking
 /// change.
 #[derive(Debug, Clone, Copy, PartialEq)]

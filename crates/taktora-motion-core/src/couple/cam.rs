@@ -66,7 +66,7 @@ use crate::state::AxisState;
 ///
 /// The polynomial is expressed in the **local** master coordinate
 /// `u = master_pos − master_start`, so a piece's coefficients are independent of
-/// where it sits in the table. See the [module docs](self) for the coefficient
+/// where it sits in the table. See the module-level documentation for the coefficient
 /// layout.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CamSegment {
@@ -83,7 +83,7 @@ impl CamSegment {
     ///
     /// `coeffs` is `[c0, c1, c2, c3, c4, c5]` of the slave-position polynomial
     /// in the local coordinate `u = master_pos − master_start` (see the
-    /// [module docs](self)). `const` so whole tables can be `static`.
+    /// module-level documentation). `const` so whole tables can be `static`.
     #[inline]
     #[must_use]
     pub const fn new(coeffs: [f64; 6], master_start: f64) -> Self {
@@ -213,7 +213,7 @@ impl CamTable {
 ///
 /// Construct with [`Cam::new`]; drive with [`Cam::update`] once per control
 /// cycle. The slave's velocity and acceleration are produced by the chain rule
-/// (see the [module docs](self)), so the coupling is same-cycle coherent — the
+/// (see the module-level documentation), so the coupling is same-cycle coherent — the
 /// master's set-state for *this* cycle yields the slave's set-state for the same
 /// cycle.
 #[derive(Debug, Clone, Copy, PartialEq)]
