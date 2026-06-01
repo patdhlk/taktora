@@ -18,7 +18,7 @@ use clap::Parser;
 use taktora_connector_core::{ChannelDescriptor, ConnectorError, PayloadCodec};
 use taktora_connector_ethercat::{
     EthercatConnector, EthercatConnectorOptions, EthercatRouting, EthercrabBusDriver, PdoDirection,
-    connector::EthercatState, declare_pdu_storage,
+    SubDeviceMap, connector::EthercatState, declare_pdu_storage,
 };
 use taktora_connector_host::Connector;
 use taktora_ethercat_esi_rt::{EsiDevice, Lsb0};
@@ -63,6 +63,32 @@ const SUBDEV_EL2004: u16 = 0x1002;
 
 /// 4 digital output bits, one PDI byte.
 const ROUTING_BITS_EL2004: u16 = 4;
+
+/// Working-counter mapping for WKC-based health (`REQ_0329`). Each
+/// SubDevice declares its expected per-cycle WKC contribution: an
+/// input-only terminal (TxPDO, master reads) is +2, an output-only
+/// terminal (RxPDO, master writes) is +1. EL1008 (input) + EL2004
+/// (output) ⇒ expected 3, which matches the bus's observed WKC.
+///
+/// The PDO-entry lists are empty: EL1008/EL2004 have FIXED PDO
+/// mappings, so we do no SDO re-assignment (an empty list is a no-op
+/// in the driver) — we only declare the expected WKC. Without this
+/// map the connector's expected WKC is 0 and a dead bus would still
+/// read as healthy.
+static PDO_MAP: &[SubDeviceMap] = &[
+    SubDeviceMap {
+        address: SUBDEV,
+        rx_pdos: &[],
+        tx_pdos: &[],
+        expected_wkc: 2,
+    },
+    SubDeviceMap {
+        address: SUBDEV_EL2004,
+        rx_pdos: &[],
+        tx_pdos: &[],
+        expected_wkc: 1,
+    },
+];
 
 /// Toggle cadence for the output bit during normal and drill modes.
 const OUTPUT_TOGGLE_PERIOD: Duration = Duration::from_millis(500);
@@ -181,6 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = EthercatConnectorOptions::builder()
         .network_interface(&cli.nic)
         .cycle_time(Duration::from_millis(2))
+        .pdo_map(PDO_MAP)
         .build();
 
     // 2. Driver. EthercrabBusDriver wraps `ethercrab::MainDevice`

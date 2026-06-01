@@ -17,7 +17,11 @@ taktora-executor                = "0.1"
 taktora-connector-core          = "0.2"
 taktora-connector-host          = "0.1"
 taktora-connector-transport-iox = "0.1"
-taktora-connector-ethercat      = { version = "0.1", features = ["bus-integration"] }
+# NOTE: 0.2 (not 0.1) so the `[patch.crates-io]` path override (local 0.2.0)
+# actually applies — `^0.1` rejects the 0.2.0 patch and silently falls back to
+# the stale published 0.1.x connector, which is what produced the bogus WKC
+# `expected 9` on the bus. Local-only demo, so a published 0.2 is not required.
+taktora-connector-ethercat      = { version = "0.2", features = ["bus-integration"] }
 
 # ESI device-driver toolchain. These two crates are unpublished, so they are
 # path-only here (a local hardware demo, never built from crates.io). The
