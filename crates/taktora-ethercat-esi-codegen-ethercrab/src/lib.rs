@@ -312,9 +312,42 @@ impl CodegenBackend for EthercrabBackend {
         })
     }
 
-    fn emit_module_root(&self, _devices: &[Device]) -> Result<TokenStream, CodegenError> {
-        // Registry emission is deferred to a later slice (REQ_0523).
-        Ok(TokenStream::new())
+    fn emit_module_root(&self, devices: &[Device]) -> Result<TokenStream, CodegenError> {
+        // A static table mapping each device's already-emitted identity const to
+        // a non-capturing factory closure (which coerces to `fn() -> Box<dyn
+        // EsiDevice>`), plus an O(n)-scan `device_for` lookup. The slice + linear
+        // `find` is trivially reducible to a `HashMap<Identity, _>` lookup
+        // downstream should device counts ever grow (`REQ_0525`). Entries follow
+        // the resolved device order, which `generate` fixes order-independently.
+        let entries = devices.iter().map(|device| {
+            let struct_ident = &device.struct_ident;
+            let const_ident = &device.const_ident;
+            quote! {
+                (
+                    #const_ident,
+                    || Box::new(#struct_ident::default())
+                        as Box<dyn taktora_ethercat_esi_rt::EsiDevice>
+                )
+            }
+        });
+
+        Ok(quote! {
+            /// All devices generated in this module, keyed by EtherCAT identity.
+            /// A linear scan over this slice is reducible to a `HashMap` lookup.
+            pub static REGISTRY: &[(
+                taktora_ethercat_esi_rt::Identity,
+                fn() -> Box<dyn taktora_ethercat_esi_rt::EsiDevice>,
+            )] = &[
+                #(#entries,)*
+            ];
+
+            /// Construct a fresh device instance for the given identity, if known.
+            pub fn device_for(
+                identity: taktora_ethercat_esi_rt::Identity,
+            ) -> Option<Box<dyn taktora_ethercat_esi_rt::EsiDevice>> {
+                REGISTRY.iter().find(|(id, _)| *id == identity).map(|(_, make)| make())
+            }
+        })
     }
 }
 

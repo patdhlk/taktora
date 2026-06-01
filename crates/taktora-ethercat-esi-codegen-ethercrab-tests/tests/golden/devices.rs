@@ -43,3 +43,23 @@ impl taktora_ethercat_esi_rt::EsiDevice for EL3001_like {
         Ok(())
     }
 }
+/// All devices generated in this module, keyed by EtherCAT identity.
+/// A linear scan over this slice is reducible to a `HashMap` lookup.
+pub static REGISTRY: &[(
+    taktora_ethercat_esi_rt::Identity,
+    fn() -> Box<dyn taktora_ethercat_esi_rt::EsiDevice>,
+)] = &[
+    (
+        EL3001_LIKE_REV00100000,
+        || {
+            Box::new(EL3001_like::default())
+                as Box<dyn taktora_ethercat_esi_rt::EsiDevice>
+        },
+    ),
+];
+/// Construct a fresh device instance for the given identity, if known.
+pub fn device_for(
+    identity: taktora_ethercat_esi_rt::Identity,
+) -> Option<Box<dyn taktora_ethercat_esi_rt::EsiDevice>> {
+    REGISTRY.iter().find(|(id, _)| *id == identity).map(|(_, make)| make())
+}
