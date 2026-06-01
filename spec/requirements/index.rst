@@ -33,6 +33,10 @@ top-level features:
   ``&'static`` bus tables ``taktora-connector-ethercat`` consumers
   hand-write today, composing on top of the ESI device toolchain.
   See :doc:`ethercat-netcfg`.
+* :need:`FEAT_0090` "Real-time motion control" — soft-real-time,
+  allocation-free trajectory generation (profiles, electronic gearing,
+  camming, flying saw) feeding CiA 402 drives in CSP mode, layered on
+  the taktora runtime. See :doc:`motion`.
 
 Each ``req`` directive ``:satisfies:`` one ``feat`` parent; each
 capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
@@ -47,6 +51,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    canopen-codegen
    logging
    ethercat-netcfg
+   motion
 
 Requirements at a glance
 ------------------------
