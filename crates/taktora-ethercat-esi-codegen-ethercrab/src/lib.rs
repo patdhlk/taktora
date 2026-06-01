@@ -159,6 +159,28 @@ fn partition_pdos(pdos: &[Pdo]) -> (Vec<&Pdo>, Vec<&Pdo>) {
     pdos.iter().partition(|p| p.fixed || p.mandatory)
 }
 
+/// Classify a whole direction's PDOs into the final always-on set and the
+/// genuine (≥2-PDO) alternative groups.
+///
+/// The always-on set is `(Fixed || Mandatory)` PDOs ∪ singleton candidates (a
+/// non-fixed/non-mandatory PDO that is the only candidate in its Sm/`<Exclude>`
+/// group is not an alternative — see [`classify_alternatives`]). It is returned
+/// in original declaration order so the running bit-offset threads correctly:
+/// every always-on PDO — reclassified singleton or not — takes its place in the
+/// offset accumulator in declaration order.
+fn classify_direction(pdos: &[Pdo]) -> (Vec<&Pdo>, Vec<Vec<&Pdo>>) {
+    let (_, candidates) = partition_pdos(pdos);
+    let (singletons, genuine) = classify_alternatives(&candidates);
+
+    let is_singleton = |p: &Pdo| singletons.iter().any(|s| std::ptr::eq(*s, p));
+    let always_on: Vec<&Pdo> = pdos
+        .iter()
+        .filter(|p| p.fixed || p.mandatory || is_singleton(p))
+        .collect();
+
+    (always_on, genuine)
+}
+
 /// Union-find `find` with path-halving over a `parent` slice.
 fn uf_find(parent: &mut [usize], mut i: usize) -> usize {
     while parent[i] != i {
@@ -229,6 +251,45 @@ fn group_alternatives<'a>(candidates: &[&'a Pdo]) -> Vec<Vec<&'a Pdo>> {
         .collect()
 }
 
+/// Refine the alternative-candidate grouping into real alternatives vs.
+/// mis-grouped always-on PDOs.
+///
+/// A candidate group of size 1 is NOT an alternative: a non-`Fixed`/non-
+/// `Mandatory` PDO that is the only candidate competing for its sync manager
+/// (or `<Exclude>` component) is just an always-on (default) PDO whose mapping
+/// happens to be reconfigurable. Only a group of **≥2** candidates is a genuine
+/// alternative set (mutually-exclusive mappings competing for one Sm, or
+/// `<Exclude>`-linked).
+///
+/// Returns `(singletons, genuine_groups)`:
+/// - `singletons`: the lone-candidate PDOs to fold back into the always-on set,
+///   in declaration order;
+/// - `genuine_groups`: the ≥2-PDO groups, in first-appearance order, each in
+///   declaration order.
+fn classify_alternatives<'a>(candidates: &[&'a Pdo]) -> (Vec<&'a Pdo>, Vec<Vec<&'a Pdo>>) {
+    let groups = group_alternatives(candidates);
+    let mut singletons: Vec<&Pdo> = Vec::new();
+    let mut genuine: Vec<Vec<&Pdo>> = Vec::new();
+    for group in groups {
+        if group.len() == 1 {
+            singletons.push(group[0]);
+        } else {
+            genuine.push(group);
+        }
+    }
+    // Preserve declaration order among reclassified singletons (the
+    // first-appearance group order already follows declaration order, but a
+    // group's first member is not necessarily its lowest declaration index, so
+    // sort defensively by the candidate-slice position).
+    singletons.sort_by_key(|p| {
+        candidates
+            .iter()
+            .position(|c| std::ptr::eq(*c, *p))
+            .unwrap_or(usize::MAX)
+    });
+    (singletons, genuine)
+}
+
 /// Resolve one alternative group into [`ResolvedAlternative`]s. Every
 /// alternative's entries are laid out starting at `base_offset` (the running
 /// offset after this direction's always-on PDOs), since exactly one alternative
@@ -259,37 +320,38 @@ fn resolve_alt_group(
     })
 }
 
-/// Resolve a direction's alternative groups. Always-on PDOs (already resolved)
-/// occupy `base_offset` bits; the alternative group's variants start there.
+/// Resolve a direction's genuine alternative groups. Always-on PDOs (already
+/// resolved) occupy `base_offset` bits; the alternative group's variants start
+/// there.
 ///
-/// The spec-required shape is one alternative group per direction (the master
-/// selects a single PDO assignment via 0x1C12/0x1C13), so the single group is
-/// unlabelled (bare `pdo` / `<Dev>PdoAssignment`). A direction that resolves to
-/// MORE THAN ONE group is rejected with
-/// [`CodegenError::MultipleAlternativeGroups`] rather than miscompiled (see the
-/// inline `TODO`).
+/// `genuine` carries only ≥2-PDO groups (singleton candidates were already
+/// reclassified as always-on by [`classify_direction`]). The spec-required
+/// shape is at most one genuine group per direction (the master selects a
+/// single PDO assignment via 0x1C12/0x1C13), so the single group is unlabelled
+/// (bare `pdo` / `<Dev>PdoAssignment`). A direction with MORE THAN ONE genuine
+/// group is rejected with [`CodegenError::MultipleAlternativeGroups`] rather
+/// than miscompiled (see the inline `TODO`).
 fn resolve_alt_groups(
-    candidates: &[&Pdo],
+    genuine: &[Vec<&Pdo>],
     device_struct: &Ident,
     base_offset: usize,
     direction: &'static str,
 ) -> Result<Vec<ResolvedAltGroup>, CodegenError> {
-    let groups = group_alternatives(candidates);
     // TODO: support more than one alternative group per direction by sequencing
     // each group's `base_offset` after the previous group's widest variant
     // (instead of giving every group the same `base_offset`). Until then a
     // multi-group direction is rejected: `direction_len` SUMS the widest-per-
     // group while `resolve_alt_group` lays every group at the same offset, so
     // two groups would alias the same bits (silent data corruption).
-    if groups.len() > 1 {
+    if genuine.len() > 1 {
         return Err(CodegenError::MultipleAlternativeGroups {
             device: device_struct.to_string(),
             direction,
         });
     }
-    // Single-group (the only spec-required case) stays unlabelled: bare `pdo` /
-    // `<Dev>PdoAssignment`.
-    groups
+    // Single genuine group (the only spec-required case) stays unlabelled: bare
+    // `pdo` / `<Dev>PdoAssignment`.
+    genuine
         .iter()
         .map(|group| resolve_alt_group(group, device_struct, base_offset, None))
         .collect()
@@ -375,18 +437,20 @@ impl CodegenBackend for EthercrabBackend {
         let struct_ident = &device.struct_ident;
         let const_ident = &device.const_ident;
 
-        // Partition each direction: `Fixed || Mandatory` PDOs are always-on and
-        // keep the existing T8 flat/sub-struct treatment; the rest are
-        // alternative candidates the master chooses among at bring-up
-        // (0x1C12/0x1C13), so they become a closed sum type (REQ_0523/0524).
-        let (in_fixed, in_alt) = partition_pdos(device.tx_pdos);
-        let (out_fixed, out_alt) = partition_pdos(device.rx_pdos);
+        // Classify each direction: the always-on set is `Fixed || Mandatory`
+        // PDOs PLUS any non-fixed/non-mandatory PDO that is the lone candidate
+        // in its sync-manager (or `<Exclude>`) group — such a singleton is not
+        // an alternative, just a default PDO whose mapping is reconfigurable.
+        // Only a group of ≥2 genuinely-competing PDOs becomes a closed sum type
+        // the master chooses among at bring-up (0x1C12/0x1C13; REQ_0523/0524).
+        let (in_always_on, in_genuine) = classify_direction(device.tx_pdos);
+        let (out_always_on, out_genuine) = classify_direction(device.rx_pdos);
 
-        let (inputs, input_base_bits) = resolve_direction(&in_fixed, struct_ident)?;
-        let (outputs, output_base_bits) = resolve_direction(&out_fixed, struct_ident)?;
+        let (inputs, input_base_bits) = resolve_direction(&in_always_on, struct_ident)?;
+        let (outputs, output_base_bits) = resolve_direction(&out_always_on, struct_ident)?;
 
-        let in_groups = resolve_alt_groups(&in_alt, struct_ident, input_base_bits, "Tx")?;
-        let out_groups = resolve_alt_groups(&out_alt, struct_ident, output_base_bits, "Rx")?;
+        let in_groups = resolve_alt_groups(&in_genuine, struct_ident, input_base_bits, "Tx")?;
+        let out_groups = resolve_alt_groups(&out_genuine, struct_ident, output_base_bits, "Rx")?;
 
         // A direction with more than one always-on PDO is split into per-PDO
         // sub-structs so that entry names repeated across channels (e.g. each
@@ -1108,5 +1172,96 @@ mod tests {
         let groups = group_alternatives(&candidates);
         assert_eq!(groups.len(), 1, "exclude chain merges A-B-C");
         assert_eq!(groups[0].len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Classification (refined T9): a candidate group of size 1 is NOT an
+    // alternative — it is an always-on PDO whose mapping happens to be
+    // reconfigurable. Only groups of >= 2 candidates are genuine alternatives.
+    // -----------------------------------------------------------------------
+
+    /// A single non-fixed/non-mandatory candidate (the only one in its Sm group)
+    /// is reclassified as always-on, not a 1-variant alternative. No genuine
+    /// alternative group survives.
+    #[test]
+    fn singleton_candidate_is_reclassified_as_always_on() {
+        let candidates = [alt_pdo(0x1A00, "Solo", Some(3), false, false, vec![])];
+        let refs: Vec<&Pdo> = candidates.iter().collect();
+        let (singletons, genuine) = classify_alternatives(&refs);
+        assert_eq!(
+            singletons.iter().map(|p| p.index).collect::<Vec<_>>(),
+            vec![0x1A00],
+            "the lone candidate is reclassified as always-on"
+        );
+        assert!(genuine.is_empty(), "no genuine (>=2) alternative group");
+    }
+
+    /// Two candidates on the SAME Sm (the ALT shape) stay a genuine alternative
+    /// group; nothing is reclassified as always-on.
+    #[test]
+    fn shared_sm_pair_stays_a_genuine_alternative() {
+        let candidates = [
+            alt_pdo(0x1A00, "Standard", Some(3), false, false, vec![]),
+            alt_pdo(0x1A01, "Compact", Some(3), false, false, vec![]),
+        ];
+        let refs: Vec<&Pdo> = candidates.iter().collect();
+        let (singletons, genuine) = classify_alternatives(&refs);
+        assert!(singletons.is_empty(), "no singleton reclassified");
+        assert_eq!(genuine.len(), 1, "one genuine alternative group");
+        assert_eq!(genuine[0].len(), 2);
+    }
+
+    /// The EL1262 shape: two candidates on DISTINCT Sm (3 and 4), no Exclude →
+    /// two singleton groups → BOTH reclassified as always-on, NO genuine
+    /// alternative group. Declaration order is preserved.
+    #[test]
+    fn distinct_sm_singletons_are_both_always_on() {
+        let candidates = [
+            alt_pdo(0x1A00, "ChA", Some(3), false, false, vec![]),
+            alt_pdo(0x1A01, "ChB", Some(4), false, false, vec![]),
+        ];
+        let refs: Vec<&Pdo> = candidates.iter().collect();
+        let (singletons, genuine) = classify_alternatives(&refs);
+        assert_eq!(
+            singletons.iter().map(|p| p.index).collect::<Vec<_>>(),
+            vec![0x1A00, 0x1A01],
+            "both lone candidates reclassified as always-on, in declaration order"
+        );
+        assert!(genuine.is_empty(), "no genuine alternative group");
+    }
+
+    /// Two genuine (>=2) groups in one direction survive classification as two
+    /// genuine groups (still rejected downstream by `MultipleAlternativeGroups`).
+    #[test]
+    fn two_multi_pdo_groups_both_genuine() {
+        let candidates = [
+            alt_pdo(0x1A00, "A0", Some(3), false, false, vec![]),
+            alt_pdo(0x1A01, "A1", Some(3), false, false, vec![]),
+            alt_pdo(0x1A10, "B0", Some(4), false, false, vec![]),
+            alt_pdo(0x1A11, "B1", Some(4), false, false, vec![]),
+        ];
+        let refs: Vec<&Pdo> = candidates.iter().collect();
+        let (singletons, genuine) = classify_alternatives(&refs);
+        assert!(singletons.is_empty(), "nothing reclassified");
+        assert_eq!(genuine.len(), 2, "two genuine alternative groups");
+    }
+
+    /// A mix: one genuine pair (Sm 3) plus one lone candidate (Sm 4). The lone
+    /// candidate becomes always-on; the pair stays a genuine group.
+    #[test]
+    fn mixed_singleton_and_genuine_group() {
+        let candidates = [
+            alt_pdo(0x1A00, "Pair0", Some(3), false, false, vec![]),
+            alt_pdo(0x1A01, "Pair1", Some(3), false, false, vec![]),
+            alt_pdo(0x1A10, "Solo", Some(4), false, false, vec![]),
+        ];
+        let refs: Vec<&Pdo> = candidates.iter().collect();
+        let (singletons, genuine) = classify_alternatives(&refs);
+        assert_eq!(
+            singletons.iter().map(|p| p.index).collect::<Vec<_>>(),
+            vec![0x1A10]
+        );
+        assert_eq!(genuine.len(), 1);
+        assert_eq!(genuine[0].len(), 2);
     }
 }

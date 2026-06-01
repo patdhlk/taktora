@@ -406,3 +406,128 @@ fn alt_output_is_valid_rust() {
     // Re-parse the pretty-printed output as a final guard.
     let _: syn::File = syn::parse_str(&src).expect("ALT module is valid Rust");
 }
+
+// ---------------------------------------------------------------------------
+// Refined classification (the EL1262 unblock): a non-fixed/non-mandatory PDO
+// that is the ONLY candidate in its sync-manager group is NOT an alternative;
+// it is an always-on PDO whose mapping happens to be reconfigurable.
+// ---------------------------------------------------------------------------
+
+/// The EL1262 shape: two non-fixed/non-mandatory `TxPdo`s on DISTINCT sync
+/// managers (Sm 3 and Sm 4), no `<Exclude>`. They coexist (one per channel) —
+/// they are not alternatives of each other. Each is the lone candidate in its
+/// Sm group, so BOTH must be reclassified as always-on (per-PDO sub-structs),
+/// with NO `PdoAssignment` enum and NO `MultipleAlternativeGroups` error.
+const EL1262_SHAPE_XML: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
+<EtherCATInfo>
+  <Vendor><Id>#x00000002</Id></Vendor>
+  <Descriptions><Devices>
+    <Device>
+      <Type ProductCode="#x00020000" RevisionNo="#x00000001">EL1262LIKE</Type>
+      <TxPdo Sm="3" Fixed="0" Mandatory="0">
+        <Index>#x1a00</Index>
+        <Name>Channel 1</Name>
+        <Entry><Index>#x6000</Index><SubIndex>1</SubIndex><BitLen>16</BitLen><Name>Value</Name></Entry>
+      </TxPdo>
+      <TxPdo Sm="4" Fixed="0" Mandatory="0">
+        <Index>#x1a20</Index>
+        <Name>Channel 2</Name>
+        <Entry><Index>#x6010</Index><SubIndex>1</SubIndex><BitLen>16</BitLen><Name>Value</Name></Entry>
+      </TxPdo>
+    </Device>
+  </Devices></Descriptions>
+</EtherCATInfo>"##;
+
+#[test]
+fn distinct_sm_singletons_emit_no_enum() {
+    let src = source_from_xml(EL1262_SHAPE_XML);
+    assert!(
+        !src.contains("PdoAssignment"),
+        "two lone candidates on distinct SMs must NOT produce an alternative enum:\n{src}"
+    );
+    assert!(
+        !src.contains("enum "),
+        "no choice enum should be emitted for coexisting singleton PDOs:\n{src}"
+    );
+}
+
+#[test]
+fn distinct_sm_singletons_become_per_pdo_substructs() {
+    let src = source_from_xml(EL1262_SHAPE_XML);
+    // Two always-on PDOs in one direction → per-PDO sub-structs (the T8 split
+    // shape), one per channel, both fields living on the device struct.
+    assert!(
+        src.contains("pub struct EL1262LIKEChannel1")
+            && src.contains("pub struct EL1262LIKEChannel2"),
+        "both reclassified PDOs should become per-PDO sub-structs:\n{src}"
+    );
+    let sq = squash(&src);
+    assert!(
+        sq.contains("pubchannel_1:EL1262LIKEChannel1")
+            && sq.contains("pubchannel_2:EL1262LIKEChannel2"),
+        "device struct should carry both sub-struct fields:\n{src}"
+    );
+}
+
+#[test]
+fn distinct_sm_singletons_thread_running_offset() {
+    // Channel 1 occupies bits 0..16; Channel 2 reads at the running offset 16.
+    let src = source_from_xml(EL1262_SHAPE_XML);
+    let sq = squash(&src);
+    assert!(
+        sq.contains("bits[0usize..16usize].load_le::<u16>()"),
+        "channel 1 reads bits 0..16:\n{src}"
+    );
+    assert!(
+        sq.contains("bits[16usize..32usize].load_le::<u16>()"),
+        "channel 2 reads at the running offset 16..32:\n{src}"
+    );
+}
+
+/// Two SEPARATE >=2-PDO alternative groups in one direction (Sm 3 has two
+/// competing PDOs AND Sm 4 has two competing PDOs) is a genuinely-rare case
+/// still rejected with `MultipleAlternativeGroups` (no multi-group offset
+/// threading is implemented here).
+const TWO_GENUINE_GROUPS_XML: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
+<EtherCATInfo>
+  <Vendor><Id>#x00000002</Id></Vendor>
+  <Descriptions><Devices>
+    <Device>
+      <Type ProductCode="#x00030000" RevisionNo="#x00000001">TWOGRP</Type>
+      <TxPdo Sm="3" Fixed="0" Mandatory="0">
+        <Index>#x1a00</Index><Name>A0</Name>
+        <Entry><Index>#x6000</Index><SubIndex>1</SubIndex><BitLen>16</BitLen><Name>Value</Name></Entry>
+      </TxPdo>
+      <TxPdo Sm="3" Fixed="0" Mandatory="0">
+        <Index>#x1a01</Index><Name>A1</Name>
+        <Entry><Index>#x6000</Index><SubIndex>1</SubIndex><BitLen>8</BitLen><Name>Value</Name></Entry>
+      </TxPdo>
+      <TxPdo Sm="4" Fixed="0" Mandatory="0">
+        <Index>#x1a10</Index><Name>B0</Name>
+        <Entry><Index>#x6010</Index><SubIndex>1</SubIndex><BitLen>16</BitLen><Name>Value</Name></Entry>
+      </TxPdo>
+      <TxPdo Sm="4" Fixed="0" Mandatory="0">
+        <Index>#x1a11</Index><Name>B1</Name>
+        <Entry><Index>#x6010</Index><SubIndex>1</SubIndex><BitLen>8</BitLen><Name>Value</Name></Entry>
+      </TxPdo>
+    </Device>
+  </Devices></Descriptions>
+</EtherCATInfo>"##;
+
+#[test]
+fn two_genuine_alternative_groups_are_still_rejected() {
+    use taktora_ethercat_esi_codegen::CodegenError;
+    let esi = taktora_ethercat_esi::parse(TWO_GENUINE_GROUPS_XML).expect("fixture parses");
+    let err = generate(&esi, &EthercrabBackend)
+        .expect_err("two genuine alternative groups in one direction must be rejected");
+    assert!(
+        matches!(
+            err,
+            CodegenError::MultipleAlternativeGroups {
+                direction: "Tx",
+                ..
+            }
+        ),
+        "expected MultipleAlternativeGroups for Tx, got {err:?}"
+    );
+}
