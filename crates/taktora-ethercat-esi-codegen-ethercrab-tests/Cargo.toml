@@ -1,0 +1,21 @@
+[package]
+name         = "taktora-ethercat-esi-codegen-ethercrab-tests"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "End-to-end landing pad for the EtherCAT ESI device-codegen toolchain: a build.rs runs taktora-ethercat-esi-build over an ESI XML fixture, the generated module is include!d, and its decode_inputs is exercised on a known PDI bit-pattern. Not published; proves the whole codegen spine compiles and runs in one `cargo test`."
+publish      = false
+
+[dependencies]
+taktora-ethercat-esi-rt = { workspace = true }
+bitvec                  = { workspace = true }
+
+[build-dependencies]
+taktora-ethercat-esi-build = { workspace = true }
