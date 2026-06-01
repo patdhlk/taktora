@@ -47,6 +47,35 @@ fn parse_esi_bool(raw: Option<&String>) -> bool {
     matches!(raw.map(|s| s.trim()), Some("1" | "true" | "TRUE"))
 }
 
+// ── localized name helpers ────────────────────────────────────────────────────
+
+/// A `<Name>` element, possibly carrying a locale id. Real Beckhoff ESI repeats
+/// `<Name LcId="1033">` (English) / `<Name LcId="1031">` (German); CDATA content
+/// is captured by quick-xml's `$text`.
+#[derive(Deserialize)]
+struct NameDto {
+    #[serde(rename = "@LcId", default)]
+    lc_id: Option<u32>,
+    #[serde(rename = "$text", default)]
+    text: Option<String>,
+}
+
+/// English (`LcId == 1033`) Windows locale id.
+const LCID_ENGLISH: u32 = 1033;
+
+/// Pick a single display name from a list of localized `<Name>` elements.
+///
+/// Prefers the English (`LcId == 1033`) entry; otherwise the first non-empty
+/// text in document order. Returns `None` if no entry carries text.
+fn pick_name(names: &[NameDto]) -> Option<String> {
+    let non_empty = |t: &Option<String>| t.as_deref().is_some_and(|s| !s.trim().is_empty());
+    names
+        .iter()
+        .find(|n| n.lc_id == Some(LCID_ENGLISH) && non_empty(&n.text))
+        .or_else(|| names.iter().find(|n| non_empty(&n.text)))
+        .and_then(|n| n.text.clone())
+}
+
 // ── top-level DTOs ────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -62,7 +91,7 @@ struct VendorDto {
     #[serde(rename = "Id")]
     id: String,
     #[serde(rename = "Name", default)]
-    name: Option<String>,
+    names: Vec<NameDto>,
 }
 
 #[derive(Deserialize)]
@@ -82,7 +111,7 @@ struct DeviceDto {
     #[serde(rename = "Type")]
     ty: TypeDto,
     #[serde(rename = "Name", default)]
-    name: Option<String>,
+    names: Vec<NameDto>,
     #[serde(rename = "GroupType", default)]
     group_type: Option<String>,
     #[serde(rename = "Sm", default)]
@@ -101,10 +130,13 @@ struct DeviceDto {
 
 #[derive(Deserialize)]
 struct TypeDto {
-    #[serde(rename = "@ProductCode")]
-    product_code: String,
-    #[serde(rename = "@RevisionNo")]
-    revision_no: String,
+    // Some real files carry placeholder `<Type>` elements with neither a
+    // product code nor a revision (e.g. abstract module slots); default both
+    // to 0 rather than reject the whole document.
+    #[serde(rename = "@ProductCode", default)]
+    product_code: Option<String>,
+    #[serde(rename = "@RevisionNo", default)]
+    revision_no: Option<String>,
     #[serde(rename = "$text", default)]
     text: Option<String>,
 }
@@ -113,10 +145,13 @@ struct TypeDto {
 
 #[derive(Deserialize)]
 struct SmDto {
-    #[serde(rename = "@StartAddress")]
-    start_address: String,
-    #[serde(rename = "@ControlByte")]
-    control_byte: String,
+    // Real Beckhoff files carry placeholder `<Sm No="0">` / `<Sm … Virtual="true">`
+    // declarations with neither a start address nor a control byte; default both
+    // to 0 so the device still parses (such an Sm is simply unconfigured).
+    #[serde(rename = "@StartAddress", default)]
+    start_address: Option<String>,
+    #[serde(rename = "@ControlByte", default)]
+    control_byte: Option<String>,
     #[serde(rename = "@Enable", default)]
     enable: Option<String>,
 }
@@ -152,7 +187,16 @@ struct EntryDto {
     #[serde(rename = "Name", default)]
     name: Option<String>,
     #[serde(rename = "DataType", default)]
-    data_type: Option<String>,
+    data_type: Option<DataTypeDto>,
+}
+
+/// An entry's `<DataType>` element. Real ESI carries attributes on this element
+/// (e.g. `<DataType DScale="+/-10">DINT</DataType>`); only the text content
+/// ("DINT") is meaningful here, so the attributes are tolerated and ignored.
+#[derive(Deserialize)]
+struct DataTypeDto {
+    #[serde(rename = "$text", default)]
+    text: Option<String>,
 }
 
 // ── mailbox DTOs ──────────────────────────────────────────────────────────────
@@ -324,18 +368,25 @@ fn sync_managers_from_dtos(dtos: Vec<SmDto>) -> Result<Vec<crate::model::SyncMan
     use crate::model::{SmDirection, SyncManager};
     let mut out = Vec::with_capacity(dtos.len());
     for (i, sm) in dtos.into_iter().enumerate() {
-        let control_byte = parse_esi_u8(&sm.control_byte, "Sm.ControlByte")?;
+        let control_byte = match sm.control_byte.as_deref() {
+            Some(cb) => parse_esi_u8(cb, "Sm.ControlByte")?,
+            None => 0,
+        };
         let direction = match (control_byte >> 2) & 0x3 {
             0b01 => SmDirection::Input,
             0b00 => SmDirection::Output,
             _ => SmDirection::Unspecified,
+        };
+        let start_address = match sm.start_address.as_deref() {
+            Some(sa) => parse_esi_u16(sa, "Sm.StartAddress")?,
+            None => 0,
         };
         out.push(SyncManager {
             index: u8::try_from(i).map_err(|_| EsiError::Number {
                 raw: i.to_string(),
                 path: "Sm.index".to_owned(),
             })?,
-            start_address: parse_esi_u16(&sm.start_address, "Sm.StartAddress")?,
+            start_address,
             control_byte,
             enable: parse_esi_bool(sm.enable.as_ref()),
             direction,
@@ -372,7 +423,11 @@ fn pdo_from_dto(dto: PdoDto) -> Result<Pdo, EsiError> {
             sub_index,
             bit_length: parse_esi_u16(&e.bit_len, "Entry.BitLen")?,
             name: e.name,
-            data_type: e.data_type.as_deref().map(DataType::parse_coe_name),
+            data_type: e
+                .data_type
+                .and_then(|d| d.text)
+                .as_deref()
+                .map(DataType::parse_coe_name),
         });
     }
 
@@ -576,15 +631,21 @@ impl EtherCatInfo {
         let vendor_id = parse_esi_uint(&self.vendor.id, "Vendor.Id")?;
         let vendor = Vendor {
             id: vendor_id,
-            name: self.vendor.name,
+            name: pick_name(&self.vendor.names),
         };
 
         let mut devices = Vec::with_capacity(self.descriptions.devices.device.len());
         for dev in self.descriptions.devices.device {
             let identity = Identity {
                 vendor_id,
-                product_code: parse_esi_uint(&dev.ty.product_code, "Device.Type.ProductCode")?,
-                revision: parse_esi_uint(&dev.ty.revision_no, "Device.Type.RevisionNo")?,
+                product_code: match dev.ty.product_code.as_deref() {
+                    Some(pc) => parse_esi_uint(pc, "Device.Type.ProductCode")?,
+                    None => 0,
+                },
+                revision: match dev.ty.revision_no.as_deref() {
+                    Some(rev) => parse_esi_uint(rev, "Device.Type.RevisionNo")?,
+                    None => 0,
+                },
             };
 
             let mut tx_pdos = Vec::with_capacity(dev.tx_pdo.len());
@@ -602,7 +663,7 @@ impl EtherCatInfo {
 
             devices.push(EsiDevice {
                 identity,
-                name: dev.name,
+                name: pick_name(&dev.names),
                 product_type: dev.ty.text,
                 group_type: dev.group_type,
                 sync_managers: sync_managers_from_dtos(dev.sm)?,
