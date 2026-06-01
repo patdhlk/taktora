@@ -28,6 +28,7 @@ fn decode_round_trip() {
     dev.decode_inputs(bits).expect("decode should succeed");
 
     assert!(dev.underrange, "underrange bit should decode to true");
+    // bits 8..24 little-endian: 0x34 | (0x12 << 8) == 0x1234.
     assert_eq!(dev.value, 0x1234, "value should decode to 0x1234");
 
     assert_eq!(dev.identity(), EXPECTED_IDENTITY);
@@ -66,15 +67,26 @@ fn object_safety_smoke() {
 
 /// The generated module must match the committed golden snapshot byte-for-byte
 /// (modulo trailing whitespace), so codegen drift is caught in review.
+///
+/// After an *intended* codegen change, refresh the golden by rerunning with
+/// `UPDATE_GOLDEN=1 cargo test -p taktora-ethercat-esi-codegen-ethercrab-tests`,
+/// then review the diff to `tests/golden/devices.rs` before committing.
 #[test]
 fn golden_snapshot_matches() {
     let generated = include_str!(concat!(env!("OUT_DIR"), "/devices.rs"));
-    let golden = include_str!("golden/devices.rs");
+    let golden_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/devices.rs");
 
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        std::fs::write(golden_path, generated).expect("write golden snapshot");
+        return;
+    }
+
+    let golden = include_str!("golden/devices.rs");
     assert_eq!(
         normalize(generated),
         normalize(golden),
-        "generated devices.rs drifted from tests/golden/devices.rs"
+        "generated devices.rs drifted from tests/golden/devices.rs \
+         (rerun with UPDATE_GOLDEN=1 to bless an intended change)"
     );
 }
 
