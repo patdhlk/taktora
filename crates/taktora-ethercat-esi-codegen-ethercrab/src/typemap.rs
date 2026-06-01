@@ -15,11 +15,26 @@ use taktora_ethercat_esi_codegen::CodegenError;
 pub struct FieldType {
     /// The Rust field type token (e.g. `bool`, `i16`, `f32`).
     pub rust_type: TokenStream,
+    /// An optional doc-comment line for the generated struct field. Set for
+    /// width-inferred *opaque* mappings (a non-scalar / non-modelled `CoE` type
+    /// resolved purely from its bit width), so the emitted code self-documents
+    /// that the semantic type was not modelled. `None` for clean scalars.
+    pub doc: Option<String>,
 }
 
 impl FieldType {
     const fn new(rust_type: TokenStream) -> Self {
-        Self { rust_type }
+        Self {
+            rust_type,
+            doc: None,
+        }
+    }
+
+    const fn with_doc(rust_type: TokenStream, doc: String) -> Self {
+        Self {
+            rust_type,
+            doc: Some(doc),
+        }
     }
 }
 
@@ -35,6 +50,11 @@ pub enum Layout {
         width: usize,
         kind: ScalarKind,
     },
+    /// A byte-aligned opaque blob occupying `offset..offset + bytes * 8`,
+    /// decoded as a fixed `[u8; bytes]` array (the bit range copied out of the
+    /// slice) and encoded by copying it back. Used for width-inferred opaque
+    /// fields wider than 64 bits, which no `uN` storage type can hold.
+    Bytes { offset: usize, bytes: usize },
 }
 
 /// The reinterpretation applied to the little-endian loaded bits of a field.
@@ -51,13 +71,31 @@ pub enum ScalarKind {
 /// Resolve a (parsed) data type plus its declared bit length into a Rust field
 /// type and a layout describing the read/write.
 ///
-/// `index`/`sub_index`/`field` are only used to build a descriptive
-/// [`CodegenError::UnsupportedEntryType`] for types this backend cannot map.
+/// The type map is **total** for any entry with a usable `bit_length`
+/// (`REQ` — full vendor corpus codegen): clean scalars map exactly; every other
+/// sized entry (`BitN`, `Named(_)`, the string types, or a sized entry whose
+/// declared `DataType` doesn't match a scalar) is resolved purely from its bit
+/// width into an *opaque* field carrying a doc marker. This intentionally
+/// reverses the earlier "error on strings / `Named`" decision (design Q7): the
+/// goal of compiling the entire Beckhoff vendor corpus requires that an
+/// unmodelled `CoE` type (e.g. `BITARR8`) never aborts codegen for the whole
+/// file. The opaque width-inferred fallback preserves the bit layout faithfully
+/// while leaving the semantic type unmodelled (and saying so in a doc-comment).
+///
+/// Width-inference precedence for the fallback:
+/// 1. `width == 1` → `bool`.
+/// 2. `width <= 64` → next-larger unsigned (`u8/u16/u32/u64`), masked via
+///    `load_le`/`store_le`.
+/// 3. `width > 64` → a fixed `[u8; ceil(width/8)]` byte array.
+///
+/// `index`/`sub_index`/`field` are only used to build a descriptive error for
+/// the one genuinely-unusable case.
 ///
 /// # Errors
 ///
-/// Returns [`CodegenError::UnsupportedEntryType`] for string and complex/named
-/// types, which have no scalar Rust field representation in this slice.
+/// Returns [`CodegenError::UnsupportedEntryType`] only when `bit_length` is
+/// itself unusable — i.e. `0` for a non-padding entry (padding entries with
+/// index 0 never reach here). For every sized entry the map is total.
 pub fn resolve(
     data_type: Option<&DataType>,
     bit_length: u16,
@@ -66,30 +104,10 @@ pub fn resolve(
     sub_index: u8,
     field: &str,
 ) -> Result<(FieldType, Layout), CodegenError> {
-    let unsupported = |reason: &str| CodegenError::UnsupportedEntryType {
-        index,
-        sub_index,
-        field: field.to_owned(),
-        reason: reason.to_owned(),
-    };
     let width = bit_length as usize;
 
-    // Build a signed/unsigned integer mapping over the next-larger storage
-    // width, masking sub-width fields via `load_le`.
-    let int = |signed: bool| -> (FieldType, Layout) {
-        let store_bits = storage_bits(width);
-        let ty = int_type_token(signed, store_bits);
-        (
-            FieldType::new(ty),
-            Layout::Field {
-                offset,
-                width,
-                kind: ScalarKind::Int,
-            },
-        )
-    };
-
     match data_type {
+        // Clean scalars map exactly, with no opaque doc marker.
         Some(DataType::Bool) => Ok((FieldType::new(quote! { bool }), Layout::Bool { offset })),
         Some(DataType::I8) => Ok(exact_int(true, 8, offset)),
         Some(DataType::I16) => Ok(exact_int(true, 16, offset)),
@@ -115,21 +133,102 @@ pub fn resolve(
                 kind: ScalarKind::F64,
             },
         )),
-        // BitN and any non-standard width: next-larger unsigned via load_le.
-        Some(DataType::BitN(_)) => Ok(int(false)),
-        // Untyped but sized: width-inferred.
-        None => {
+        // BitN / untyped-but-sized: width-inferred, no opaque marker (a `BitN`
+        // is already an honest "n raw bits", and an untyped entry was never
+        // named, so there is nothing to flag as "unmodelled"). A 1-bit field is
+        // a `bool`; wider widths use the next-larger unsigned via `load_le`.
+        // The `BitN` ≥ 2 path stays byte-identical to the prior mapping.
+        Some(DataType::BitN(_)) | None => {
             if width == 1 {
                 Ok((FieldType::new(quote! { bool }), Layout::Bool { offset }))
             } else {
-                Ok(int(false))
+                Ok(width_unsigned(width, offset))
             }
         }
-        Some(DataType::VisibleString) => Err(unsupported("VisibleString")),
-        Some(DataType::OctetString) => Err(unsupported("OctetString")),
-        Some(DataType::UnicodeString) => Err(unsupported("UnicodeString")),
-        Some(DataType::Named(name)) => Err(unsupported(name)),
+        // Opaque, unmodelled types: faithful width-inferred fallback + doc
+        // marker. This is the Q7 reversal — these previously errored.
+        Some(DataType::VisibleString) => {
+            opaque(width, offset, "VisibleString", index, sub_index, field)
+        }
+        Some(DataType::OctetString) => {
+            opaque(width, offset, "OctetString", index, sub_index, field)
+        }
+        Some(DataType::UnicodeString) => {
+            opaque(width, offset, "UnicodeString", index, sub_index, field)
+        }
+        Some(DataType::Named(name)) => opaque(width, offset, name, index, sub_index, field),
     }
+}
+
+/// Resolve an opaque (unmodelled) type purely from its bit width, attaching a
+/// `/// opaque <NAME> (<n> bits)` doc marker to the generated field.
+///
+/// # Errors
+///
+/// [`CodegenError::UnsupportedEntryType`] if `width == 0` (a non-padding entry
+/// with no bits is genuinely unusable — it can be neither loaded nor stored).
+fn opaque(
+    width: usize,
+    offset: usize,
+    name: &str,
+    index: u16,
+    sub_index: u8,
+    field: &str,
+) -> Result<(FieldType, Layout), CodegenError> {
+    if width == 0 {
+        return Err(CodegenError::UnsupportedEntryType {
+            index,
+            sub_index,
+            field: field.to_owned(),
+            reason: format!("{name} has zero bit length"),
+        });
+    }
+
+    let doc = format!("opaque {name} ({width} bits)");
+
+    if width == 1 {
+        return Ok((
+            FieldType::with_doc(quote! { bool }, doc),
+            Layout::Bool { offset },
+        ));
+    }
+
+    if width <= 64 {
+        let store_bits = storage_bits(width);
+        let ty = int_type_token(false, store_bits);
+        return Ok((
+            FieldType::with_doc(ty, doc),
+            Layout::Field {
+                offset,
+                width,
+                kind: ScalarKind::Int,
+            },
+        ));
+    }
+
+    // > 64 bits: no `uN` holds it. Emit a byte array spanning the (byte-rounded)
+    // bit range. `bit_length` need not be a byte multiple; the array covers
+    // ceil(width/8) bytes and decode/encode copy that byte-aligned range.
+    let bytes = width.div_ceil(8);
+    Ok((
+        FieldType::with_doc(quote! { [u8; #bytes] }, doc),
+        Layout::Bytes { offset, bytes },
+    ))
+}
+
+/// A width-inferred unsigned field: next-larger `uN` storage, masked via
+/// `load_le`. Used for clean `BitN` / untyped-but-sized entries (no doc marker).
+fn width_unsigned(width: usize, offset: usize) -> (FieldType, Layout) {
+    let store_bits = storage_bits(width);
+    let ty = int_type_token(false, store_bits);
+    (
+        FieldType::new(ty),
+        Layout::Field {
+            offset,
+            width,
+            kind: ScalarKind::Int,
+        },
+    )
 }
 
 /// An exactly-sized integer (`width` equals the declared `CoE` width).
@@ -175,6 +274,7 @@ impl Layout {
         match *self {
             Self::Bool { .. } => 1,
             Self::Field { width, .. } => width,
+            Self::Bytes { bytes, .. } => bytes * 8,
         }
     }
 }

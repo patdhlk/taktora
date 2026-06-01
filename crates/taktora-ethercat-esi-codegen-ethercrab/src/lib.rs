@@ -42,6 +42,10 @@ struct ResolvedField {
     ident: Ident,
     rust_type: TokenStream,
     layout: Layout,
+    /// An optional doc-comment line for width-inferred opaque mappings, emitted
+    /// on the generated struct field so the code self-documents the unmodelled
+    /// `CoE` type. `None` for clean scalars.
+    doc: Option<String>,
 }
 
 /// A resolved PDO: its device-struct field ident, its sub-struct type ident,
@@ -88,6 +92,7 @@ fn resolve_pdo_fields(pdo: &Pdo, offset: &mut usize) -> Result<Vec<ResolvedField
             ident,
             rust_type: field_type.rust_type,
             layout,
+            doc: field_type.doc,
         });
     }
 
@@ -401,6 +406,21 @@ fn read_into(target: &TokenStream, field: &ResolvedField) -> TokenStream {
                 }
             }
         }
+        Layout::Bytes { offset, bytes } => {
+            // Copy each byte out of the (byte-rounded) bit range. Per-byte
+            // `load_le::<u8>` is alignment-agnostic, so the entry need not start
+            // on a byte boundary.
+            quote! {
+                {
+                    let mut buf = [0u8; #bytes];
+                    for (i, b) in buf.iter_mut().enumerate() {
+                        let start = #offset + i * 8;
+                        *b = bits[start..start + 8].load_le::<u8>();
+                    }
+                    #target = buf;
+                }
+            }
+        }
     }
 }
 
@@ -426,6 +446,14 @@ fn write_from(source: &TokenStream, field: &ResolvedField) -> TokenStream {
                 }
                 ScalarKind::F64 => {
                     quote! { bits[#range].store_le::<u64>(#source.to_bits()); }
+                }
+            }
+        }
+        Layout::Bytes { offset, bytes } => {
+            quote! {
+                for i in 0..#bytes {
+                    let start = #offset + i * 8;
+                    bits[start..start + 8].store_le::<u8>(#source[i]);
                 }
             }
         }
@@ -594,15 +622,21 @@ impl CodegenBackend for EthercrabBackend {
     }
 }
 
+/// Emit one `pub` struct field declaration for a resolved entry, attaching its
+/// width-inferred opaque doc-comment (if any) so the generated code documents
+/// that the original semantic type was not modelled.
+fn field_decl(f: &ResolvedField) -> TokenStream {
+    let fi = &f.ident;
+    let ty = &f.rust_type;
+    let doc = f.doc.iter().map(|d| quote! { #[doc = #d] });
+    quote! { #(#doc)* pub #fi: #ty }
+}
+
 /// Emit one PDO sub-struct: a plain `#[derive(Debug, Default, Clone)]` data
 /// holder with one `pub` field per resolved entry, no trait impls.
 fn emit_sub_struct(pdo: &ResolvedPdo) -> TokenStream {
     let ident = &pdo.struct_ident;
-    let field_defs = pdo.fields.iter().map(|f| {
-        let fi = &f.ident;
-        let ty = &f.rust_type;
-        quote! { pub #fi: #ty }
-    });
+    let field_defs = pdo.fields.iter().map(field_decl);
     quote! {
         #[allow(non_camel_case_types)]
         #[derive(Debug, Default, Clone)]
@@ -628,11 +662,7 @@ fn emit_alt_group_types(group: &ResolvedAltGroup) -> Result<TokenStream, Codegen
     let mut structs = TokenStream::new();
     for alt in &group.alternatives {
         let ident = &alt.struct_ident;
-        let field_defs = alt.fields.iter().map(|f| {
-            let fi = &f.ident;
-            let ty = &f.rust_type;
-            quote! { pub #fi: #ty }
-        });
+        let field_defs = alt.fields.iter().map(field_decl);
         structs.extend(quote! {
             #[allow(non_camel_case_types)]
             #[derive(Debug, Default, Clone)]
@@ -800,14 +830,21 @@ fn direction_len(base_bits: usize, groups: &[ResolvedAltGroup]) -> usize {
     (base_bits + alt_bits).div_ceil(8)
 }
 
-/// Whether any alternative across the given groups has a multi-bit field (and so
-/// the body emits a `load_le`/`store_le` call needing the `BitField` import).
+/// Whether a layout's decode/encode emits a `load_le`/`store_le` call (and so
+/// needs the `bitvec` `BitField` trait in scope). Both multi-bit scalar fields
+/// and opaque byte arrays do; single-bit `Bool`s do not.
+const fn layout_uses_bitfield(layout: Layout) -> bool {
+    matches!(layout, Layout::Field { .. } | Layout::Bytes { .. })
+}
+
+/// Whether any alternative across the given groups has a field needing the
+/// `BitField` import.
 fn alt_groups_need_bitfield(groups: &[ResolvedAltGroup]) -> bool {
     groups.iter().any(|g| {
         g.alternatives
             .iter()
             .flat_map(|a| a.fields.iter())
-            .any(|f| matches!(f.layout, Layout::Field { .. }))
+            .any(|f| layout_uses_bitfield(f.layout))
     })
 }
 
@@ -816,9 +853,8 @@ fn alt_groups_need_bitfield(groups: &[ResolvedAltGroup]) -> bool {
 fn direction_device_fields(pdos: &[ResolvedPdo], flat: bool) -> TokenStream {
     if flat {
         let defs = pdos.iter().flat_map(|p| p.fields.iter()).map(|f| {
-            let fi = &f.ident;
-            let ty = &f.rust_type;
-            quote! { pub #fi: #ty, }
+            let decl = field_decl(f);
+            quote! { #decl, }
         });
         quote! { #(#defs)* }
     } else {
@@ -855,7 +891,7 @@ fn bitfield_import_with_alts(pdos: &[ResolvedPdo], groups: &[ResolvedAltGroup]) 
     let needs = pdos
         .iter()
         .flat_map(|p| p.fields.iter())
-        .any(|f| matches!(f.layout, Layout::Field { .. }))
+        .any(|f| layout_uses_bitfield(f.layout))
         || alt_groups_need_bitfield(groups);
     if needs {
         quote! { use bitvec::field::BitField as _; }
@@ -918,7 +954,7 @@ mod tests {
                 assert_eq!(width, 2);
                 assert_eq!(kind, ScalarKind::Int);
             }
-            other @ Layout::Bool { .. } => panic!("expected sub-byte Field layout, got {other:?}"),
+            other => panic!("expected sub-byte Field layout, got {other:?}"),
         }
     }
 
@@ -933,7 +969,7 @@ mod tests {
                 assert_eq!(width, 32);
                 assert_eq!(kind, ScalarKind::Int);
             }
-            other @ Layout::Bool { .. } => panic!("expected 32-bit Field layout, got {other:?}"),
+            other => panic!("expected 32-bit Field layout, got {other:?}"),
         }
     }
 
@@ -943,22 +979,101 @@ mod tests {
         assert_eq!(ty(None, 12), "u16");
     }
 
+    /// Q7 reversal: strings no longer abort codegen. A sized string entry maps
+    /// to a width-inferred opaque unsigned field carrying a doc marker.
     #[test]
-    fn type_map_strings_are_unsupported() {
-        let err = typemap::resolve(Some(&DataType::VisibleString), 64, 0, 0x6000, 5, "name")
-            .expect_err("strings unsupported");
-        assert!(matches!(err, CodegenError::UnsupportedEntryType { .. }));
+    fn type_map_visible_string_is_opaque_width_inferred() {
+        let (ft, layout) =
+            typemap::resolve(Some(&DataType::VisibleString), 16, 0, 0x6000, 5, "name")
+                .expect("strings now resolve");
+        assert_eq!(ft.rust_type.to_string(), "u16");
+        assert!(
+            ft.doc.as_deref().is_some_and(|d| d.contains("opaque")
+                && d.contains("VisibleString")
+                && d.contains("16 bits")),
+            "expected opaque doc marker, got {:?}",
+            ft.doc
+        );
+        assert!(matches!(layout, Layout::Field { width: 16, .. }));
     }
 
+    /// Q7 reversal: Beckhoff `BITARR8` (`Named`, 8 bits) → opaque `u8`.
     #[test]
-    fn type_map_named_is_unsupported() {
+    fn type_map_named_bitarr8_is_opaque_u8() {
+        let dt = DataType::Named("BITARR8".to_owned());
+        let (ft, _) = typemap::resolve(Some(&dt), 8, 0, 0x6000, 5, "arr").expect("named resolves");
+        assert_eq!(ft.rust_type.to_string(), "u8");
+        assert!(
+            ft.doc
+                .as_deref()
+                .is_some_and(|d| d.contains("opaque") && d.contains("BITARR8")),
+            "expected opaque BITARR8 doc, got {:?}",
+            ft.doc
+        );
+    }
+
+    /// `Named` `BITARR16` (16 bits) → opaque `u16`.
+    #[test]
+    fn type_map_named_bitarr16_is_opaque_u16() {
+        let dt = DataType::Named("BITARR16".to_owned());
+        let (ft, _) = typemap::resolve(Some(&dt), 16, 0, 0x6000, 5, "arr").expect("named resolves");
+        assert_eq!(ft.rust_type.to_string(), "u16");
+    }
+
+    /// A 24-bit `Named` → opaque `u32` (next-larger unsigned, masked load).
+    #[test]
+    fn type_map_named_24bit_is_opaque_u32_masked() {
         let dt = DataType::Named("DT2008".to_owned());
-        let err =
-            typemap::resolve(Some(&dt), 16, 0, 0x6000, 5, "name").expect_err("named unsupported");
-        match err {
-            CodegenError::UnsupportedEntryType { reason, .. } => assert_eq!(reason, "DT2008"),
-            other => panic!("unexpected error: {other:?}"),
+        let (ft, layout) =
+            typemap::resolve(Some(&dt), 24, 0, 0x6000, 5, "x").expect("named resolves");
+        assert_eq!(ft.rust_type.to_string(), "u32");
+        match layout {
+            Layout::Field { width, kind, .. } => {
+                assert_eq!(width, 24);
+                assert_eq!(kind, ScalarKind::Int);
+            }
+            other => panic!("expected masked Field layout, got {other:?}"),
         }
+    }
+
+    /// A 1-bit `Named`/`BitN` → bool (width takes precedence over the type name).
+    #[test]
+    fn type_map_one_bit_opaque_is_bool() {
+        let dt = DataType::Named("BITARR8".to_owned());
+        let (ft, layout) =
+            typemap::resolve(Some(&dt), 1, 7, 0x6000, 5, "b").expect("named resolves");
+        assert_eq!(ft.rust_type.to_string(), "bool");
+        assert!(matches!(layout, Layout::Bool { offset: 7 }));
+
+        let (ft2, _) = typemap::resolve(Some(&DataType::BitN(1)), 1, 0, 0x6000, 5, "b2")
+            .expect("bitn resolves");
+        assert_eq!(ft2.rust_type.to_string(), "bool");
+    }
+
+    /// A >64-bit opaque entry → fixed byte array `[u8; N]` (N = ceil(bits/8)).
+    #[test]
+    fn type_map_over_64_bits_is_byte_array() {
+        let dt = DataType::Named("DT8000".to_owned());
+        let (ft, layout) =
+            typemap::resolve(Some(&dt), 72, 0, 0x6000, 5, "blob").expect("wide resolves");
+        assert_eq!(ft.rust_type.to_string(), "[u8 ; 9usize]");
+        match layout {
+            Layout::Bytes { offset, bytes } => {
+                assert_eq!(offset, 0);
+                assert_eq!(bytes, 9);
+            }
+            other => panic!("expected Bytes layout, got {other:?}"),
+        }
+    }
+
+    /// A zero-width non-padding entry is genuinely unusable → error. (Padding
+    /// entries with index 0 never reach `resolve`.)
+    #[test]
+    fn type_map_zero_width_named_is_unsupported() {
+        let dt = DataType::Named("WEIRD".to_owned());
+        let err =
+            typemap::resolve(Some(&dt), 0, 0, 0x6000, 5, "z").expect_err("zero width unusable");
+        assert!(matches!(err, CodegenError::UnsupportedEntryType { .. }));
     }
 
     use taktora_ethercat_esi::{Pdo, PdoEntry};
