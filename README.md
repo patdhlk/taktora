@@ -3,15 +3,19 @@
 A Rust workspace exploring how to build a high-level execution framework and a
 connector framework on top of [iceoryx2](https://github.com/eclipse-iceoryx/iceoryx2).
 
-Two layered pieces:
+Three layered pieces:
 
 - **`taktora-executor`** — items triggered by IPC, intervals, and request/response
   activity; sequential chains; parallel DAGs; signal/slot; lifecycle observability.
 - **`taktora-connector-*`** — typed channels with codec-pluggable payloads,
-  uniform connector health, and two reference connectors — EtherCAT (driving a
-  SubDevice's process data) and Zenoh (pub/sub + query/reply over a Zenoh
-  session) — both exposing the same plugin-facing `ChannelWriter` /
-  `ChannelReader` types every other connector will reuse.
+  uniform connector health, and three reference connectors — EtherCAT (driving a
+  SubDevice's process data), Zenoh (pub/sub + query/reply over a Zenoh session),
+  and CAN/SocketCAN — all exposing the same plugin-facing `ChannelWriter` /
+  `ChannelReader` types every other connector reuses.
+- **EtherCAT build-time codegen toolchains** — turn vendor descriptions into
+  strongly-typed Rust at build time, with zero runtime parsing: a *device-driver*
+  toolchain (ESI XML → typed `EsiDevice` drivers) and a *network-config* toolchain
+  (network YAML → PDO maps / routing tables for the connector).
 
 > [!WARNING]
 > **Personal experiment. Not meant for production.**
@@ -24,22 +28,51 @@ Two layered pieces:
 
 ## What's here
 
-Ten crates in the workspace, layered:
+The workspace has grown to 23 library crates (plus per-crate `*-tests` siblings),
+grouped by layer.
+
+**Execution & runtime support**
 
 | Crate | Purpose |
 |---|---|
 | [`taktora-executor`](crates/taktora-executor) | The execution core. Items, triggers, executor, runner, channels, services, chains, graphs, signal/slot, observer + execution monitor, optional thread tuning. |
 | [`taktora-executor-tracing`](crates/taktora-executor-tracing) | `Observer` adapter forwarding executor lifecycle and user events to the global `tracing` subscriber. |
+| [`taktora-bounded-alloc`](crates/taktora-bounded-alloc) | Static pre-allocated `#[global_allocator]` with hard caps on per-allocation size and total live blocks. `FEAT_0040`. |
 | [`taktora-log`](crates/taktora-log) | Workspace logging facade (`log` crate facade with one-shot init, tracing-log bridge, console dev fallback). See `spec/requirements/logging.rst`. |
 | [`taktora-log-dlt`](crates/taktora-log-dlt) | Pure-Rust AUTOSAR DLT R20-11 backend for `taktora-log`. Talks to a co-located COVESA `dlt-daemon` over UDS (default) or TCP. See `spec/architecture/logging.rst`. |
-| [`taktora-bounded-alloc`](crates/taktora-bounded-alloc) | Static pre-allocated `#[global_allocator]` with hard caps on per-allocation size and total live blocks. `FEAT_0040`. |
+| [`taktora-replay`](crates/taktora-replay) | Empty placeholder for an eventual replay coordinator. Do not depend on it. |
+
+**Connector framework + reference connectors**
+
+| Crate | Purpose |
+|---|---|
 | [`taktora-connector-core`](crates/taktora-connector-core) | Framework-level traits and types shared by every connector — `Routing`, `ChannelDescriptor`, `PayloadCodec`, `ConnectorHealth` / `HealthEvent`, `ReconnectPolicy`, `ConnectorError`. `BB_0001`. |
 | [`taktora-connector-transport-iox`](crates/taktora-connector-transport-iox) | iceoryx2-backed `ChannelWriter` / `ChannelReader` + `ConnectorEnvelope` POD wire format + `ServiceFactory`. `BB_0002`. |
 | [`taktora-connector-codec`](crates/taktora-connector-codec) | `PayloadCodec` implementations. Ships `JsonCodec`; codec is compile-time-dispatched, so additional codecs are plug-in. `BB_0003`. |
 | [`taktora-connector-host`](crates/taktora-connector-host) | `Connector` trait + `ConnectorHost` / `ConnectorGateway` builders + `HealthSubscription`. The seam at which protocol-specific connectors plug into an `Executor`. `BB_0005`. |
-| [`taktora-connector-ethercat`](crates/taktora-connector-ethercat) | Reference EtherCAT connector built on the framework. Pluggable `BusDriver` (mock or `ethercrab`), bit-slice PDI routing, gateway-side dispatcher that hops bytes between iceoryx2 and the SubDevice PDI each cycle. `BB_0030` / `FEAT_0041`. |
+| [`taktora-connector-ethercat`](crates/taktora-connector-ethercat) | Reference EtherCAT connector. Pluggable `BusDriver` (mock or `ethercrab`), bit-slice PDI routing, gateway-side dispatcher that hops bytes between iceoryx2 and the SubDevice PDI each cycle. `BB_0030` / `FEAT_0041`. |
 | [`taktora-connector-zenoh`](crates/taktora-connector-zenoh) | Reference Zenoh connector. Pluggable `ZenohSessionLike` back-end (mock or `zenoh::Session`), pub/sub + query/reply with timeout-correct sealed-queries handling, peer-count-driven health. `BB_0040` / `FEAT_0042`. |
-| [`taktora-replay`](crates/taktora-replay) | Empty placeholder for an eventual replay coordinator. Do not depend on it. |
+| [`taktora-connector-can`](crates/taktora-connector-can) | Reference CAN / SocketCAN connector. `BB_0070` / `FEAT_0046`. |
+
+**EtherCAT device-driver codegen** — ESI XML → typed drivers at build time (`FEAT_0050`)
+
+| Crate | Purpose |
+|---|---|
+| [`taktora-ethercat-esi`](crates/taktora-ethercat-esi) | Parses EtherCAT ESI (slave information) XML into a faithful typed IR (identity, PDOs, sync managers, mailbox, distributed clocks, object dictionary). |
+| [`taktora-ethercat-esi-rt`](crates/taktora-ethercat-esi-rt) | Runtime contract for generated drivers: the object-safe `EsiDevice` trait + runtime `EsiError`. The only crate generated code links against. |
+| [`taktora-ethercat-esi-codegen`](crates/taktora-ethercat-esi-codegen) | Codegen layer: naming/collision policy, the `CodegenBackend` trait, and the `generate` entry point producing `proc-macro2` token streams. |
+| [`taktora-ethercat-esi-codegen-ethercrab`](crates/taktora-ethercat-esi-codegen-ethercrab) | Concrete backend: emits per-device structs + `EsiDevice` impl (`decode_inputs`/`encode_outputs`), `Identity` consts, and a device registry. |
+| [`taktora-ethercat-esi-build`](crates/taktora-ethercat-esi-build) | `build.rs` glue: glob ESI files → parse → generate → format → `$OUT_DIR`, encoding-aware (ISO-8859-1), with `rerun-if-changed`. |
+| [`taktora-fieldbus-od-core`](crates/taktora-fieldbus-od-core) | Shared object-dictionary IR (`Identity`, `DataType`, dictionary entries) reused across fieldbus device descriptions. |
+
+**EtherCAT network-config codegen** — network YAML → PDO maps / routing tables
+
+| Crate | Purpose |
+|---|---|
+| [`taktora-ethercat-netcfg`](crates/taktora-ethercat-netcfg) | Parser + in-memory IR for the EtherCAT network-config YAML. |
+| [`taktora-ethercat-netcfg-codegen`](crates/taktora-ethercat-netcfg-codegen) | Turns the netcfg IR into Rust source (PDO maps, routing tables) for the EtherCAT connector runtime. |
+| [`taktora-ethercat-netcfg-build`](crates/taktora-ethercat-netcfg-build) | `build.rs` glue turning a `network.yaml` into a generated Rust module in `$OUT_DIR`. |
+| [`taktora-ethercat-netcfg-cli`](crates/taktora-ethercat-netcfg-cli) | Command-line front end: expand a `network.yaml` to generated Rust source for inspection. |
 
 ## Executor quick start
 
@@ -234,6 +267,25 @@ The session back-end is pluggable:
 configurable `min_peers` threshold and emits `HealthEvent`s through the
 same `subscribe_health` surface every connector exposes.
 
+## EtherCAT codegen toolchains (build-time)
+
+Two toolchains turn vendor descriptions into strongly-typed Rust entirely in
+`build.rs`, with zero runtime parsing — consumers `include!` the generated module
+and ship no XML/YAML.
+
+- **Device-driver codegen (`FEAT_0050`).** `taktora-ethercat-esi-build` reads a
+  vendor ESI XML file and generates per-device structs implementing the
+  object-safe `EsiDevice` trait (`taktora-ethercat-esi-rt`): typed
+  `decode_inputs` / `encode_outputs` over the SubDevice's process image, an
+  `Identity` const per device, and a registry for identity-based dispatch. The
+  parser copes with real-world ESI quirks (localized `<Name>`, CDATA, ISO-8859-1,
+  vendor data types). Real Beckhoff terminals (EL1008 / EL2004 / EL3602, …)
+  generate compiling, bit-exact drivers; the [`ethercat-real-bus`](examples/ethercat-real-bus)
+  example drives EL1008/EL2004 through generated drivers, validated on real hardware.
+- **Network-config codegen.** `taktora-ethercat-netcfg-build` turns a network
+  `.yaml` into the PDO maps and routing tables the EtherCAT connector consumes,
+  with a `cargo`-style CLI (`taktora-ethercat-netcfg-cli`) for inspection.
+
 ## Threading
 
 Single executor-owned worker pool (M1 model). The thread that calls
@@ -324,7 +376,8 @@ user would write:
 | [`zenoh-pubsub-mock`](examples/zenoh-pubsub-mock)   | executor + zenoh connector (`MockZenohSession`), in-process pub/sub |
 | [`zenoh-pubsub-real`](examples/zenoh-pubsub-real)   | same shape over a real `zenoh::Session`; two-terminal peer-to-peer |
 | [`ethercat-mock-loop`](examples/ethercat-mock-loop) | 1 kHz control loop over the EtherCAT connector with PDI bit-slice routing through `MockBusDriver` |
-| [`ethercat-real-bus`](examples/ethercat-real-bus)   | drives a real EK1100 + EL1008 over a Linux NIC (Pi-friendly); build-only in CI |
+| [`ethercat-wago-coupler`](examples/ethercat-wago-coupler) | mirrors a WAGO 750-430's 8 inputs to a 750-530's 8 outputs through a 750-354 coupler over a real NIC |
+| [`ethercat-real-bus`](examples/ethercat-real-bus)   | drives a real EK1100 + EL1008 + EL2004 over a Linux NIC (Pi-friendly), decoding inputs / encoding outputs via **ESI-generated typed drivers** |
 
 See [`examples/README.md`](examples/README.md) for the full index and
 the local-paths toggle (debugging an in-tree change against an

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/patdhlk/taktora/compare/taktora-ethercat-esi-v0.2.0...taktora-ethercat-esi-v0.2.1) - 2026-06-01
+
+
+### Documentation
+
+- *(readme)* Document EtherCAT codegen toolchains, CAN connector, od-core, new examples
+
+## [0.2.0](https://github.com/patdhlk/taktora/compare/taktora-ethercat-esi-v0.1.0...taktora-ethercat-esi-v0.2.0) - 2026-06-01
+
+
+### Added
+
+- *(ethercat)* ESI device-driver codegen toolchain (FEAT_0050) + real Beckhoff support ([#23](https://github.com/patdhlk/taktora/pull/23))
+- *(ethercat-esi)* Parse structured PDOs with padding + alternatives
+- *(ethercat-esi)* [**breaking**] Faithful structured IR (PDO/SM/mailbox/DC/OD), located error type
+
+### Changed
+
+- *(ethercat-esi)* Drop dead locals and stale allows in raw_xml capture
+
+### Fixed
+
+- *(ethercat-esi)* Use idiomatic Option<&T> in dictionary_from_profile
+
 ### Changed
 
 - **(breaking, DTO behaviour)** Parse real Beckhoff ESI files. `<Name>` is now
