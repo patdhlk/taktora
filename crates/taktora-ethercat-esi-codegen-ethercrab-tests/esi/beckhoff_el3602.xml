@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trimmed single-device excerpt of a Beckhoff ESI file, for parser testing only. -->
+<!-- The large <Profile> object dictionary block was dropped to keep the fixture small. -->
+<EtherCATInfo>
+  <Vendor><Id>2</Id><Name>Beckhoff Automation GmbH &amp; Co. KG</Name></Vendor>
+  <Descriptions><Devices>
+			<Device Physics="KK">
+				<Type ProductCode="#xe123052" RevisionNo="#x00100000">EL3602</Type>
+				<Name LcId="1033">EL3602 2Ch. Ana. Input +/-10Volt, Diff. 24bit</Name>
+				<Name LcId="1031">EL3602 2K. Ana. Eingang +/- 10Volt, Diff. 24bit</Name>
+				<URL LcId="1033"><![CDATA[http://www.beckhoff.com/EL3602]]></URL>
+				<URL LcId="1031"><![CDATA[http://www.beckhoff.de/EL3602]]></URL>
+				<Info>
+					<Electrical>
+						<EBusCurrent>190</EBusCurrent>
+					</Electrical>
+					<Mailbox>
+						<Timeout>
+							<RequestTimeout>100</RequestTimeout>
+							<ResponseTimeout>2000</ResponseTimeout>
+						</Timeout>
+					</Mailbox>
+				</Info>
+				<GroupType>AnaIn</GroupType>
+				<Fmmu>Inputs</Fmmu>
+				<Fmmu>MBoxState</Fmmu>
+				<Sm MinSize="128" MaxSize="128" DefaultSize="128" StartAddress="#x1000" ControlByte="#x26" Enable="1">MBoxOut</Sm>
+				<Sm MinSize="128" MaxSize="128" DefaultSize="128" StartAddress="#x1080" ControlByte="#x22" Enable="1">MBoxIn</Sm>
+				<Sm DefaultSize="0" StartAddress="#x1100" ControlByte="#x4" Enable="0">Outputs</Sm>
+				<Sm DefaultSize="12" StartAddress="#x1180" ControlByte="#x20" Enable="1">Inputs</Sm>
+				<TxPdo Fixed="1" Sm="3">
+					<Index>#x1a00</Index>
+					<Name>AI Inputs Channel 1</Name>
+					<Entry>
+						<Index>#x6000</Index>
+						<SubIndex>1</SubIndex>
+						<BitLen>1</BitLen>
+						<Name>Underrange</Name>
+						<Comment>Underrange event active</Comment>
+						<DataType>BOOL</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x6000</Index>
+						<SubIndex>2</SubIndex>
+						<BitLen>1</BitLen>
+						<Name>Overrange</Name>
+						<Comment>Overrange event active</Comment>
+						<DataType>BOOL</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x6000</Index>
+						<SubIndex>3</SubIndex>
+						<BitLen>2</BitLen>
+						<Name>Limit 1</Name>
+						<Comment>Bit0: Value smaller/equal Limit1
+Bit1: Value bigger/equal Limit1</Comment>
+						<DataType>BIT2</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x6000</Index>
+						<SubIndex>5</SubIndex>
+						<BitLen>2</BitLen>
+						<Name>Limit 2</Name>
+						<Comment>Bit0: Value smaller/equal Limit2
+Bit1: Value bigger/equal Limit2</Comment>
+						<DataType>BIT2</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x6000</Index>
+						<SubIndex>7</SubIndex>
+						<BitLen>1</BitLen>
+						<Name>Error</Name>
+						<Comment>Bit set when Over- or Underrange</Comment>
+						<DataType>BOOL</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x0</Index>
+						<BitLen>7</BitLen>
+					</Entry>
+					<Entry>
+						<Index>#x1800</Index>
+						<SubIndex>7</SubIndex>
+						<BitLen>1</BitLen>
+						<Name>TxPDO State</Name>
+						<Comment>TRUE when this TxPDO is not valid</Comment>
+						<DataType>BOOL</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x1800</Index>
+						<SubIndex>9</SubIndex>
+						<BitLen>1</BitLen>
+						<Name>TxPDO Toggle</Name>
+						<Comment>Bit toggles everytime when new value available</Comment>
+						<DataType>BOOL</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x6000</Index>
+						<SubIndex>17</SubIndex>
+						<BitLen>32</BitLen>
+						<Name>Value</Name>
+						<DataType DScale="+/-10">DINT</DataType>
+					</Entry>
+				</TxPdo>
+				<TxPdo Fixed="1" Sm="3">
+					<Index>#x1a01</Index>
+					<Name>AI Inputs Channel 2</Name>
+					<Entry>
+						<Index>#x6010</Index>
+						<SubIndex>1</SubIndex>
+						<BitLen>1</BitLen>
+						<Name>Underrange</Name>
+						<Comment>Underrange event active</Comment>
+						<DataType>BOOL</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x6010</Index>
+						<SubIndex>2</SubIndex>
+						<BitLen>1</BitLen>
+						<Name>Overrange</Name>
+						<Comment>Overrange event active</Comment>
+						<DataType>BOOL</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x6010</Index>
+						<SubIndex>3</SubIndex>
+						<BitLen>2</BitLen>
+						<Name>Limit 1</Name>
+						<Comment>Bit0: Value smaller/equal Limit1
+Bit1: Value bigger/equal Limit1</Comment>
+						<DataType>BIT2</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x6010</Index>
+						<SubIndex>5</SubIndex>
+						<BitLen>2</BitLen>
+						<Name>Limit 2</Name>
+						<Comment>Bit0: Value smaller/equal Limit2
+Bit1: Value bigger/equal Limit2</Comment>
+						<DataType>BIT2</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x6010</Index>
+						<SubIndex>7</SubIndex>
+						<BitLen>1</BitLen>
+						<Name>Error</Name>
+						<Comment>Bit set when Over- or Underrange</Comment>
+						<DataType>BOOL</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x0</Index>
+						<BitLen>7</BitLen>
+					</Entry>
+					<Entry>
+						<Index>#x1801</Index>
+						<SubIndex>7</SubIndex>
+						<BitLen>1</BitLen>
+						<Name>TxPDO State</Name>
+						<Comment>TRUE when this TxPDO is not valid</Comment>
+						<DataType>BOOL</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x1801</Index>
+						<SubIndex>9</SubIndex>
+						<BitLen>1</BitLen>
+						<Name>TxPDO Toggle</Name>
+						<Comment>Bit toggles everytime when new value available</Comment>
+						<DataType>BOOL</DataType>
+					</Entry>
+					<Entry>
+						<Index>#x6010</Index>
+						<SubIndex>17</SubIndex>
+						<BitLen>32</BitLen>
+						<Name>Value</Name>
+						<DataType DScale="+/-10">DINT</DataType>
+					</Entry>
+				</TxPdo>
+				<Mailbox DataLinkLayer="true">
+					<CoE SdoInfo="1" PdoAssign="1"></CoE>
+					<FoE></FoE>
+				</Mailbox>
+				<Eeprom>
+					<ByteSize>2048</ByteSize>
+					<ConfigData>0500030000000000000000000000</ConfigData>
+					<BootStrap>0010f400f410f400</BootStrap>
+				</Eeprom>
+			</Device>
+  </Devices></Descriptions>
+</EtherCATInfo>
