@@ -343,9 +343,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             while let Ok(Some(event)) = health_sub.try_next() {
                 let new_state = event.to.kind();
                 if new_state != last_state {
+                    // Print the full health value, not just the kind, so a
+                    // `Degraded { reason: … }` surfaces WHY (WKC mismatch vs
+                    // dropped inbound frames) instead of a bare `Degraded`.
                     eprintln!(
-                        "t=+{:>6}ms  ethercat health: {last_state:?} -> {new_state:?}",
-                        started_at.elapsed().as_millis()
+                        "t=+{:>6}ms  ethercat health: {last_state:?} -> {:?}",
+                        started_at.elapsed().as_millis(),
+                        event.to
                     );
                     use taktora_connector_core::ConnectorHealthKind::*;
                     match new_state {
