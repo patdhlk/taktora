@@ -61,10 +61,15 @@ Capability clusters
    information-exchange independence (for the diverse-monitor safety
    argument) can be reasoned about without the soft-RT machinery.
 
-   The v1 slice provides four ``Motion`` generators — ``Idle``,
-   ``Velocity`` (also the virtual master), ``Trapezoid``, and ``Gear``
-   (electronic gearing) — ticked through a fixed-capacity ``AxisGroup``
-   in a build-time topological order (masters before slaves) so coupling
-   is same-cycle coherent. Jerk-limited S-curve, camming, flying saw,
-   and superimposed motion are deferred follow-ons that slot into the
-   same ``#[non_exhaustive]`` generator enum.
+   The ``Motion`` generators — ``Idle``, ``Velocity`` (also the virtual
+   master), ``Trapezoid``, jerk-limited ``SCurve``, ``Gear`` (electronic
+   gearing), ``FlyingSaw`` (quintic catch-up / synchronous / return), and
+   ``Cam`` (``&'static`` quintic table) — are ticked through a
+   fixed-capacity ``AxisGroup`` in a build-time topological order (masters
+   before slaves) so coupling is same-cycle coherent. Superimposed
+   corrective motion (PLCopen ``MC_MoveSuperimposed``) is realised as an
+   additive jerk-limited overlay on the ``Axis`` itself rather than a
+   generator arm — a ``Motion`` cannot hold a ``Motion`` without heap
+   indirection. The ``SCurve`` profile is cross-checked against the Ruckig
+   time-optimal oracle; on-the-fly retargeting from a non-zero state
+   (Ruckig *online*) remains a deferred follow-on.

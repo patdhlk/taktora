@@ -1,12 +1,15 @@
 //! [`Axis`] and [`AxisGroup`] — the per-cycle tick contract.
 
+use crate::MotionError;
 use crate::couple::Gear;
 use crate::math;
 use crate::motion::Motion;
-use crate::state::{AxisState, AxisStatus};
+use crate::profile::SCurveState;
+use crate::state::{AxisState, AxisStatus, Limits};
 
-/// A single axis: its active generator, optional modulo period, optional master
-/// coupling, and last published set-state.
+/// A single axis: its active generator, an optional superimposed corrective
+/// offset, optional modulo period, optional master coupling, and last published
+/// set-state.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Axis {
     /// The active setpoint generator.
@@ -17,6 +20,11 @@ pub struct Axis {
     pub master_idx: Option<u8>,
     /// Last commanded set-state (modulo-wrapped). Read by downstream slaves.
     pub state: AxisState,
+    /// Optional superimposed corrective offset (`PLCopen` `MC_MoveSuperimposed`):
+    /// a jerk-limited additive move `0 → Δ` layered on top of `motion` without
+    /// interrupting it. Managed via [`Axis::superimpose`] /
+    /// [`Axis::clear_superimposed`]; applied in [`AxisGroup::tick`].
+    superimposed: Option<SCurveState>,
 }
 
 impl Axis {
@@ -29,6 +37,7 @@ impl Axis {
             modulo: None,
             master_idx: None,
             state: AxisState::ZERO,
+            superimposed: None,
         }
     }
 
@@ -41,6 +50,7 @@ impl Axis {
             modulo: None,
             master_idx: Some(master_idx),
             state: AxisState::ZERO,
+            superimposed: None,
         }
     }
 
@@ -65,6 +75,47 @@ impl Axis {
     #[must_use]
     pub fn status(&self) -> AxisStatus {
         self.motion.status()
+    }
+
+    /// Superimpose a jerk-limited corrective offset of `delta` (user units) on
+    /// top of the ongoing base motion, without interrupting it — the analogue
+    /// of `PLCopen` `MC_MoveSuperimposed`. The offset profiles `0 → delta` under
+    /// `limits` and is added to every subsequent tick; once it completes the
+    /// (now constant) offset remains applied until [`clear_superimposed`] is
+    /// called. Starting a new superimposed move replaces any previous one.
+    ///
+    /// [`clear_superimposed`]: Self::clear_superimposed
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`SCurveState::plan`] errors (non-positive limits).
+    pub fn superimpose(&mut self, delta: f64, limits: Limits) -> Result<(), MotionError> {
+        // The corrective runs in offset space (0 → delta); position soft-limits
+        // do not apply to a relative overlay, so widen them out.
+        let lim = Limits {
+            pos_min: f64::NEG_INFINITY,
+            pos_max: f64::INFINITY,
+            ..limits
+        };
+        self.superimposed = Some(SCurveState::plan(AxisState::ZERO, delta, lim)?);
+        Ok(())
+    }
+
+    /// Remove the superimposed offset. Note: if a completed offset was holding a
+    /// non-zero `delta`, clearing it steps the commanded position back by that
+    /// `delta` on the next tick — clear only when that jump is intended.
+    #[inline]
+    pub const fn clear_superimposed(&mut self) {
+        self.superimposed = None;
+    }
+
+    /// `true` while a superimposed corrective move is still in progress. Returns
+    /// `false` once it completes (even though the constant offset stays applied)
+    /// and when none is set.
+    #[inline]
+    #[must_use]
+    pub fn superimposed_active(&self) -> bool {
+        self.superimposed.is_some_and(|s| !s.done())
     }
 }
 
@@ -93,15 +144,23 @@ impl<const N: usize> AxisGroup<N> {
 
     /// Advance every axis by `dt` seconds in topological order.
     ///
-    /// Each axis reads its master's already-updated, modulo-wrapped state, runs
-    /// its generator, then has the per-axis modulo wrap applied once — keeping
-    /// rotary rollover in exactly one place. Bounded, allocation-free,
-    /// panic-free.
+    /// For each axis: read the master's already-updated, modulo-wrapped state,
+    /// run the base generator, add the superimposed corrective offset (if any),
+    /// then apply the per-axis modulo wrap once — keeping rotary rollover in
+    /// exactly one place. Bounded, allocation-free, panic-free.
     pub fn tick(&mut self, dt: f64) {
         for k in 0..N {
             let i = self.order[k] as usize;
             let master = self.axes[i].master_idx.map(|m| self.axes[m as usize].state);
             let mut next = self.axes[i].motion.update(dt, master);
+            // Superimposed corrective offset (PLCopen MC_MoveSuperimposed):
+            // additive on top of the base motion, in offset space.
+            if let Some(overlay) = self.axes[i].superimposed.as_mut() {
+                let d = overlay.update(dt);
+                next.pos += d.pos;
+                next.vel += d.vel;
+                next.acc += d.acc;
+            }
             if let Some(period) = self.axes[i].modulo {
                 next.pos = math::rem_euclid(next.pos, period);
             }

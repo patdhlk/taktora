@@ -35,8 +35,9 @@ fn count_allocs<R>(f: impl FnOnce() -> R) -> (usize, R) {
 
 /// Build a representative group exercising **every** generator on each tick: a
 /// virtual master, a trapezoid, an S-curve (multi-segment walk), a geared rotary
-/// slave, a flying-saw (quintic phase machine), and a cam (binary-search +
-/// Horner). All read master axis 0 where coupled.
+/// slave carrying a superimposed corrective overlay, a flying-saw (quintic phase
+/// machine), and a cam (binary-search + Horner). All read master axis 0 where
+/// coupled.
 fn build_group() -> AxisGroup<6> {
     let lim = Limits::new(10.0, 50.0, 100.0, -1000.0, 1000.0).unwrap();
     let trap = TrapState::plan(AxisState::ZERO, 250.0, lim).unwrap();
@@ -50,11 +51,15 @@ fn build_group() -> AxisGroup<6> {
     )
     .unwrap();
     let cam = Cam::new(CamTable::new(&CAM_SEGMENTS, 360.0));
+    // Geared slave with a superimposed corrective offset — exercises the
+    // additive-overlay branch of AxisGroup::tick.
+    let mut geared = Axis::geared(Gear::new(2.0), 0).with_modulo(360.0);
+    geared.superimpose(45.0, lim).unwrap();
     let axes = [
         master::velocity(20.0, 100.0),
         Axis::new(Motion::Trapezoid(trap)),
         Axis::new(Motion::SCurve(scurve)),
-        Axis::geared(Gear::new(2.0), 0).with_modulo(360.0),
+        geared,
         Axis::new(Motion::FlyingSaw(saw)).with_master(0),
         Axis::new(Motion::Cam(cam)).with_master(0),
     ];

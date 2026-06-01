@@ -10,8 +10,11 @@ use crate::state::{AxisState, AxisStatus};
 /// [`update`](Self::update) is bounded and allocation-free. Each arm carries
 /// its own internal state and produces an absolute [`AxisState`] each cycle.
 ///
-/// The remaining hard arms (`Superimposed`) are deferred; the enum is
-/// `#[non_exhaustive]` so they slot in without a breaking change.
+/// Superimposed motion is *not* an arm here — it cannot be (a `Motion` holding
+/// a `Motion` would need `Box`): it is realized as an additive corrective
+/// overlay on the [`Axis`](crate::Axis) itself (see [`Axis::superimpose`]). The
+/// enum is `#[non_exhaustive]` so future generators slot in without a breaking
+/// change.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum Motion {
