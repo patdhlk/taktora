@@ -17,6 +17,8 @@ taktora-executor = { workspace = true }
 tracing        = { workspace = true }
 
 [dev-dependencies]
+# NOTE: no internal `taktora-*` dev-deps here. The taktora-log bridge test
+# lives in the `publish = false` taktora-executor-tracing-tests crate, so this
+# published manifest carries no internal dev-dep that release-plz's topological
+# publish sort would mis-order (see issue #27 / release-plz#2697).
 tracing-subscriber = { version = "0.3", features = ["fmt", "registry"] }
-log         = { workspace = true }
-taktora-log = { workspace = true }

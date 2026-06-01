@@ -28,6 +28,7 @@ members = [
     "crates/taktora-executor",
     "crates/taktora-executor-tests",
     "crates/taktora-executor-tracing",
+    "crates/taktora-executor-tracing-tests",
     "crates/taktora-log",
     "crates/taktora-log-dlt",
     "crates/taktora-replay",

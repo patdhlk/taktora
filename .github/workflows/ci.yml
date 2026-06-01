@@ -60,6 +60,15 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  publish-deps:
+    name: Publish dependency order guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check internal dev-dependency publish ordering
+        run: ./scripts/check-publish-deps.sh
+
   examples:
     name: Examples (compile + mock-run)
     runs-on: ubuntu-latest
