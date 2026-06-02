@@ -19,7 +19,9 @@ taktora-cia402          = { workspace = true }
 taktora-motion-proto    = { workspace = true }
 
 [dev-dependencies]
-pollster = { workspace = true }
+pollster             = { workspace = true }
+taktora-cia402       = { workspace = true }
+taktora-motion-proto = { workspace = true }
 
 [lints.rust]
 unsafe_code  = "deny"

@@ -278,6 +278,13 @@ impl<const N: usize> NcCycle<N> {
             if !is_faulted {
                 continue;
             }
+            // The faulted axis is itself in error: latch `ErrorStop` so it is
+            // honest in the *same* `step` the fault is injected (its own `tick`
+            // ran before `exchange`, so it published a pre-fault state this
+            // cycle). `AxisRuntime::tick` would also publish `ErrorStop` from
+            // the drive statusword on the next cycle (Change A), but latching
+            // here makes the reaction same-cycle and coherent (`REQ_0861`).
+            self.axes[a].force_error_stop();
             // Quickstop the engaged downstream subtree of the faulted axis `a`.
             #[allow(clippy::cast_possible_truncation)]
             for s in self.topology.engaged_downstream(a as u16) {

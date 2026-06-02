@@ -13,6 +13,7 @@
 //!
 //! [`motion-core`]: taktora_motion_core
 
+use taktora_cia402::state::{Cia402State, decode_state};
 use taktora_cia402::{Cia402Drive, PowerStateMachine, PowerTarget};
 use taktora_motion_core::profile::{SCurveState, TrapState, VelocityMove};
 use taktora_motion_core::{Axis, AxisState as CoreAxisState, Limits, Motion};
@@ -168,9 +169,17 @@ impl AxisRuntime {
         drive.set_target_position(image, self.scale.to_increments(commanded));
 
         // 7. Publish status (minimal; full token/command mapping is Task 12).
-        // A latched safe-state reaction overrides the nominal state until power
-        // is re-requested (`REQ_0861`).
-        self.status.state = if self.error_stop {
+        // A latched safe-state reaction (engaged-downstream slave) or a drive
+        // whose statusword decodes to `Fault`/`FaultReactionActive` (the axis is
+        // itself in error) overrides the nominal state with `ErrorStop` — the
+        // latter reflects physical reality without `NcCycle` having to force it
+        // (`REQ_0861`). The drive-fault check uses the statusword already read
+        // this cycle; `decode_state` is const/cheap and allocation-free.
+        let drive_faulted = matches!(
+            decode_state(sw),
+            Cia402State::Fault | Cia402State::FaultReactionActive
+        );
+        self.status.state = if self.error_stop || drive_faulted {
             proto::AxisState::ErrorStop
         } else if self.enabled {
             map_status(self.arm.status())
@@ -215,9 +224,18 @@ impl AxisRuntime {
     /// Latch the published state to `ErrorStop` (`REQ_0861`) and reflect it in
     /// the already-published status immediately, so a fault detected after this
     /// cycle's `tick` still surfaces as `ErrorStop` in the same `step`.
+    ///
+    /// Also drops the axis's motion authority: the active generator is replaced
+    /// with `Idle` at the current commanded position. A faulted axis must not
+    /// keep tracking a master (a geared slave would otherwise gear-follow a
+    /// still-moving master while published `ErrorStop`); freezing the generator
+    /// here makes the safe-state reaction coherent and lets the subsequent
+    /// bumpless re-enable settle to `Standstill` rather than resuming the gear.
     pub(crate) const fn force_error_stop(&mut self) {
         self.error_stop = true;
         self.status.state = proto::AxisState::ErrorStop;
+        self.arm.motion = Motion::Idle(self.arm.state.pos);
+        self.move_finite = false;
     }
 
     /// The current `CiA` 402 power target (inspection helper for the fault
@@ -659,6 +677,35 @@ mod tests {
             axis.token_state_for_test(),
             proto::TokenState::Active,
             "Reset is accepted (Active) on a faulted axis"
+        );
+    }
+
+    #[test]
+    fn drive_fault_statusword_publishes_error_stop() {
+        // Change A: a drive whose statusword decodes to `Fault` must publish
+        // `ErrorStop` (the axis is itself in error), NOT `Disabled` — even
+        // though it is not `OperationEnabled` and no `error_stop` latch is set.
+        let (mut axis, mut bus) = enabled_axis();
+        let drive = MockDrive::for_axis(0);
+        let dt = 0.002;
+
+        // Inject a hard-fault into the drive: next exchange rewrites the
+        // statusword to `Fault` (0x0208).
+        bus.inject_fault(0);
+        bus.with_image_mut(|img| axis.tick(img, &drive, dt, None));
+        pollster::block_on(bus.exchange()).unwrap();
+        // Tick again so the post-fault statusword is read and published.
+        bus.with_image_mut(|img| axis.tick(img, &drive, dt, None));
+
+        assert!(!axis.is_enabled(), "faulted drive is not OperationEnabled");
+        assert!(
+            !axis.error_stop_for_test(),
+            "no force_error_stop latch — state comes purely from the statusword"
+        );
+        assert_eq!(
+            axis.status().state,
+            proto::AxisState::ErrorStop,
+            "Fault statusword must publish ErrorStop, not Disabled"
         );
     }
 }

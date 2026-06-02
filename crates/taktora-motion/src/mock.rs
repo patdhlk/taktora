@@ -109,10 +109,25 @@ impl MockCyclicFieldbus {
     ///
     /// This is a latched hard-fault: it stays faulted (the `Fault` statusword
     /// is rewritten every cycle), so the natural `FAULT_RESET` recovery path
-    /// in `advance_drive` is not reachable while injected. To test recovery,
-    /// drive the `CiA` 402 power state naturally rather than via this hook.
+    /// in `advance_drive` is not reachable while injected. Call
+    /// [`clear_fault`](Self::clear_fault) to lift the injection so the drive
+    /// can recover via the normal `CiA` 402 transitions (`FAULT_RESET` ->
+    /// `SwitchOnDisabled` -> power-walk -> `OperationEnabled`).
     pub fn inject_fault(&mut self, a: usize) {
         self.faulted[a] = true;
+    }
+
+    /// Lift the latched hard-fault on axis `a` (undoes [`inject_fault`]).
+    ///
+    /// After this, `advance_drive` resumes normal `CiA` 402 state transitions,
+    /// so a `FAULT_RESET` controlword walks the drive `Fault` ->
+    /// `SwitchOnDisabled`, from which the power machine can re-enable. The
+    /// drive's current statusword is left as-is (still `Fault` until the next
+    /// `FAULT_RESET` exchange) so recovery follows the real handshake.
+    ///
+    /// [`inject_fault`]: Self::inject_fault
+    pub fn clear_fault(&mut self, a: usize) {
+        self.faulted[a] = false;
     }
 
     /// Make axis `a`'s device stale (drops out of the cycle).
@@ -258,6 +273,47 @@ mod tests {
         bus.inject_stale(0, true);
         let q = block_on(bus.exchange()).unwrap();
         assert!(!q.all_devices_fresh);
+    }
+
+    #[test]
+    fn clear_fault_lets_a_faulted_drive_recover() {
+        // Change B: while `inject_fault` is latched the drive stays in `Fault`
+        // (statusword rewritten every cycle); after `clear_fault` the normal
+        // `CiA` 402 transitions resume and the power machine re-enables.
+        let mut bus = MockCyclicFieldbus::new(1);
+        let drive = MockDrive::for_axis(0);
+
+        // Latch a hard-fault and confirm it sticks across cycles.
+        bus.inject_fault(0);
+        for _ in 0..4 {
+            block_on(bus.exchange()).unwrap();
+        }
+        assert_eq!(
+            decode_state(bus.with_image(|i| drive.statusword(i))),
+            Cia402State::Fault,
+            "injected fault is latched"
+        );
+
+        // Lift the injection, then drive the power machine toward Enabled. The
+        // machine emits FAULT_RESET from `Fault`, walking the drive back to
+        // SwitchOnDisabled, then through the normal power handshake.
+        bus.clear_fault(0);
+        let machine = taktora_cia402::PowerStateMachine::new(taktora_cia402::PowerTarget::Enabled);
+        let mut sw = bus.with_image(|i| drive.statusword(i));
+        for _ in 0..12 {
+            let cw_out = machine.next_controlword(sw);
+            bus.with_image_mut(|img| drive.set_controlword(img, cw_out));
+            block_on(bus.exchange()).unwrap();
+            sw = bus.with_image(|i| drive.statusword(i));
+            if decode_state(sw) == Cia402State::OperationEnabled {
+                break;
+            }
+        }
+        assert_eq!(
+            decode_state(sw),
+            Cia402State::OperationEnabled,
+            "after clear_fault the drive recovers to OperationEnabled"
+        );
     }
 
     fn block_on<F: core::future::Future>(f: F) -> F::Output {
