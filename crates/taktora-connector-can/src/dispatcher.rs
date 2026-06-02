@@ -345,34 +345,11 @@ where
     let mut outcome = IterationOutcome::default();
 
     // Filter recompute pass.
-    let recompiled = compile_iface_filter(registry, iface);
-    let last = inbound_count(registry, iface);
-    if !recompiled.is_empty() || last > 0 {
-        driver
-            .apply_filter(recompiled.as_slice())
-            .map_err(|e| ConnectorError::stack(IoErr(format!("apply_filter: {e}"))))?;
-    }
+    recompute_filter_once(iface, driver, registry)?;
 
     // TX drain.
     let mut tx_scratch = [0u8; MAX_CAN_PAYLOAD];
-    let jobs = collect_outbound_jobs(iface, registry)?;
-    for data in &jobs {
-        match data.kind {
-            CanFrameKind::Classical => {
-                driver
-                    .send_classical(data)
-                    .await
-                    .map_err(|e| ConnectorError::stack(IoErr(format!("send_classical: {e}"))))?;
-            }
-            CanFrameKind::Fd => {
-                driver
-                    .send_fd(data)
-                    .await
-                    .map_err(|e| ConnectorError::stack(IoErr(format!("send_fd: {e}"))))?;
-            }
-        }
-        outcome.tx_sent += 1;
-    }
+    outcome.tx_sent = send_outbound_jobs_counted(iface, driver, registry).await?;
     let _ = &mut tx_scratch;
 
     // RX poll with timeout.
@@ -398,21 +375,111 @@ where
         Some(Ok(CanFrame::Remote { .. })) => {}
         Some(Err(CanIoError::Closed)) => {
             outcome.reconnected = true;
-            let _ = health.set_iface(*iface, IfaceHealthKind::Down);
-            // Try one reopen with the policy's next delay.
-            let delay = reconnect_policy.next_delay();
-            tokio::time::sleep(delay).await;
-            if driver.reopen().await.is_ok() {
-                let recompiled = compile_iface_filter(registry, iface);
-                let _ = driver.apply_filter(recompiled.as_slice());
-                let _ = health.set_iface(*iface, IfaceHealthKind::Connecting);
-                let _ = health.set_iface(*iface, IfaceHealthKind::Up);
-            }
+            reconnect_once(iface, driver, registry, health, reconnect_policy).await;
         }
         Some(Err(e)) => return Err(ConnectorError::stack(IoErr(format!("recv: {e}")))),
     }
 
     Ok(outcome)
+}
+
+/// Recompute and apply this iface's inbound filter once, mirroring the
+/// filter-recompute pass at the head of [`dispatch_one_iteration`].
+///
+/// The `apply_filter` call is skipped only when there is nothing to
+/// install: the recompiled filter is empty *and* the iface has no
+/// inbound channels registered.
+///
+/// # Errors
+///
+/// Propagates the driver's `apply_filter` failure as a stack error.
+fn recompute_filter_once<I>(
+    iface: &CanIface,
+    driver: &mut I,
+    registry: &Mutex<ChannelRegistry>,
+) -> Result<(), ConnectorError>
+where
+    I: CanInterfaceLike,
+{
+    let recompiled = compile_iface_filter(registry, iface);
+    let last = inbound_count(registry, iface);
+    if !recompiled.is_empty() || last > 0 {
+        driver
+            .apply_filter(recompiled.as_slice())
+            .map_err(|e| ConnectorError::stack(IoErr(format!("apply_filter: {e}"))))?;
+    }
+    Ok(())
+}
+
+/// Drain this iface's outbound channels once and send every collected
+/// `CAN` frame via the driver, returning the number of frames sent.
+///
+/// Behaviour mirrors the TX-drain pass of [`dispatch_one_iteration`]:
+/// jobs are collected under the registry lock, then sent in order with
+/// classical / `FD` routing per [`CanFrameKind`]. The count returned is
+/// assigned to [`IterationOutcome::tx_sent`].
+///
+/// # Errors
+///
+/// Propagates the driver's `send_classical` / `send_fd` failure as a
+/// stack error.
+async fn send_outbound_jobs_counted<I>(
+    iface: &CanIface,
+    driver: &mut I,
+    registry: &Mutex<ChannelRegistry>,
+) -> Result<usize, ConnectorError>
+where
+    I: CanInterfaceLike,
+{
+    let jobs = collect_outbound_jobs(iface, registry)?;
+    let mut sent = 0usize;
+    for data in &jobs {
+        match data.kind {
+            CanFrameKind::Classical => {
+                driver
+                    .send_classical(data)
+                    .await
+                    .map_err(|e| ConnectorError::stack(IoErr(format!("send_classical: {e}"))))?;
+            }
+            CanFrameKind::Fd => {
+                driver
+                    .send_fd(data)
+                    .await
+                    .map_err(|e| ConnectorError::stack(IoErr(format!("send_fd: {e}"))))?;
+            }
+        }
+        sent += 1;
+    }
+    Ok(sent)
+}
+
+/// Take the single-shot reconnect path after an inbound recv returned
+/// [`CanIoError::Closed`], mirroring the `Closed` arm of
+/// [`dispatch_one_iteration`].
+///
+/// Sets the iface `Down`, waits the policy's next delay, then attempts
+/// one reopen. On success the filter is recompiled + reapplied and the
+/// iface transitions `Connecting` then `Up`. All health and re-apply
+/// errors are intentionally ignored, exactly as in the inline arm.
+async fn reconnect_once<I>(
+    iface: &CanIface,
+    driver: &mut I,
+    registry: &Mutex<ChannelRegistry>,
+    health: &Arc<CanHealthMonitor>,
+    reconnect_policy: &mut dyn ReconnectPolicy,
+) where
+    I: CanInterfaceLike,
+{
+    let _ = health.set_iface(*iface, IfaceHealthKind::Down);
+    // Try one reopen with the policy's next delay.
+    let delay = reconnect_policy.next_delay();
+    tokio::time::sleep(delay).await;
+    if driver.reopen().await.is_ok() {
+        let recompiled = compile_iface_filter(registry, iface);
+        let _ = driver.apply_filter(recompiled.as_slice());
+        let _ = health.set_iface(*iface, IfaceHealthKind::Connecting);
+        let _ = health.set_iface(*iface, IfaceHealthKind::Up);
+    }
 }
 
 #[allow(clippy::significant_drop_tightening)]
