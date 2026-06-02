@@ -2,3 +2,4 @@
 #![warn(missing_docs)]
 
 pub mod scale;
+pub mod topology;
