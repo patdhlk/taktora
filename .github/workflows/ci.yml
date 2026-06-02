@@ -89,6 +89,24 @@ jobs:
       - name: Check examples
         run: ./scripts/check-examples.sh
 
+  complexity:
+    name: Complexity gate (rust-code-analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install rust-code-analysis-cli (pinned prebuilt)
+        run: |
+          set -euo pipefail
+          ver=v0.0.25
+          url="https://github.com/mozilla/rust-code-analysis/releases/download/${ver}/rust-code-analysis-linux-cli-x86_64.tar.gz"
+          curl -fsSL "$url" -o /tmp/rca.tar.gz
+          # tarball contains a single file at archive root: rust-code-analysis-cli
+          sudo tar -xzf /tmp/rca.tar.gz -C /usr/local/bin rust-code-analysis-cli
+          sudo chmod +x /usr/local/bin/rust-code-analysis-cli
+          rust-code-analysis-cli --version
+      - name: Run complexity gate
+        run: ./scripts/check-complexity.sh
+
   spec:
     name: Build specification
     runs-on: ubuntu-latest
