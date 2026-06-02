@@ -44,25 +44,19 @@ pub enum DataType {
 }
 
 impl DataType {
+    /// Parse a `BIT`-prefixed width suffix, returning `Some(BitN(w))` for widths 1–8.
+    fn parse_bit_width(upper: &str) -> Option<Self> {
+        let w = upper.strip_prefix("BIT")?.parse::<u8>().ok()?;
+        (1..=8).contains(&w).then_some(Self::BitN(w))
+    }
+
     /// Map an ESI/CoE type name (the text of an ESI `<Type>` / `BaseType`) to a
     /// [`DataType`]. Unknown names are returned as [`DataType::Named`].
     #[must_use]
     pub fn parse_coe_name(name: &str) -> Self {
         let trimmed = name.trim();
-        if trimmed.eq_ignore_ascii_case("STRING")
-            || trimmed.to_ascii_uppercase().starts_with("STRING(")
-            || trimmed.eq_ignore_ascii_case("VISIBLESTRING")
-        {
-            return Self::VisibleString;
-        }
-        if let Some(rest) = trimmed.to_ascii_uppercase().strip_prefix("BIT") {
-            if let Ok(width) = rest.parse::<u8>() {
-                if (1..=8).contains(&width) {
-                    return Self::BitN(width);
-                }
-            }
-        }
-        match trimmed.to_ascii_uppercase().as_str() {
+        let upper = trimmed.to_ascii_uppercase();
+        match upper.as_str() {
             "BOOL" | "BOOLEAN" => Self::Bool,
             "SINT" => Self::I8,
             "INT" => Self::I16,
@@ -76,7 +70,10 @@ impl DataType {
             "LREAL" => Self::Real64,
             "OCTETSTRING" => Self::OctetString,
             "UNICODESTRING" => Self::UnicodeString,
-            _ => Self::Named(trimmed.to_owned()),
+            s if s == "STRING" || s == "VISIBLESTRING" || s.starts_with("STRING(") => {
+                Self::VisibleString
+            }
+            _ => Self::parse_bit_width(&upper).unwrap_or_else(|| Self::Named(trimmed.to_owned())),
         }
     }
 }
