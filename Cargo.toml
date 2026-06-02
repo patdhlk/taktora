@@ -37,6 +37,7 @@ members = [
     "crates/taktora-cia402",
     "crates/taktora-motion-proto",
     "crates/taktora-motion",
+    "crates/taktora-motion-tests",
     "crates/taktora-replay",
 ]
 
