@@ -39,6 +39,7 @@ members = [
     "crates/taktora-motion",
     "crates/taktora-motion-tests",
     "crates/taktora-replay",
+    "crates/taktora-stats",
 ]
 
 [workspace.package]
@@ -86,6 +87,7 @@ taktora-cyclic-fieldbus          = { path = "crates/taktora-cyclic-fieldbus", ve
 taktora-cia402                   = { path = "crates/taktora-cia402", version = "0.1.0" }
 taktora-motion-proto             = { path = "crates/taktora-motion-proto", version = "0.1.0" }
 taktora-motion                   = { path = "crates/taktora-motion", version = "0.1.0" }
+taktora-stats                    = { path = "crates/taktora-stats", version = "0.1.0" }
 
 # External crates
 iceoryx2          = "0.8"
