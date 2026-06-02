@@ -20,4 +20,4 @@ mod histogram;
 mod minmax;
 
 pub use histogram::{BUCKETS, RollingHistogram, bucket_index, bucket_lower};
-// TODO(Task 4): pub use minmax::MinMaxDeque;
+pub use minmax::MinMaxDeque;
