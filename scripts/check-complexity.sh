@@ -34,6 +34,13 @@ if [ "${#files[@]}" -eq 0 ]; then
   while IFS= read -r line; do files+=("$line"); done < <(find "$SCAN_ROOT" -name '*.rs' | sort)
 fi
 
+# No Rust sources under the scan root → nothing to gate. Exit clean. (Also
+# avoids a `set -u` "unbound variable" on the empty-array loop under bash 3.2.)
+if [ "${#files[@]}" -eq 0 ]; then
+  echo "complexity gate: OK — no Rust source files under $SCAN_ROOT."
+  exit 0
+fi
+
 violations=0
 mi_report=""
 
