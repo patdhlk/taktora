@@ -39,8 +39,12 @@ pub const fn bucket_lower(i: usize) -> u64 {
 /// segment holds up to `window / S` samples; when the current segment
 /// fills, the ring advances and the segment it advances into is cleared —
 /// ageing out the oldest `window / S` samples in one step (the
-/// snapshot-ring of `ADR_0060`). The live window therefore holds between
-/// `(S - 1) * (window / S)` and `window` samples.
+/// snapshot-ring of `ADR_0060`). In steady state (after at least `window`
+/// samples have been recorded) the live window holds between
+/// `(S - 1) * (window / S)` and `S * (window / S)` samples — the upper
+/// bound equals `window` exactly when `window` is divisible by `S` (floor
+/// division). During initial fill, `count()` grows monotonically from `1`
+/// to the steady-state upper bound.
 ///
 /// Single-writer: `record` takes `&mut self`. `percentile` is `&self` and
 /// O(`BUCKETS * S`). Allocation-free; all storage is inline arrays.
@@ -57,9 +61,8 @@ impl<const B: usize, const S: usize> RollingHistogram<B, S> {
     /// segment holds at least one sample.
     #[must_use]
     pub fn new(window: u32) -> Self {
-        // S is a small const-generic segment count; a histogram with
-        // 2^32 or more segments is not a realistic use-case, so the
-        // expect message documents that invariant.
+        // S is a small const-generic segment count; casting to u32 is safe
+        // because S > u32::MAX is not a realistic use-case.
         #[allow(clippy::cast_possible_truncation)] // S ≤ u32::MAX by construction; const generic
         let s_u32 = S as u32;
         let seg_capacity = (window / s_u32).max(1);
@@ -71,8 +74,9 @@ impl<const B: usize, const S: usize> RollingHistogram<B, S> {
         }
     }
 
-    /// Record one sample (nanoseconds). O(1); ages out a segment when the
-    /// current one is full.
+    /// Record one sample (nanoseconds). Amortised O(1); O(`B`) at segment
+    /// boundaries (once every `window / S` calls, when the segment it
+    /// advances into is cleared).
     pub fn record(&mut self, value_ns: u64) {
         if self.n_in_cur >= self.seg_capacity {
             self.cur = (self.cur + 1) % S;
@@ -97,7 +101,9 @@ impl<const B: usize, const S: usize> RollingHistogram<B, S> {
 
     /// Percentile estimate, in nanoseconds, as the lower edge of the bucket
     /// containing the requested rank. `permille` is the percentile times 10
-    /// (e.g. `500` = p50, `950` = p95, `990` = p99). Returns `0` if empty.
+    /// (e.g. `500` = p50, `950` = p95, `990` = p99) and must be in
+    /// `1..=1000`; `0` degenerates to `bucket_lower(0)` regardless of the
+    /// data. Returns `0` if empty.
     #[must_use]
     pub fn percentile(&self, permille: u16) -> u64 {
         let total = self.count();
