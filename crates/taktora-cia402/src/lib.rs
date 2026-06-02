@@ -7,3 +7,6 @@ pub use state::{Cia402State, controlword, decode_state};
 
 pub mod power;
 pub use power::{PowerStateMachine, PowerTarget};
+
+pub mod drive;
+pub use drive::Cia402Drive;
