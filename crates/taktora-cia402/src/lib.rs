@@ -4,3 +4,6 @@
 
 pub mod state;
 pub use state::{Cia402State, controlword, decode_state};
+
+pub mod power;
+pub use power::{PowerStateMachine, PowerTarget};
