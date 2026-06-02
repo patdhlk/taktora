@@ -1,0 +1,30 @@
+[package]
+name         = "taktora-motion"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Cyclic NC task: runs taktora-motion-core against CSP drives over a CyclicFieldbus."
+
+[dependencies]
+taktora-motion-core     = { workspace = true }
+taktora-cyclic-fieldbus = { workspace = true }
+taktora-cia402          = { workspace = true }
+taktora-motion-proto    = { workspace = true }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"
