@@ -1,9 +1,12 @@
 //! Exact windowed min/max via a monotonic deque.
 
-/// Fixed-capacity ring deque of `(sample_index, value)` pairs. Holds at
-/// most `N` elements — the window length — so the backing array never
-/// overflows: the leaving element is popped from the front before each
-/// push once the window has slid.
+/// Private fixed-capacity ring deque of `(sample_index, value)` pairs.
+///
+/// **Safety contract:** the caller (`MinMaxDeque::record`) must ensure
+/// `len < N` before every `push_back`. It guarantees this by draining the
+/// deque via `pop_back` (value dominance — the primary room-maker, which
+/// also maintains the monotonic invariant) and `pop_front` (window expiry).
+/// `push_back` itself performs no bounds check.
 struct MonoDeque<const N: usize> {
     buf: [(u64, u64); N],
     head: usize,
@@ -59,8 +62,14 @@ pub struct MinMaxDeque<const N: usize> {
 
 impl<const N: usize> MinMaxDeque<N> {
     /// Create an empty deque over a window of `N` samples.
+    ///
+    /// # Panics
+    ///
+    /// Fails to compile (const-eval assertion) if `N == 0`; a zero-length
+    /// window has no meaning and would divide by zero in the ring math.
     #[must_use]
     pub const fn new() -> Self {
+        const { assert!(N > 0, "MinMaxDeque window size N must be > 0") }
         Self {
             min_d: MonoDeque::new(),
             max_d: MonoDeque::new(),
@@ -68,8 +77,10 @@ impl<const N: usize> MinMaxDeque<N> {
         }
     }
 
-    /// Record one sample. Evicts the now-out-of-window front before
-    /// pushing, so the backing arrays never exceed `N` elements.
+    /// Record one sample. Pops dominated values from the back (maintaining
+    /// the monotonic invariant), then evicts any expired front entries
+    /// (maintaining the window bound), so the backing arrays never exceed
+    /// `N` elements.
     #[allow(clippy::missing_const_for_fn)] // runtime-only mutation; const would be misleading
     pub fn record(&mut self, value: u64) {
         let idx = self.next;
