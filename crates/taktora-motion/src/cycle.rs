@@ -177,6 +177,15 @@ impl<const N: usize> NcCycle<N> {
         self.axes[i].status()
     }
 
+    /// The token superseded on axis `i`'s most recent rising edge while still
+    /// `Active` (Aborting buffer mode observation, `REQ_0855`). The single-slot
+    /// [`proto::AxisStatus`] only carries the current token, so the aborted
+    /// predecessor is surfaced through this accessor.
+    #[must_use]
+    pub const fn last_aborted_token_of(&self, i: usize) -> Option<proto::Token> {
+        self.axes[i].last_aborted_token()
+    }
+
     /// Axis `i`'s current `CiA` 402 power target (test/inspection helper).
     #[must_use]
     pub const fn power_target_of(&self, i: usize) -> taktora_cia402::PowerTarget {
@@ -203,12 +212,14 @@ impl<const N: usize> NcCycle<N> {
         commands: &[proto::AxisCommand],
         dt: f64,
     ) -> [proto::AxisStatus; N] {
-        // 1. Drain commands (minimal: route by axis id; full mapping is Task 12).
+        // 1. Drain commands: route by axis id, applying token-correlated
+        //    command -> motion/power mapping with Aborting buffer mode
+        //    (`REQ_0855`). `GearIn` consumes the axis's resolved direct master.
         for cmd in commands {
             let idx = cmd.axis_id as usize;
             if idx < N {
-                // Task 12 maps `kind`/`params` to motion + token lifecycle.
-                let _ = idx;
+                let master = self.direct_master[idx];
+                self.axes[idx].apply_command(cmd, master);
             }
         }
 
@@ -363,6 +374,96 @@ mod tests {
         assert_ne!(
             nc.power_target_of(2),
             taktora_cia402::PowerTarget::QuickStop
+        );
+    }
+
+    /// Drive axis 0 up to `OperationEnabled`, running empty `step`s.
+    fn enable_axis0(nc: &mut NcCycle<1>, bus: &mut MockCyclicFieldbus, dt: f64) {
+        nc.request_power(0, true);
+        for _ in 0..16 {
+            pollster::block_on(nc.step(bus, &[], dt));
+            if nc.is_enabled(0) {
+                break;
+            }
+        }
+        assert!(nc.is_enabled(0), "axis 0 should enable");
+    }
+
+    fn vel_params(v: f64, a: f64) -> proto::CommandParams {
+        proto::CommandParams {
+            target_pos: 0.0,
+            velocity: v,
+            accel: a,
+            jerk: 0.0,
+        }
+    }
+
+    #[test]
+    fn token_correlation_aborting_and_infeasible() {
+        let mut nc = NcCycle::<1>::new([unit_scale()]);
+        nc.precompute();
+        let mut bus = MockCyclicFieldbus::new(1);
+        let dt = 0.002;
+        enable_axis0(&mut nc, &mut bus, dt);
+
+        // 1. MoveVelocity, token 1 -> Active + ContinuousMotion.
+        let move_vel = proto::AxisCommand {
+            axis_id: 0,
+            token: 1,
+            kind: proto::CommandKind::MoveVelocity,
+            params: vel_params(25.0, 100.0),
+        };
+        pollster::block_on(nc.step(&mut bus, &[move_vel], dt));
+        let s = nc.status_of(0);
+        assert_eq!(s.last_token, 1, "token 1 latched");
+        assert_eq!(s.token_state, proto::TokenState::Active, "token 1 active");
+        assert_eq!(
+            s.state,
+            proto::AxisState::ContinuousMotion,
+            "velocity move -> ContinuousMotion"
+        );
+
+        // 2. Stop, token 2 -> token 2 Active, token 1 reported Aborted (supersede).
+        let stop = proto::AxisCommand {
+            axis_id: 0,
+            token: 2,
+            kind: proto::CommandKind::Stop,
+            params: vel_params(0.0, 100.0),
+        };
+        pollster::block_on(nc.step(&mut bus, &[stop], dt));
+        let s = nc.status_of(0);
+        assert_eq!(s.last_token, 2, "token 2 now latched");
+        assert_eq!(s.token_state, proto::TokenState::Active, "token 2 active");
+        assert_eq!(
+            nc.last_aborted_token_of(0),
+            Some(1),
+            "superseded token 1 aborted (Aborting buffer mode)"
+        );
+
+        // 3. Infeasible FlyingSaw, token 3 -> Error, NO fault, motion unchanged.
+        let state_before = nc.status_of(0).state;
+        let saw = proto::AxisCommand {
+            axis_id: 0,
+            token: 3,
+            kind: proto::CommandKind::FlyingSaw,
+            params: vel_params(0.0, 100.0),
+        };
+        pollster::block_on(nc.step(&mut bus, &[saw], dt));
+        let s = nc.status_of(0);
+        assert_eq!(s.last_token, 3, "token 3 latched");
+        assert_eq!(
+            s.token_state,
+            proto::TokenState::Error,
+            "infeasible FlyingSaw -> Error"
+        );
+        assert_ne!(
+            s.state,
+            proto::AxisState::ErrorStop,
+            "infeasible command must NOT fault the axis"
+        );
+        assert_eq!(
+            s.state, state_before,
+            "active motion unchanged by rejected command"
         );
     }
 }
