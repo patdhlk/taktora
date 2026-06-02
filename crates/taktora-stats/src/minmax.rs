@@ -57,6 +57,9 @@ impl<const N: usize> MonoDeque<N> {
 pub struct MinMaxDeque<const N: usize> {
     min_d: MonoDeque<N>,
     max_d: MonoDeque<N>,
+    /// Monotonic sample counter / next sample index. The window-expiry
+    /// comparison relies on this never wrapping; at u64 width that is
+    /// unreachable in practice (centuries even at MHz sample rates).
     next: u64,
 }
 
