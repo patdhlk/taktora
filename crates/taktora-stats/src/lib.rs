@@ -19,6 +19,5 @@
 mod histogram;
 mod minmax;
 
-pub use histogram::{BUCKETS, bucket_index, bucket_lower};
-// TODO(Task 3): add RollingHistogram to the histogram re-export
+pub use histogram::{BUCKETS, RollingHistogram, bucket_index, bucket_lower};
 // TODO(Task 4): pub use minmax::MinMaxDeque;

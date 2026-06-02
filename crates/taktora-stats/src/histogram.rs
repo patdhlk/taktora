@@ -33,6 +33,91 @@ pub const fn bucket_lower(i: usize) -> u64 {
     1u64 << i
 }
 
+/// Sliding-window percentile histogram over octave buckets.
+///
+/// Implemented as a ring of `S` per-segment bucket-count arrays. Each
+/// segment holds up to `window / S` samples; when the current segment
+/// fills, the ring advances and the segment it advances into is cleared —
+/// ageing out the oldest `window / S` samples in one step (the
+/// snapshot-ring of `ADR_0060`). The live window therefore holds between
+/// `(S - 1) * (window / S)` and `window` samples.
+///
+/// Single-writer: `record` takes `&mut self`. `percentile` is `&self` and
+/// O(`BUCKETS * S`). Allocation-free; all storage is inline arrays.
+pub struct RollingHistogram<const B: usize, const S: usize> {
+    seg: [[u32; B]; S],
+    cur: usize,
+    n_in_cur: u32,
+    seg_capacity: u32,
+}
+
+impl<const B: usize, const S: usize> RollingHistogram<B, S> {
+    /// Create a histogram whose live window is approximately `window`
+    /// samples, divided into `S` segments. `window` is clamped so each
+    /// segment holds at least one sample.
+    #[must_use]
+    pub fn new(window: u32) -> Self {
+        // S is a small const-generic segment count; a histogram with
+        // 2^32 or more segments is not a realistic use-case, so the
+        // expect message documents that invariant.
+        #[allow(clippy::cast_possible_truncation)] // S ≤ u32::MAX by construction; const generic
+        let s_u32 = S as u32;
+        let seg_capacity = (window / s_u32).max(1);
+        Self {
+            seg: [[0u32; B]; S],
+            cur: 0,
+            n_in_cur: 0,
+            seg_capacity,
+        }
+    }
+
+    /// Record one sample (nanoseconds). O(1); ages out a segment when the
+    /// current one is full.
+    pub fn record(&mut self, value_ns: u64) {
+        if self.n_in_cur >= self.seg_capacity {
+            self.cur = (self.cur + 1) % S;
+            self.seg[self.cur] = [0u32; B];
+            self.n_in_cur = 0;
+        }
+        self.seg[self.cur][bucket_index(value_ns)] += 1;
+        self.n_in_cur += 1;
+    }
+
+    /// Total sample count currently in the window.
+    #[must_use]
+    pub fn count(&self) -> u64 {
+        let mut total = 0u64;
+        for s in 0..S {
+            for b in 0..B {
+                total += u64::from(self.seg[s][b]);
+            }
+        }
+        total
+    }
+
+    /// Percentile estimate, in nanoseconds, as the lower edge of the bucket
+    /// containing the requested rank. `permille` is the percentile times 10
+    /// (e.g. `500` = p50, `950` = p95, `990` = p99). Returns `0` if empty.
+    #[must_use]
+    pub fn percentile(&self, permille: u16) -> u64 {
+        let total = self.count();
+        if total == 0 {
+            return 0;
+        }
+        let target = (total * u64::from(permille)).div_ceil(1000);
+        let mut cum = 0u64;
+        for b in 0..B {
+            for s in 0..S {
+                cum += u64::from(self.seg[s][b]);
+            }
+            if cum >= target {
+                return bucket_lower(b);
+            }
+        }
+        bucket_lower(B - 1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,5 +147,57 @@ mod tests {
         // at least 3 buckets apart (REQ_0100 / ADR_0060).
         assert!(bucket_index(10_000) - bucket_index(1_000) >= 3);
         assert!(bucket_index(1_000_000) - bucket_index(100_000) >= 3);
+    }
+
+    #[test]
+    fn percentile_of_uniform_fill_is_bucket_quantised() {
+        // Window 1000, 4 segments. Record 1000 samples all == 1024 ns
+        // (bucket 10). Every percentile is that bucket's lower edge.
+        let mut h = RollingHistogram::<BUCKETS, 4>::new(1000);
+        for _ in 0..1000 {
+            h.record(1024);
+        }
+        assert_eq!(h.count(), 1000);
+        assert_eq!(h.percentile(500), bucket_lower(10)); // p50
+        assert_eq!(h.percentile(990), bucket_lower(10)); // p99
+    }
+
+    #[test]
+    fn percentile_separates_low_and_high_populations() {
+        // 900 fast samples (~1us, bucket 9-10) + 100 slow (~1ms, bucket 19-20).
+        let mut h = RollingHistogram::<BUCKETS, 4>::new(1000);
+        for _ in 0..900 {
+            h.record(1_000);
+        }
+        for _ in 0..100 {
+            h.record(1_000_000);
+        }
+        // p50 lands in the fast population, p99 in the slow population.
+        assert!(h.percentile(500) < bucket_lower(15));
+        assert!(h.percentile(990) >= bucket_lower(15));
+    }
+
+    #[test]
+    fn old_samples_age_out_of_the_window() {
+        // Window 1000 / 4 segments => 250 samples per segment. Fill the
+        // window with slow samples, then push enough fast samples to evict
+        // every slow one. The slow population must disappear from the tail.
+        let mut h = RollingHistogram::<BUCKETS, 4>::new(1000);
+        for _ in 0..1000 {
+            h.record(1_000_000); // slow, bucket ~19
+        }
+        for _ in 0..1000 {
+            h.record(1_000); // fast, bucket ~9
+        }
+        // Window now holds only fast samples; even p99 is fast.
+        assert!(h.percentile(990) < bucket_lower(15));
+        assert!(h.count() <= 1000);
+    }
+
+    #[test]
+    fn empty_histogram_reports_zero() {
+        let h = RollingHistogram::<BUCKETS, 4>::new(1000);
+        assert_eq!(h.count(), 0);
+        assert_eq!(h.percentile(500), 0);
     }
 }
