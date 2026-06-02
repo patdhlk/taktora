@@ -394,6 +394,16 @@ cargo test  --workspace --all-features -- --test-threads=1
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
+Pre-push hooks (cargo-clippy, cargo-doc, complexity-gate) mirror the CI jobs.
+Install with `pre-commit install && pre-commit install --hook-type pre-push`.
+Per-tool notes:
+
+- **Complexity gate (optional locally):** install once with
+  `cargo install --locked rust-code-analysis-cli` (the `--locked` is required;
+  a plain `cargo install` fails to build on current toolchains) so the
+  `complexity-gate` pre-push hook runs. Without it the hook self-skips; CI
+  enforces it regardless.
+
 Tests run single-threaded in CI because each test creates its own iceoryx2
 service in shared memory (parallel runs would contend on the same names) and
 the `CountingAllocator` used by the zero-alloc tests is process-wide.

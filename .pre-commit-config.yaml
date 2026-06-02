@@ -107,3 +107,14 @@ repos:
         files: \.rs$
         stages: [pre-push]
         description: Matches the `doc` CI job.
+
+      - id: complexity-gate
+        name: complexity gate (rust-code-analysis)
+        entry: ./scripts/check-complexity.sh
+        language: system
+        pass_filenames: false
+        files: \.rs$
+        stages: [pre-push]
+        description: >-
+          Cyclomatic/exit-point gate. Self-skips if rust-code-analysis-cli/jq
+          are not installed. Matches the `complexity` CI job.

@@ -192,6 +192,43 @@ fn image_bits(device: &DeviceInstance, direction: PdoDirection) -> u32 {
         .unwrap_or(0)
 }
 
+/// Validate per-channel rules 1, 2, and 5 for a single [`ChannelBinding`].
+///
+/// Checks, in order: zero-length slice (rule 1), unknown device (rule 2),
+/// slice out of process image (rule 5). Returns the first fault found.
+fn validate_channel(
+    channel: &ChannelBinding,
+    device_by_label: &HashMap<&str, &DeviceInstance>,
+) -> Result<(), CodegenError> {
+    // Rule 1: zero-length slice.
+    if channel.bit_length == 0 {
+        return Err(ValidationError::ZeroLengthSlice {
+            channel: channel.name.clone(),
+        }
+        .into());
+    }
+    // Rule 2: unknown / dangling device.
+    let Some(device) = device_by_label.get(channel.device.as_str()) else {
+        return Err(ValidationError::UnknownDevice {
+            channel: channel.name.clone(),
+            device: channel.device.clone(),
+        }
+        .into());
+    };
+    // Rule 5: slice out of process image (rule 2 takes precedence).
+    let slice_end = channel.bit_offset + u32::from(channel.bit_length);
+    let image = image_bits(device, channel.direction);
+    if slice_end > image {
+        return Err(ValidationError::SliceOutOfImage {
+            channel: channel.name.clone(),
+            slice_end,
+            image_bits: image,
+        }
+        .into());
+    }
+    Ok(())
+}
+
 /// Validate a network config against the build-time rules.
 ///
 /// Returns the first fault found as a [`CodegenError::Validation`].
@@ -202,33 +239,9 @@ pub fn validate(config: &NetworkConfig) -> Result<(), CodegenError> {
         .map(|d| (d.label.as_str(), d))
         .collect();
 
+    // Rules 1, 2, 5 — per-channel checks (zero-length, unknown device, out-of-image).
     for channel in &config.channels {
-        // Rule 1: zero-length slice.
-        if channel.bit_length == 0 {
-            return Err(ValidationError::ZeroLengthSlice {
-                channel: channel.name.clone(),
-            }
-            .into());
-        }
-        // Rule 2: unknown / dangling device.
-        let Some(device) = device_by_label.get(channel.device.as_str()) else {
-            return Err(ValidationError::UnknownDevice {
-                channel: channel.name.clone(),
-                device: channel.device.clone(),
-            }
-            .into());
-        };
-        // Rule 5: slice out of process image (rule 2 takes precedence).
-        let slice_end = channel.bit_offset + u32::from(channel.bit_length);
-        let image = image_bits(device, channel.direction);
-        if slice_end > image {
-            return Err(ValidationError::SliceOutOfImage {
-                channel: channel.name.clone(),
-                slice_end,
-                image_bits: image,
-            }
-            .into());
-        }
+        validate_channel(channel, &device_by_label)?;
     }
 
     // Rule 3: duplicate channel name.

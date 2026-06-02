@@ -883,54 +883,9 @@ impl Executor {
 
         for (task_idx, task) in self.tasks.iter().enumerate() {
             for decl in &task.decls {
-                match decl {
-                    TriggerDecl::Subscriber { listener } => {
-                        // Clone Arc to extend listener lifetime to this scope.
-                        let l = Arc::clone(listener);
-                        listener_storage.push(l);
-                        let l_ref = listener_storage.last().unwrap().as_ref();
-                        // SAFETY: we cast the reference lifetime to match
-                        // 'waitset / 'attachment; both listener_storage and
-                        // waitset are stack-local and dropped together at the
-                        // end of dispatch_loop.  Guards are dropped before
-                        // listener_storage below.
-                        let l_ref: &crate::trigger::RawListener = unsafe { &*(l_ref as *const _) };
-                        let guard = waitset
-                            .attach_notification(l_ref)
-                            .map_err(ExecutorError::iceoryx2)?;
-                        guards.push(guard);
-                        attachment_to_task.push(task_idx);
-                    }
-                    TriggerDecl::Interval(d) => {
-                        let guard = waitset
-                            .attach_interval(*d)
-                            .map_err(ExecutorError::iceoryx2)?;
-                        guards.push(guard);
-                        attachment_to_task.push(task_idx);
-                    }
-                    TriggerDecl::Deadline { listener, deadline } => {
-                        let l = Arc::clone(listener);
-                        listener_storage.push(l);
-                        let l_ref = listener_storage.last().unwrap().as_ref();
-                        let l_ref: &crate::trigger::RawListener = unsafe { &*(l_ref as *const _) };
-                        let guard = waitset
-                            .attach_deadline(l_ref, *deadline)
-                            .map_err(ExecutorError::iceoryx2)?;
-                        guards.push(guard);
-                        attachment_to_task.push(task_idx);
-                    }
-                    TriggerDecl::RawListener(listener) => {
-                        let l = Arc::clone(listener);
-                        listener_storage.push(l);
-                        let l_ref = listener_storage.last().unwrap().as_ref();
-                        let l_ref: &crate::trigger::RawListener = unsafe { &*(l_ref as *const _) };
-                        let guard = waitset
-                            .attach_notification(l_ref)
-                            .map_err(ExecutorError::iceoryx2)?;
-                        guards.push(guard);
-                        attachment_to_task.push(task_idx);
-                    }
-                }
+                let guard = attach_trigger_decl(&waitset, &mut listener_storage, decl)?;
+                guards.push(guard);
+                attachment_to_task.push(task_idx);
             }
         }
 
@@ -999,189 +954,321 @@ impl Executor {
             // triggered by an executor-wide fault.
             let exec_start_ptr = &*self.start_time as *const OnceLock<Instant>;
 
+            // Bundle the per-iteration captures into a single context the
+            // WaitSet callback delegates to. Keeping the closure a thin
+            // adapter over `DispatchPass::process_attachment` keeps the
+            // dispatch logic in named, individually-measurable functions.
+            let mut pass = DispatchPass {
+                guards: &guards,
+                attachment_to_task: &attachment_to_task,
+                tasks_ptr,
+                exec_fault_ptr,
+                exec_start_ptr,
+                stop_listener_ptr,
+                pool,
+                iter_err: &iter_err_inner,
+            };
+
             let cb_result = waitset.wait_and_process_once(
                 |attachment_id: WaitSetAttachmentId<ipc::Service>| {
-                    // Drain stop notifications first (no dispatch — the stop_flag
-                    // check after the callback returns handles termination).
-                    // SAFETY: stop_listener_ptr is valid for the duration of the
-                    // closure; the Arc in self.stop_listener keeps it alive.
-                    let stop_l = unsafe { &*stop_listener_ptr };
-                    while let Ok(Some(_)) = stop_l.try_wait_one() {}
-
-                    for (i, guard) in guards.iter().enumerate() {
-                        let fired = attachment_id.has_event_from(guard)
-                            || attachment_id.has_missed_deadline(guard);
-                        if !fired {
-                            continue;
-                        }
-                        let task_idx = attachment_to_task[i];
-
-                        // SAFETY: we are the only thread that may touch
-                        // `self` during the callback. wait_and_process_once
-                        // is single-threaded; we hold &mut self in
-                        // dispatch_loop. The pointer is valid for the
-                        // duration of this closure.
-                        let task = unsafe { &mut (&mut *tasks_ptr)[task_idx] };
-
-                        // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072).
-                        // Only applies to Single/Chain — Graph tasks use their
-                        // own per-vertex scheduling and are out of scope for
-                        // FEAT_0018.
-                        if matches!(task.kind, TaskKind::Single(_) | TaskKind::Chain(_)) {
-                            // SAFETY: exec_fault_ptr derefs into the Executor that
-                            // owns this dispatch_loop — alive for the callback's
-                            // lifetime.
-                            let exec_faulted = matches!(
-                                unsafe { &*exec_fault_ptr }.load(0, 0),
-                                ExecutorFaultState::Faulted { .. }
-                            );
-                            let task_budget_ms = task.budget.map_or(0_u32, duration_to_ms_sat);
-                            let task_state = task.fault.load(task_budget_ms);
-
-                            // Lazy cascade: if executor is `Faulted` and task
-                            // is still `Running`, silently transition the task
-                            // to `Faulted{ExecutorFaulted}`. No `on_task_fault`
-                            // — Observer already heard about the executor-wide
-                            // fault via `on_executor_fault` (cascade-noise
-                            // invariant from FEAT_0018 §4.6).
-                            let task_faulted =
-                                if exec_faulted && matches!(task_state, FaultState::Running) {
-                                    // SAFETY: exec_start_ptr derefs into the same
-                                    // `Executor` owning this dispatch_loop. The
-                                    // `OnceLock` is wait-free.
-                                    let exec_start = *unsafe { &*exec_start_ptr }
-                                        .get_or_init(std::time::Instant::now);
-                                    let since_ms =
-                                        instant_to_since_ms(std::time::Instant::now(), exec_start);
-                                    let _ = task.fault.swap(
-                                        FaultState::Faulted {
-                                            reason: FaultReason::ExecutorFaulted,
-                                            since_ms,
-                                        },
-                                        task_budget_ms,
-                                    );
-                                    true
-                                } else {
-                                    matches!(task_state, FaultState::Faulted { .. })
-                                };
-                            let route_to_handler = exec_faulted || task_faulted;
-
-                            if route_to_handler {
-                                // If a handler is registered, dispatch it.
-                                // Otherwise, skip dispatch entirely this wakeup.
-                                if let Some(handler_box) = task.handler_job.as_deref_mut() {
-                                    let job_ptr: *mut (dyn FnMut() + Send) =
-                                        handler_box as *mut (dyn FnMut() + Send);
-                                    // SAFETY: same as the main-job dispatch
-                                    // below — handler_job is owned by the
-                                    // TaskEntry; pool.barrier() awaits its
-                                    // completion before the next callback.
-                                    #[allow(unsafe_code)]
-                                    unsafe {
-                                        pool.submit_borrowed(crate::pool::BorrowedJob::new(
-                                            job_ptr,
-                                        ));
-                                    }
-                                }
-                                // No handler and not Running — skip silently.
-                                continue;
-                            }
-                        }
-
-                        match &mut task.kind {
-                            TaskKind::Single(_) | TaskKind::Chain(_) => {
-                                // The dispatch closure was pre-allocated at
-                                // task-add time and stashed on `task.job`.
-                                // Submit it via `submit_borrowed` — no
-                                // per-iteration Box allocation. Required by
-                                // REQ_0060.
-                                let job_box = task
-                                    .job
-                                    .as_deref_mut()
-                                    .expect("Single/Chain tasks carry a pre-built job");
-                                let job_ptr: *mut (dyn FnMut() + Send) =
-                                    job_box as *mut (dyn FnMut() + Send);
-                                // SAFETY: the closure lives in
-                                // `task.job` which is owned by
-                                // `self.tasks[task_idx]`; `tasks_ptr` is
-                                // sound for the duration of this
-                                // callback. `pool.barrier()` below
-                                // finishes the closure invocation before
-                                // we re-enter the next iteration's
-                                // callback. The WaitSet thread does not
-                                // touch the closure between this submit
-                                // and that barrier.
-                                #[allow(unsafe_code)]
-                                unsafe {
-                                    pool.submit_borrowed(crate::pool::BorrowedJob::new(job_ptr));
-                                }
-                            }
-                            TaskKind::Graph(graph) => {
-                                // Outer driver runs on the WaitSet thread; vertices run on the
-                                // pool. The graph holds its own pre-built per-vertex closures
-                                // and SPSC ready ring (REQ_0060), so dispatch is allocation-free
-                                // in steady state.
-                                let outcome = graph.run_once_borrowed(pool);
-                                if let Some(source) = outcome.error {
-                                    let mut g = iter_err_inner.lock().unwrap();
-                                    if g.is_none() {
-                                        *g = Some(ExecutorError::Item {
-                                            task_id: task.id.clone(),
-                                            source,
-                                        });
-                                    }
-                                }
-                                let _ = outcome.stopped_chain; // chain-abort semantics: no extra bookkeeping at task level
-                            }
-                        }
-                    }
-
-                    // Wait for all submitted jobs to finish before leaving
-                    // the callback scope (validates item_ptr safety contract).
-                    pool.barrier();
-                    CallbackProgression::Continue
+                    pass.process_attachment(&attachment_id)
                 },
             );
 
-            let cb_result = cb_result.map_err(ExecutorError::iceoryx2)?;
+            // Funnel the post-callback decision (interrupt / item error /
+            // stop request / run-mode termination) through one helper that
+            // yields a single control value, so the loop has exactly one exit.
+            match self.after_callback(cb_result, mode, &iterations_done, &stop_flag) {
+                IterOutcome::Continue => {}
+                IterOutcome::Done => break Ok(()),
+                IterOutcome::Failed(err) => break Err(err),
+            }
+        }
+    }
 
-            // iceoryx2's WaitSet catches SIGINT/SIGTERM internally; honor that
-            // here for a clean exit.
-            if matches!(
-                cb_result,
-                WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest
-            ) {
-                return Ok(());
+    /// Evaluates the post-callback termination conditions for one dispatch
+    /// iteration and reports whether the loop should continue, stop, or fail.
+    ///
+    /// Order of precedence matches the original inline checks: `WaitSet`
+    /// errors, then SIGINT/SIGTERM, then a captured item error, then a stop
+    /// request, then the active [`RunMode`] limit.
+    fn after_callback(
+        &self,
+        cb_result: Result<WaitSetRunResult, iceoryx2::waitset::WaitSetRunError>,
+        mode: &mut RunMode<'_>,
+        iterations_done: &AtomicUsize,
+        stop_flag: &Stoppable,
+    ) -> IterOutcome {
+        let cb_result = match cb_result.map_err(ExecutorError::iceoryx2) {
+            Ok(r) => r,
+            Err(e) => return IterOutcome::Failed(e),
+        };
+
+        // iceoryx2's WaitSet catches SIGINT/SIGTERM internally; honor that
+        // here for a clean exit.
+        if matches!(
+            cb_result,
+            WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest
+        ) {
+            return IterOutcome::Done;
+        }
+
+        // Extract the error before dropping the MutexGuard — avoids holding the
+        // lock across the return (clippy::significant_drop_in_scrutinee).
+        let maybe_err = self.iter_err.lock().unwrap().take();
+        if let Some(err) = maybe_err {
+            return IterOutcome::Failed(err);
+        }
+        if stop_flag.is_stopped() {
+            return IterOutcome::Done;
+        }
+
+        iterations_done.fetch_add(1, Ordering::SeqCst);
+        let reached_limit = match mode {
+            RunMode::Forever => false,
+            RunMode::Iterations(n) => iterations_done.load(Ordering::SeqCst) >= *n,
+            RunMode::Until(deadline) => Instant::now() >= *deadline,
+            RunMode::Predicate(p) => (p)(),
+        };
+        if reached_limit {
+            IterOutcome::Done
+        } else {
+            IterOutcome::Continue
+        }
+    }
+}
+
+/// Outcome of one `dispatch_loop` iteration's post-callback evaluation.
+enum IterOutcome {
+    /// Run another iteration.
+    Continue,
+    /// Terminate the loop successfully.
+    Done,
+    /// Terminate the loop with the given error.
+    Failed(ExecutorError),
+}
+
+/// Attaches a single [`TriggerDecl`] to `waitset`, returning the resulting
+/// guard.
+///
+/// Listener-backed declarations (`Subscriber`, `Deadline`, `RawListener`)
+/// clone the listener `Arc` into `listener_storage` to extend its lifetime to
+/// the surrounding `dispatch_loop` scope; `Interval` attaches a bare timer.
+///
+/// # Safety
+///
+/// The returned guard borrows the listener via a raw-pointer cast that erases
+/// its lifetime. Soundness relies on the caller keeping `listener_storage` (and
+/// `waitset`) alive for at least as long as the guard, and dropping the guards
+/// before `listener_storage` — exactly the discipline `dispatch_loop` follows.
+#[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
+fn attach_trigger_decl<'w>(
+    waitset: &'w WaitSet<ipc::Service>,
+    listener_storage: &mut Vec<Arc<crate::trigger::RawListener>>,
+    decl: &TriggerDecl,
+) -> Result<WaitSetGuard<'w, 'w, ipc::Service>, ExecutorError> {
+    // Clone the listener Arc and obtain a lifetime-erased reference. SAFETY:
+    // both `listener_storage` and `waitset` are stack-local in `dispatch_loop`
+    // and dropped together at its end; guards are dropped before
+    // `listener_storage`.
+    let mut listener_ref = |listener: &Arc<crate::trigger::RawListener>| {
+        listener_storage.push(Arc::clone(listener));
+        let l_ref = listener_storage.last().unwrap().as_ref();
+        let l_ref: &crate::trigger::RawListener = unsafe { &*(l_ref as *const _) };
+        l_ref
+    };
+
+    let guard = match decl {
+        TriggerDecl::Subscriber { listener } | TriggerDecl::RawListener(listener) => {
+            waitset.attach_notification(listener_ref(listener))
+        }
+        TriggerDecl::Interval(d) => waitset.attach_interval(*d),
+        TriggerDecl::Deadline { listener, deadline } => {
+            waitset.attach_deadline(listener_ref(listener), *deadline)
+        }
+    };
+    guard.map_err(ExecutorError::iceoryx2)
+}
+
+/// Per-iteration dispatch context handed to the `WaitSet` callback.
+///
+/// `dispatch_loop` rebuilds one of these every iteration and the `WaitSet`
+/// callback is a thin adapter over [`DispatchPass::process_attachment`]. All
+/// fields are short-lived borrows / raw pointers into the `Executor` that owns
+/// the surrounding `dispatch_loop`; their soundness is documented at each use
+/// site in `dispatch_loop` (same single-threaded, barrier-bounded discipline).
+struct DispatchPass<'a, 'g, 'w> {
+    /// `WaitSet` guards, indexed in parallel with `attachment_to_task`.
+    guards: &'a [WaitSetGuard<'g, 'w, ipc::Service>],
+    /// Maps guard index to task index in `tasks_ptr`.
+    attachment_to_task: &'a [usize],
+    /// Raw pointer to `Executor::tasks`.
+    tasks_ptr: *mut Vec<TaskEntry>,
+    /// Raw pointer to `Executor::exec_fault` inner state.
+    exec_fault_ptr: *const ExecutorFaultAtomic,
+    /// Raw pointer to `Executor::start_time`.
+    exec_start_ptr: *const OnceLock<Instant>,
+    /// Raw pointer to the internal stop listener.
+    stop_listener_ptr: *const IxListener<ipc::Service>,
+    /// Borrow of the executor thread pool.
+    pool: &'a Pool,
+    /// Refcount-only handle to the per-iteration error slot.
+    iter_err: &'a Arc<std::sync::Mutex<Option<ExecutorError>>>,
+}
+
+impl DispatchPass<'_, '_, '_> {
+    /// Handles a single `WaitSet` wakeup: drains stop notifications, then
+    /// dispatches every task whose attachment fired. Always returns
+    /// [`CallbackProgression::Continue`]; termination is decided by the
+    /// `stop_flag` check in `dispatch_loop` after the callback returns.
+    #[allow(unsafe_code)]
+    fn process_attachment(
+        &mut self,
+        attachment_id: &WaitSetAttachmentId<ipc::Service>,
+    ) -> CallbackProgression {
+        // Drain stop notifications first (no dispatch — the stop_flag check
+        // after the callback returns handles termination).
+        // SAFETY: stop_listener_ptr is valid for the duration of the call;
+        // the Arc in self.stop_listener keeps it alive.
+        let stop_l = unsafe { &*self.stop_listener_ptr };
+        while let Ok(Some(_)) = stop_l.try_wait_one() {}
+
+        for (i, guard) in self.guards.iter().enumerate() {
+            let fired =
+                attachment_id.has_event_from(guard) || attachment_id.has_missed_deadline(guard);
+            if !fired {
+                continue;
+            }
+            let task_idx = self.attachment_to_task[i];
+
+            // SAFETY: we are the only thread that may touch the task table
+            // during the callback. wait_and_process_once is single-threaded
+            // and dispatch_loop holds &mut self. The pointer is valid for the
+            // duration of this call.
+            let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
+
+            // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072). When it
+            // routes to a (possible) handler, normal dispatch is skipped.
+            if self.handle_fault_routing(task) {
+                continue;
             }
 
-            // Extract the error before dropping the MutexGuard — avoids
-            // holding the lock across the return (clippy::significant_drop_in_scrutinee).
-            let maybe_err = self.iter_err.lock().unwrap().take();
-            if let Some(err) = maybe_err {
-                return Err(err);
-            }
-            if stop_flag.is_stopped() {
-                return Ok(());
-            }
+            self.dispatch_task(task);
+        }
 
-            iterations_done.fetch_add(1, Ordering::SeqCst);
-            match mode {
-                RunMode::Forever => {}
-                RunMode::Iterations(n) => {
-                    if iterations_done.load(Ordering::SeqCst) >= *n {
-                        return Ok(());
+        // Wait for all submitted jobs to finish before leaving the callback
+        // scope (validates item_ptr safety contract).
+        self.pool.barrier();
+        CallbackProgression::Continue
+    }
+
+    /// Applies the pre-dispatch fault gate for `Single`/`Chain` tasks.
+    ///
+    /// Returns `true` when the task is routed to its fault handler (or
+    /// silently skipped because no handler is registered) and normal dispatch
+    /// must therefore be skipped. Returns `false` when normal dispatch should
+    /// proceed. `Graph` tasks always return `false` — they use their own
+    /// per-vertex scheduling and are out of scope for `FEAT_0018`.
+    #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
+    fn handle_fault_routing(&self, task: &mut TaskEntry) -> bool {
+        if !matches!(task.kind, TaskKind::Single(_) | TaskKind::Chain(_)) {
+            return false;
+        }
+
+        // SAFETY: exec_fault_ptr derefs into the Executor that owns the
+        // surrounding dispatch_loop — alive for this call's lifetime.
+        let exec_faulted = matches!(
+            unsafe { &*self.exec_fault_ptr }.load(0, 0),
+            ExecutorFaultState::Faulted { .. }
+        );
+        let task_budget_ms = task.budget.map_or(0_u32, duration_to_ms_sat);
+        let task_state = task.fault.load(task_budget_ms);
+
+        // Lazy cascade: if executor is `Faulted` and task is still `Running`,
+        // silently transition the task to `Faulted{ExecutorFaulted}`. No
+        // `on_task_fault` — the Observer already heard about the executor-wide
+        // fault via `on_executor_fault` (cascade-noise invariant, FEAT_0018
+        // §4.6).
+        let task_faulted = if exec_faulted && matches!(task_state, FaultState::Running) {
+            // SAFETY: exec_start_ptr derefs into the same Executor owning the
+            // dispatch_loop. The OnceLock is wait-free.
+            let exec_start = *unsafe { &*self.exec_start_ptr }.get_or_init(std::time::Instant::now);
+            let since_ms = instant_to_since_ms(std::time::Instant::now(), exec_start);
+            let _ = task.fault.swap(
+                FaultState::Faulted {
+                    reason: FaultReason::ExecutorFaulted,
+                    since_ms,
+                },
+                task_budget_ms,
+            );
+            true
+        } else {
+            matches!(task_state, FaultState::Faulted { .. })
+        };
+
+        if !(exec_faulted || task_faulted) {
+            return false;
+        }
+
+        // If a handler is registered, dispatch it. Otherwise, skip dispatch
+        // entirely this wakeup.
+        if let Some(handler_box) = task.handler_job.as_deref_mut() {
+            let job_ptr: *mut (dyn FnMut() + Send) = handler_box as *mut (dyn FnMut() + Send);
+            // SAFETY: same as the main-job dispatch below — handler_job is
+            // owned by the TaskEntry; pool.barrier() awaits its completion
+            // before the next callback.
+            unsafe {
+                self.pool
+                    .submit_borrowed(crate::pool::BorrowedJob::new(job_ptr));
+            }
+        }
+        true
+    }
+
+    /// Dispatches `task`'s normal (non-fault) work for one wakeup.
+    ///
+    /// `Single`/`Chain` tasks submit their pre-built job to the pool;
+    /// `Graph` tasks drive one pass and capture the first item error into the
+    /// per-iteration error slot.
+    #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
+    fn dispatch_task(&self, task: &mut TaskEntry) {
+        match &mut task.kind {
+            TaskKind::Single(_) | TaskKind::Chain(_) => {
+                // The dispatch closure was pre-allocated at task-add time and
+                // stashed on `task.job`. Submit it via `submit_borrowed` — no
+                // per-iteration Box allocation. Required by REQ_0060.
+                let job_box = task
+                    .job
+                    .as_deref_mut()
+                    .expect("Single/Chain tasks carry a pre-built job");
+                let job_ptr: *mut (dyn FnMut() + Send) = job_box as *mut (dyn FnMut() + Send);
+                // SAFETY: the closure lives in `task.job`, owned by
+                // `self.tasks[task_idx]`; `tasks_ptr` is sound for the
+                // duration of this callback. `pool.barrier()` in
+                // `process_attachment` finishes the closure invocation before
+                // the next iteration's callback. The WaitSet thread does not
+                // touch the closure between this submit and that barrier.
+                unsafe {
+                    self.pool
+                        .submit_borrowed(crate::pool::BorrowedJob::new(job_ptr));
+                }
+            }
+            TaskKind::Graph(graph) => {
+                // Outer driver runs on the WaitSet thread; vertices run on the
+                // pool. The graph holds its own pre-built per-vertex closures
+                // and SPSC ready ring (REQ_0060), so dispatch is
+                // allocation-free in steady state.
+                let outcome = graph.run_once_borrowed(self.pool);
+                if let Some(source) = outcome.error {
+                    let mut g = self.iter_err.lock().unwrap();
+                    if g.is_none() {
+                        *g = Some(ExecutorError::Item {
+                            task_id: task.id.clone(),
+                            source,
+                        });
                     }
                 }
-                RunMode::Until(deadline) => {
-                    if Instant::now() >= *deadline {
-                        return Ok(());
-                    }
-                }
-                RunMode::Predicate(p) => {
-                    if (p)() {
-                        return Ok(());
-                    }
-                }
+                let _ = outcome.stopped_chain; // chain-abort semantics: no extra bookkeeping at task level
             }
         }
     }

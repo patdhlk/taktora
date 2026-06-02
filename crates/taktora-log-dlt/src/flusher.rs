@@ -140,6 +140,152 @@ pub fn spawn_flusher(cfg: FlusherConfig) -> (FlusherHandle, Sender<Vec<u8>>) {
     )
 }
 
+/// Outcome of [`try_connect`]: either a freshly-connected transport (TCP
+/// up and read-timeout configured, but the post-connect summary/drain
+/// steps NOT yet run) or an indication that the connect-level attempt
+/// failed and the caller should back off and retry.
+///
+/// The summary (REQ_0815) and drain (REQ_0814) steps are deliberately
+/// owned by [`run`] rather than by `try_connect`: the original loop
+/// applies *different* backoff timing to a connect-level failure versus a
+/// post-connect write failure (a connect failure sleeps then grows the
+/// backoff; a summary-write failure grows the backoff but retries
+/// immediately with no sleep; a mid-drain write failure simply drops the
+/// transport and falls through with the backoff already reset). Folding
+/// those steps into a single `Retry` arm would normalise that
+/// intentionally-asymmetric timing, so they stay in `run`.
+enum ConnectOutcome {
+    /// TCP connect succeeded and the read timeout is configured. The
+    /// caller still owes the summary + drain steps before treating the
+    /// transport as fully online.
+    Connected(Transport),
+    /// Connect or `set_read_timeout` failed; caller should sleep for the
+    /// current backoff, grow it, and retry.
+    Retry,
+}
+
+/// Attempt the connect-level portion of one reconnect cycle: open the
+/// transport and configure its read timeout.
+///
+/// Returns [`ConnectOutcome::Connected`] when both succeed. A failure of
+/// either step returns [`ConnectOutcome::Retry`]; in the original loop
+/// both of these paths sleep for the current backoff and then grow it, so
+/// the caller treats them identically.
+fn try_connect(cfg: &FlusherConfig) -> ConnectOutcome {
+    let mut t = match Transport::connect(&cfg.transport) {
+        Ok(t) => t,
+        Err(_) => return ConnectOutcome::Retry,
+    };
+
+    // Best-effort: a missing read timeout just means the control-poll
+    // path may block until daemon sends data.  Production daemons send
+    // heartbeats; tests don't, so failure to set this would hang the test.
+    if t.set_read_timeout(SOCKET_READ_TIMEOUT).is_err() {
+        return ConnectOutcome::Retry;
+    }
+
+    ConnectOutcome::Connected(t)
+}
+
+/// Write the drop-summary record to `t` if one is warranted (REQ_0815).
+///
+/// Returns `Ok(())` when either no summary is needed or the write
+/// succeeded.  Returns `Err(())` on a write failure; the caller should
+/// then discard `t` and retry.
+fn emit_drop_summary(t: &mut Transport, cfg: &FlusherConfig) -> Result<(), ()> {
+    let drops = cfg.ring.drops_since_last_drain();
+    let summary_bytes = if drops > 0 {
+        cfg.summary_builder.as_ref().map(|b| b(drops))
+    } else {
+        None
+    };
+
+    if let Some(s) = summary_bytes {
+        // On failure the drop counter is left intact (drain_all has not
+        // run yet) so the next reconnect re-attempts the summary with
+        // the same count.
+        t.write_all(&s).map_err(|_| ())?;
+    }
+    Ok(())
+}
+
+/// Drain every record from the offline ring into `t` (REQ_0814, FIFO).
+///
+/// On a write failure the failed record and every remaining un-sent item
+/// are re-buffered into the ring so the next reconnect can retry them.
+/// Returns `Ok(())` when all records were sent, `Err(())` on failure.
+fn drain_ring_into_transport(t: &mut Transport, cfg: &FlusherConfig) -> Result<(), ()> {
+    let drained = cfg.ring.drain_all();
+    let mut iter = drained.into_iter();
+    while let Some(bytes) = iter.next() {
+        if t.write_all(&bytes).is_err() {
+            // Re-buffer the failed record first, then every remaining
+            // undrained item — preserves FIFO across the reconnect
+            // attempt.  Note: concurrent producers that pushed to the
+            // ring during the drain window sit AHEAD of this re-buffered
+            // remainder on the next drain.  That ordering blemish is
+            // acceptable for v1 — strict cross-reconnect FIFO is not
+            // required by the spec (REQ_0814).
+            cfg.ring.push(bytes);
+            for rest in iter.by_ref() {
+                cfg.ring.push(rest);
+            }
+            return Err(());
+        }
+    }
+    Ok(())
+}
+
+/// Handle one DLT record received from the producer channel.
+///
+/// Writes `bytes` to `transport` if connected; on write failure the
+/// record is routed to the offline ring and `transport` is cleared so
+/// the next loop iteration reconnects.  If `transport` is already
+/// `None`, the record is routed to the ring directly.
+fn handle_channel_bytes(bytes: Vec<u8>, transport: &mut Option<Transport>, cfg: &FlusherConfig) {
+    if let Some(t) = transport.as_mut() {
+        if t.write_all(&bytes).is_err() {
+            // Daemon dropped — buffer this record and reconnect.
+            cfg.ring.push(bytes);
+            *transport = None;
+        }
+    } else {
+        cfg.ring.push(bytes);
+    }
+}
+
+/// Poll the transport for an incoming DLT control message (idle path).
+///
+/// Called when the producer channel times out with no new records.
+/// Reads at most one message per call (v1 — one control message per
+/// read; a future iteration adds framing).  Clears `transport` on an
+/// orderly daemon shutdown (`Ok(0)`) or an unexpected I/O error.
+fn handle_idle(transport: &mut Option<Transport>, cfg: &FlusherConfig, read_buf: &mut [u8]) {
+    let Some(t) = transport.as_mut() else { return };
+    match t.read(read_buf) {
+        Ok(0) => {
+            // Orderly daemon shutdown.
+            *transport = None;
+        }
+        Ok(n) => {
+            // For v1 we expect one control message per read.
+            // A future iteration adds framing.
+            if let Some(msg) = crate::control::parse_control(&read_buf[..n]) {
+                msg.apply(&cfg.level_table);
+            }
+        }
+        Err(TransportError::Io(e))
+            if e.kind() == std::io::ErrorKind::WouldBlock
+                || e.kind() == std::io::ErrorKind::TimedOut =>
+        {
+            // Expected: no control traffic in this window.
+        }
+        Err(_) => {
+            *transport = None;
+        }
+    }
+}
+
 /// Main flusher loop. Owns the transport handle, the current backoff,
 /// and the control-message read buffer.
 fn run(cfg: FlusherConfig, rx: Receiver<Vec<u8>>, stop: Arc<AtomicBool>) {
@@ -150,121 +296,53 @@ fn run(cfg: FlusherConfig, rx: Receiver<Vec<u8>>, stop: Arc<AtomicBool>) {
     while !stop.load(Ordering::Acquire) {
         // 1) Ensure we have an open transport. If not, reconnect.
         if transport.is_none() {
-            match Transport::connect(&cfg.transport) {
-                Ok(mut t) => {
-                    // Best-effort: a missing read timeout just means the
-                    // control-poll path may block until daemon sends data.
-                    // Production daemons send heartbeats; tests don't, so
-                    // failure to set this would still hang the test.
-                    if t.set_read_timeout(SOCKET_READ_TIMEOUT).is_err() {
-                        // If we can't even configure the socket, drop it and
-                        // try again on the next iteration.
-                        thread::sleep(backoff);
-                        backoff = (backoff * 2).min(cfg.reconnect_max_backoff);
-                        continue;
-                    }
-
-                    // REQ_0815: snapshot the drop count BEFORE draining
-                    // (drain_all resets it). If a summary_builder is
-                    // wired in, the synthesised record is the first byte
-                    // written on the new connection — leading the
-                    // buffered records out of the ring.
-                    let drops = cfg.ring.drops_since_last_drain();
-                    let summary_bytes = if drops > 0 {
-                        cfg.summary_builder.as_ref().map(|b| b(drops))
-                    } else {
-                        None
-                    };
-
-                    // Write the summary first. On failure we drop the
-                    // transport and retry on the next outer loop. The
-                    // drop counter is left intact (drain_all has not
-                    // run yet) so the next reconnect re-attempts the
-                    // summary with the same count.
-                    if let Some(s) = summary_bytes {
-                        if t.write_all(&s).is_err() {
-                            backoff = (backoff * 2).min(cfg.reconnect_max_backoff);
-                            continue;
-                        }
-                    }
-
-                    transport = Some(t);
-                    backoff = cfg.reconnect_initial_backoff;
-
-                    // Summary write (if any) has succeeded — now drain
-                    // the offline ring FIFO (REQ_0814). drain_all also
-                    // resets drops_since_last_drain to 0.
-                    if let Some(t) = transport.as_mut() {
-                        let drained = cfg.ring.drain_all();
-                        let mut iter = drained.into_iter();
-                        while let Some(bytes) = iter.next() {
-                            if t.write_all(&bytes).is_err() {
-                                // Re-buffer the failed record first, then every
-                                // remaining undrained item — preserves FIFO across
-                                // the reconnect attempt. Note: concurrent producers
-                                // that pushed to the ring during the drain window
-                                // sit AHEAD of this re-buffered remainder on the
-                                // next drain. That ordering blemish is acceptable
-                                // for v1 — strict cross-reconnect FIFO is not
-                                // required by the spec (REQ_0814).
-                                cfg.ring.push(bytes);
-                                for rest in iter.by_ref() {
-                                    cfg.ring.push(rest);
-                                }
-                                transport = None;
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(_) => {
+            // 1a) Connect + configure the socket. A connect-level failure
+            //     (connect or set_read_timeout) sleeps for the current
+            //     backoff, grows it, and retries — matching the original.
+            let mut t = match try_connect(&cfg) {
+                ConnectOutcome::Connected(t) => t,
+                ConnectOutcome::Retry => {
                     thread::sleep(backoff);
                     backoff = (backoff * 2).min(cfg.reconnect_max_backoff);
                     continue;
                 }
+            };
+
+            // 1b) Emit the drop summary (REQ_0815) on the still-pending
+            //     transport, BEFORE adopting it and BEFORE resetting the
+            //     backoff. A summary-write failure grows the backoff but
+            //     does NOT sleep — it retries immediately on the next
+            //     outer iteration. The transport is discarded (never
+            //     stored) and the drop counter is left intact so the next
+            //     reconnect re-attempts the summary with the same count.
+            if emit_drop_summary(&mut t, &cfg).is_err() {
+                backoff = (backoff * 2).min(cfg.reconnect_max_backoff);
+                continue;
+            }
+
+            // 1c) Summary succeeded — adopt the transport and reset the
+            //     backoff, THEN drain the ring (REQ_0814). This reset
+            //     ordering is load-bearing: a mid-drain write failure
+            //     (handled inside drain_ring_into_transport, which already
+            //     re-buffers the remainder) leaves the backoff at its
+            //     freshly-reset initial value, drops the transport, and
+            //     falls through to the recv path with NO sleep and NO
+            //     extra backoff growth.
+            backoff = cfg.reconnect_initial_backoff;
+            if drain_ring_into_transport(&mut t, &cfg).is_err() {
+                transport = None;
+            } else {
+                transport = Some(t);
             }
         }
 
         // 2) Drain the producer queue with a short timeout so the loop
         //    also services the control-read path and the stop flag.
         match rx.recv_timeout(CHANNEL_RECV_TIMEOUT) {
-            Ok(bytes) => {
-                if let Some(t) = transport.as_mut() {
-                    if t.write_all(&bytes).is_err() {
-                        // Daemon dropped — buffer this record and reconnect.
-                        cfg.ring.push(bytes);
-                        transport = None;
-                    }
-                } else {
-                    cfg.ring.push(bytes);
-                }
-            }
+            Ok(bytes) => handle_channel_bytes(bytes, &mut transport, &cfg),
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                 // Idle — poll the read side for control messages.
-                if let Some(t) = transport.as_mut() {
-                    match t.read(&mut read_buf) {
-                        Ok(0) => {
-                            // Orderly daemon shutdown.
-                            transport = None;
-                        }
-                        Ok(n) => {
-                            // For v1 we expect one control message per
-                            // read. A future iteration adds framing.
-                            if let Some(msg) = crate::control::parse_control(&read_buf[..n]) {
-                                msg.apply(&cfg.level_table);
-                            }
-                        }
-                        Err(TransportError::Io(e))
-                            if e.kind() == std::io::ErrorKind::WouldBlock
-                                || e.kind() == std::io::ErrorKind::TimedOut =>
-                        {
-                            // Expected: no control traffic in this window.
-                        }
-                        Err(_) => {
-                            transport = None;
-                        }
-                    }
-                }
+                handle_idle(&mut transport, &cfg, &mut read_buf);
             }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         }

@@ -111,24 +111,52 @@ impl GraphBuilder {
     }
 
     /// Build, validating connectedness, acyclicity, and exactly-one root.
-    #[allow(clippy::too_many_lines)]
+    ///
+    /// The validation steps run in the same precedence as before — non-empty,
+    /// root presence/bounds, edge validity, acyclicity, reachability, then
+    /// trigger collection — each delegated to a private helper that surfaces
+    /// the first failing condition via `?`. Behaviour is identical to the
+    /// previous inline form: the earliest violating check still wins.
     pub(crate) fn finish(mut self) -> Result<Graph, ExecutorError> {
         let n = self.items.len();
+        let root = Self::validate_root(self.root, n)?;
+        let (successors, in_degree) = Self::build_adjacency(&self.edges, n)?;
+        Self::assert_acyclic(&successors, &in_degree, n)?;
+        Self::assert_reachable(&successors, root, n)?;
+        let decls = self.collect_root_decls(root)?;
+        Ok(Self::assemble(
+            self.items, successors, in_degree, root, decls,
+        ))
+    }
+
+    /// Validate that the graph is non-empty and that a root vertex was set and
+    /// is in bounds. Returns the validated root index.
+    ///
+    /// Preserves the original precedence: empty-graph rejection wins over the
+    /// missing-root check, which wins over the out-of-bounds check.
+    fn validate_root(root: Option<usize>, n: usize) -> Result<usize, ExecutorError> {
         if n == 0 {
             return Err(ExecutorError::InvalidGraph("graph has no vertices".into()));
         }
-        let root = self
-            .root
-            .ok_or_else(|| ExecutorError::InvalidGraph("no root vertex set".into()))?;
+        let root = root.ok_or_else(|| ExecutorError::InvalidGraph("no root vertex set".into()))?;
         if root >= n {
             return Err(ExecutorError::InvalidGraph(
                 "root index out of bounds".into(),
             ));
         }
+        Ok(root)
+    }
 
+    /// Build the adjacency list and per-vertex initial in-degree from `edges`,
+    /// rejecting out-of-bounds endpoints and self-loops (in that precedence,
+    /// matching the original inline loop).
+    fn build_adjacency(
+        edges: &[(usize, usize)],
+        n: usize,
+    ) -> Result<(Vec<Vec<usize>>, Vec<usize>), ExecutorError> {
         let mut successors = vec![Vec::<usize>::new(); n];
         let mut in_degree = vec![0_usize; n];
-        for &(from, to) in &self.edges {
+        for &(from, to) in edges {
             if from >= n || to >= n {
                 return Err(ExecutorError::InvalidGraph(
                     "edge index out of bounds".into(),
@@ -142,9 +170,17 @@ impl GraphBuilder {
             successors[from].push(to);
             in_degree[to] += 1;
         }
+        Ok((successors, in_degree))
+    }
 
-        // Acyclicity via Kahn's algorithm — clone in_degree because we mutate.
-        let mut k_in = in_degree.clone();
+    /// Reject graphs that contain a cycle, via Kahn's algorithm. `in_degree`
+    /// is cloned internally because the algorithm mutates it.
+    fn assert_acyclic(
+        successors: &[Vec<usize>],
+        in_degree: &[usize],
+        n: usize,
+    ) -> Result<(), ExecutorError> {
+        let mut k_in = in_degree.to_vec();
         let mut queue: Vec<usize> = k_in
             .iter()
             .enumerate()
@@ -163,8 +199,15 @@ impl GraphBuilder {
         if visited != n {
             return Err(ExecutorError::InvalidGraph("graph contains a cycle".into()));
         }
+        Ok(())
+    }
 
-        // Reachability from root (DFS).
+    /// Reject graphs in which some vertex is unreachable from `root`, via DFS.
+    fn assert_reachable(
+        successors: &[Vec<usize>],
+        root: usize,
+        n: usize,
+    ) -> Result<(), ExecutorError> {
         let mut reach = vec![false; n];
         let mut stack = vec![root];
         while let Some(u) = stack.pop() {
@@ -181,13 +224,17 @@ impl GraphBuilder {
                 "every vertex must be reachable from the root".into(),
             ));
         }
+        Ok(())
+    }
 
-        // Root's triggers gate the graph.
+    /// Collect the root vertex's trigger declarations (which gate the whole
+    /// graph) and warn about any triggers declared by non-root vertices, which
+    /// are ignored. Propagates a declaration error from the root vertex.
+    fn collect_root_decls(&mut self, root: usize) -> Result<Vec<TriggerDecl>, ExecutorError> {
         let mut decl = TriggerDeclarer::new_internal();
         self.items[root].declare_triggers(&mut decl)?;
         let decls = decl.into_decls();
 
-        // Warn if non-root vertices declared triggers (ignored).
         for (i, body) in self.items.iter_mut().enumerate() {
             if i == root {
                 continue;
@@ -200,9 +247,19 @@ impl GraphBuilder {
                     "non-root graph vertex declared triggers; ignored");
             }
         }
+        Ok(decls)
+    }
 
-        let n_items = self.items.len();
-        let mut items = self.items;
+    /// Assemble the validated pieces into a `Graph`, pre-allocating the runtime
+    /// dispatch state (`REQ_0060`).
+    fn assemble(
+        mut items: Vec<Box<dyn ExecutableItem>>,
+        successors: Vec<Vec<usize>>,
+        in_degree: Vec<usize>,
+        root: usize,
+        decls: Vec<TriggerDecl>,
+    ) -> Graph {
+        let n_items = items.len();
         // SAFETY: each `Box<dyn ExecutableItem>` is heap-allocated; its
         // contents do not move when the outer Vec resizes. Stable.
         #[allow(unsafe_code)]
@@ -212,7 +269,7 @@ impl GraphBuilder {
             .collect();
         let counters: Vec<AtomicUsize> = in_degree.iter().map(|d| AtomicUsize::new(*d)).collect();
 
-        Ok(Graph {
+        Graph {
             items,
             successors,
             in_degree,
@@ -227,7 +284,7 @@ impl GraphBuilder {
             done_cv: (Mutex::new(()), Condvar::new()),
             ready_ring: crate::ready_ring::ReadyRing::new(n_items),
             vertex_jobs: Vec::new(),
-        })
+        }
     }
 }
 

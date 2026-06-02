@@ -76,41 +76,27 @@ pub fn capture_device_extensions(xml: &str) -> Result<Vec<Vec<RawXml>>, EsiError
         match reader.read_event() {
             Ok(Event::Eof) => break,
             Ok(Event::Start(start)) => {
-                let name = decode_name(&start, &reader, &index)?;
-                let is_device = local_name(&name) == "Device";
-                // A direct child of the open device sits one level deeper.
-                let in_device_child = device_depth.is_some_and(|d| depth == d + 1);
-
-                if in_device_child && !is_known_child(&name) {
-                    // Materialise the whole subtree, consuming through its End.
-                    let subtree = read_subtree(&mut reader, &index, &start, &name)?;
-                    if let Some(exts) = per_device.last_mut() {
-                        exts.push(subtree);
-                    }
-                    // read_subtree consumed the matching End; depth is unchanged.
-                    continue;
+                let subtree_consumed = handle_start_event(
+                    &start,
+                    &mut reader,
+                    &index,
+                    depth,
+                    &mut device_depth,
+                    &mut per_device,
+                )?;
+                if !subtree_consumed {
+                    depth += 1;
                 }
-
-                if is_device && device_depth.is_none() {
-                    device_depth = Some(depth);
-                    per_device.push(Vec::new());
-                }
-                depth += 1;
             }
             Ok(Event::Empty(start)) => {
-                let name = decode_name(&start, &reader, &index)?;
-                let in_device_child = device_depth.is_some_and(|d| depth == d + 1);
-                if in_device_child && !is_known_child(&name) {
-                    let attributes = decode_attributes(&start, &reader, &index)?;
-                    if let Some(exts) = per_device.last_mut() {
-                        exts.push(RawXml {
-                            name,
-                            attributes,
-                            text: None,
-                            children: Vec::new(),
-                        });
-                    }
-                }
+                handle_empty_event(
+                    &start,
+                    &reader,
+                    &index,
+                    depth,
+                    device_depth,
+                    &mut per_device,
+                )?;
                 // Empty elements do not change depth.
             }
             Ok(Event::End(_)) => {
@@ -126,6 +112,74 @@ pub fn capture_device_extensions(xml: &str) -> Result<Vec<Vec<RawXml>>, EsiError
     }
 
     Ok(per_device)
+}
+
+/// Handle a `Start` event in the device-extension walk.
+///
+/// Returns `true` when the subtree was consumed (and depth must NOT be
+/// incremented by the caller), or `false` when the caller should increment
+/// depth as usual.
+fn handle_start_event(
+    start: &quick_xml::events::BytesStart<'_>,
+    reader: &mut Reader<&[u8]>,
+    index: &LineIndex,
+    depth: i32,
+    device_depth: &mut Option<i32>,
+    per_device: &mut Vec<Vec<RawXml>>,
+) -> Result<bool, EsiError> {
+    let name = decode_name(start, reader, index)?;
+    let is_device = local_name(&name) == "Device";
+    // A direct child of the open device sits one level deeper.
+    let in_device_child = is_direct_device_child(*device_depth, depth);
+
+    if in_device_child && !is_known_child(&name) {
+        // Materialise the whole subtree, consuming through its End.
+        let subtree = read_subtree(reader, index, start, &name)?;
+        if let Some(exts) = per_device.last_mut() {
+            exts.push(subtree);
+        }
+        // read_subtree consumed the matching End; depth is unchanged.
+        return Ok(true);
+    }
+
+    if is_device && device_depth.is_none() {
+        *device_depth = Some(depth);
+        per_device.push(Vec::new());
+    }
+    Ok(false)
+}
+
+/// Handle an `Empty` event in the device-extension walk.
+///
+/// Captures the element as a leaf [`RawXml`] if it is an unrecognised direct
+/// child of the currently-open `<Device>`. Empty elements do not change depth.
+fn handle_empty_event(
+    start: &quick_xml::events::BytesStart<'_>,
+    reader: &Reader<&[u8]>,
+    index: &LineIndex,
+    depth: i32,
+    device_depth: Option<i32>,
+    per_device: &mut [Vec<RawXml>],
+) -> Result<(), EsiError> {
+    let name = decode_name(start, reader, index)?;
+    if is_direct_device_child(device_depth, depth) && !is_known_child(&name) {
+        let attributes = decode_attributes(start, reader, index)?;
+        if let Some(exts) = per_device.last_mut() {
+            exts.push(RawXml {
+                name,
+                attributes,
+                text: None,
+                children: Vec::new(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Return `true` when `depth` is exactly one level below the open `<Device>`,
+/// i.e. the current event is a direct child of that device element.
+fn is_direct_device_child(device_depth: Option<i32>, depth: i32) -> bool {
+    device_depth.is_some_and(|d| depth == d + 1)
 }
 
 fn is_known_child(qualified_name: &str) -> bool {
