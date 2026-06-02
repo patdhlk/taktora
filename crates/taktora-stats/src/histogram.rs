@@ -59,8 +59,15 @@ impl<const B: usize, const S: usize> RollingHistogram<B, S> {
     /// Create a histogram whose live window is approximately `window`
     /// samples, divided into `S` segments. `window` is clamped so each
     /// segment holds at least one sample.
+    ///
+    /// # Panics
+    ///
+    /// Fails to compile (const-eval assertion) if `B == 0` or `S == 0`; a
+    /// zero bucket count or zero segment count has no meaning and would
+    /// divide by zero or index out of bounds in the ring math.
     #[must_use]
     pub fn new(window: u32) -> Self {
+        const { assert!(B > 0 && S > 0, "RollingHistogram requires B > 0 and S > 0") }
         // S is a small const-generic segment count; casting to u32 is safe
         // because S > u32::MAX is not a realistic use-case.
         #[allow(clippy::cast_possible_truncation)] // S ≤ u32::MAX by construction; const generic
