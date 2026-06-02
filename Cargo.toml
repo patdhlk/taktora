@@ -33,6 +33,11 @@ members = [
     "crates/taktora-log-dlt",
     "crates/taktora-motion-core",
     "crates/taktora-motion-core-tests",
+    "crates/taktora-cyclic-fieldbus",
+    "crates/taktora-cia402",
+    "crates/taktora-motion-proto",
+    "crates/taktora-motion",
+    "crates/taktora-motion-tests",
     "crates/taktora-replay",
 ]
 
@@ -77,6 +82,10 @@ taktora-executor-tracing         = { path = "crates/taktora-executor-tracing", v
 taktora-log                      = { path = "crates/taktora-log", version = "0.1.2" }
 taktora-log-dlt                  = { path = "crates/taktora-log-dlt", version = "0.1.3" }
 taktora-motion-core              = { path = "crates/taktora-motion-core", version = "0.1.0" }
+taktora-cyclic-fieldbus          = { path = "crates/taktora-cyclic-fieldbus", version = "0.1.0" }
+taktora-cia402                   = { path = "crates/taktora-cia402", version = "0.1.0" }
+taktora-motion-proto             = { path = "crates/taktora-motion-proto", version = "0.1.0" }
+taktora-motion                   = { path = "crates/taktora-motion", version = "0.1.0" }
 
 # External crates
 iceoryx2          = "0.8"
@@ -112,3 +121,4 @@ proptest          = "1"
 loom              = "0.7"
 tempfile          = "3"
 rsruckig          = "2"
+pollster          = "0.3"

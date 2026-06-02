@@ -117,6 +117,25 @@ impl Axis {
     pub fn superimposed_active(&self) -> bool {
         self.superimposed.is_some_and(|s| !s.done())
     }
+
+    /// Advance the superimposed overlay by `dt` and fold its additive offset
+    /// onto `base`, returning the combined commanded state.
+    ///
+    /// This is the same additive composition [`AxisGroup::tick`] performs, exposed
+    /// so per-axis runtimes that tick [`Axis::motion`] directly (outside an
+    /// [`AxisGroup`]) can apply the overlay too. With no overlay set, `base` is
+    /// returned unchanged. Allocation-free (delegates to [`SCurveState::update`]).
+    #[inline]
+    pub fn apply_superimposed(&mut self, base: AxisState, dt: f64) -> AxisState {
+        let mut next = base;
+        if let Some(overlay) = self.superimposed.as_mut() {
+            let d = overlay.update(dt);
+            next.pos += d.pos;
+            next.vel += d.vel;
+            next.acc += d.acc;
+        }
+        next
+    }
 }
 
 impl Default for Axis {
@@ -152,15 +171,10 @@ impl<const N: usize> AxisGroup<N> {
         for k in 0..N {
             let i = self.order[k] as usize;
             let master = self.axes[i].master_idx.map(|m| self.axes[m as usize].state);
-            let mut next = self.axes[i].motion.update(dt, master);
+            let base = self.axes[i].motion.update(dt, master);
             // Superimposed corrective offset (PLCopen MC_MoveSuperimposed):
             // additive on top of the base motion, in offset space.
-            if let Some(overlay) = self.axes[i].superimposed.as_mut() {
-                let d = overlay.update(dt);
-                next.pos += d.pos;
-                next.vel += d.vel;
-                next.acc += d.acc;
-            }
+            let mut next = self.axes[i].apply_superimposed(base, dt);
             if let Some(period) = self.axes[i].modulo {
                 next.pos = math::rem_euclid(next.pos, period);
             }
