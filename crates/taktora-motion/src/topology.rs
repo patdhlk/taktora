@@ -54,6 +54,12 @@ impl<const N: usize> CouplingTopology<N> {
         }
     }
 
+    /// Whether a *direct* declared edge `master -> slave` exists.
+    #[must_use]
+    pub const fn declared_edge(&self, master: u16, slave: u16) -> bool {
+        (self.declared[master as usize] & (1u64 << slave)) != 0
+    }
+
     /// Precompute transitive downstream sets over declared edges. Call
     /// once after all `add_edge`s (`REQ_0862`: topology is static).
     pub fn precompute(&mut self) {

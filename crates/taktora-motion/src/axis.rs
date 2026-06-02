@@ -41,6 +41,10 @@ pub struct AxisRuntime {
     /// Whether the drive reported `OperationEnabled` on the most recent tick's
     /// statusword read (i.e. the state *before* this cycle's exchange).
     enabled: bool,
+    /// Latched safe-state reaction (`REQ_0861`): once a fault drives this axis
+    /// (directly or as an engaged-downstream slave) to Quick Stop, its
+    /// published state is forced to `ErrorStop` until power is re-requested.
+    error_stop: bool,
     /// Active correlation token (full lifecycle mapping is Task 12).
     last_token: proto::Token,
     token_state: proto::TokenState,
@@ -66,6 +70,7 @@ impl AxisRuntime {
             unwrapper: Unwrapper::default(),
             arm: Axis::new(Motion::Idle(0.0)),
             enabled: false,
+            error_stop: false,
             last_token: 0,
             token_state: proto::TokenState::Idle,
             status: proto::AxisStatus {
@@ -84,7 +89,12 @@ impl AxisRuntime {
     /// Advance one fieldbus cycle: run the power machine, unwrap feedback, do
     /// bumpless seeding while disabled, tick the trajectory once enabled, and
     /// write the scaled `CSP` target.
-    pub fn tick<D>(&mut self, image: &mut [u8], drive: &D, dt: f64)
+    ///
+    /// `master` is the coupled master's commanded [`CoreAxisState`] for this
+    /// same cycle (`None` if this axis is uncoupled). Slaves read it to follow
+    /// their master same-cycle (`REQ_0862`); the trajectory generator consumes
+    /// it via [`Motion::update`].
+    pub fn tick<D>(&mut self, image: &mut [u8], drive: &D, dt: f64, master: Option<CoreAxisState>)
     where
         D: Cia402Drive<Image = [u8]>,
     {
@@ -103,9 +113,9 @@ impl AxisRuntime {
 
         // 5/6. Decide the commanded position.
         let commanded = if self.enabled {
-            // Tick the (already-seeded-at-actual) trajectory. `master` is None
-            // until Task 11 wires coupling.
-            let next = self.arm.motion.update(dt, None);
+            // Tick the (already-seeded-at-actual) trajectory, feeding the
+            // coupled master's commanded state (`None` if uncoupled).
+            let next = self.arm.motion.update(dt, master);
             self.arm.state = next;
             next.pos
         } else {
@@ -121,7 +131,11 @@ impl AxisRuntime {
         drive.set_target_position(image, self.scale.to_increments(commanded));
 
         // 7. Publish status (minimal; full token/command mapping is Task 12).
-        self.status.state = if self.enabled {
+        // A latched safe-state reaction overrides the nominal state until power
+        // is re-requested (`REQ_0861`).
+        self.status.state = if self.error_stop {
+            proto::AxisState::ErrorStop
+        } else if self.enabled {
             map_status(self.arm.status())
         } else {
             proto::AxisState::Disabled
@@ -138,8 +152,9 @@ impl AxisRuntime {
     }
 
     /// Set the power target to `Enabled` (`on`) or `Disabled` (operator
-    /// `MC_Power`).
+    /// `MC_Power`). Clears any latched safe-state reaction (re-arm).
     pub const fn request_power(&mut self, on: bool) {
+        self.error_stop = false;
         self.power.set_target(if on {
             PowerTarget::Enabled
         } else {
@@ -154,11 +169,25 @@ impl AxisRuntime {
     }
 
     /// Command the safe-state reaction: walk the power machine to Quick Stop
-    /// (`REQ_0861`). Used by the fault/stop path in later tasks.
-    // Forward-looking crate API for Task 11/12; `expect` self-corrects once wired.
-    #[expect(dead_code, reason = "wired by the fault/stop path in Task 12")]
+    /// (`REQ_0861`). Driven by the engaged-downstream fault path in
+    /// [`crate::cycle::NcCycle::step`].
     pub(crate) const fn request_quick_stop(&mut self) {
         self.power.set_target(PowerTarget::QuickStop);
+    }
+
+    /// Latch the published state to `ErrorStop` (`REQ_0861`) and reflect it in
+    /// the already-published status immediately, so a fault detected after this
+    /// cycle's `tick` still surfaces as `ErrorStop` in the same `step`.
+    pub(crate) const fn force_error_stop(&mut self) {
+        self.error_stop = true;
+        self.status.state = proto::AxisState::ErrorStop;
+    }
+
+    /// The current `CiA` 402 power target (inspection helper for the fault
+    /// path and tests).
+    #[must_use]
+    pub(crate) const fn power_target(&self) -> PowerTarget {
+        self.power.target()
     }
 
     /// Replace the active trajectory generator (Task 12 command mapping).
@@ -167,10 +196,9 @@ impl AxisRuntime {
         self.arm.motion = motion;
     }
 
-    /// The commanded set-state this runtime last produced (read by Task 11
+    /// The commanded set-state this runtime last produced (read by inter-axis
     /// coupling when this axis is a master).
     #[must_use]
-    #[expect(dead_code, reason = "read by inter-axis coupling in Task 11")]
     pub(crate) const fn commanded_state(&self) -> CoreAxisState {
         self.arm.state
     }
@@ -233,7 +261,7 @@ mod tests {
         let drive = MockDrive::for_axis(0);
         for _ in 0..12 {
             let dt = 0.002;
-            bus.with_image_mut(|img| axis.tick(img, &drive, dt));
+            bus.with_image_mut(|img| axis.tick(img, &drive, dt, None));
             pollster::block_on(bus.exchange()).unwrap();
             if axis.is_enabled() && first_cmd_after_enable.is_none() {
                 let t = bus.with_image(|img| MockDrive::for_axis(0).actual_position(img));

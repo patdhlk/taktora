@@ -2,6 +2,7 @@
 #![warn(missing_docs)]
 
 pub mod axis;
+pub mod cycle;
 pub mod mock;
 pub mod scale;
 pub mod topology;
