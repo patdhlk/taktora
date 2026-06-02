@@ -1,8 +1,10 @@
 //! Octave-bucket sliding-window percentile histogram.
 
-/// Number of histogram buckets — one per power-of-two octave, covering
-/// `2^0 .. 2^63` nanoseconds (≈ 3.32 buckets per decade, satisfying the
-/// "≥ 3 buckets per decade" requirement of `REQ_0100` / `ADR_0060`).
+/// Number of histogram buckets — one per power-of-two octave.
+///
+/// Covers `2^0 .. 2^63` nanoseconds (≈ 3.32 buckets per decade),
+/// satisfying the "≥ 3 buckets per decade" requirement of
+/// `REQ_0100` / `ADR_0060`.
 pub const BUCKETS: usize = 64;
 
 /// Map a nanosecond value to its octave bucket index.
@@ -20,8 +22,14 @@ pub fn bucket_index(value_ns: u64) -> usize {
 ///
 /// Bucket `0` covers `[0, 2)` and is reported as `1`. Used as the
 /// bucket-quantised percentile estimate.
+///
+/// # Panics
+///
+/// Panics in debug builds if `i >= 64` (the `1u64 << i` shift overflows).
+/// Callers pass a [`bucket_index`] result, which is clamped to
+/// `0 ..= BUCKETS - 1`, so the bound always holds in practice.
 #[must_use]
-pub fn bucket_lower(i: usize) -> u64 {
+pub const fn bucket_lower(i: usize) -> u64 {
     1u64 << i
 }
 
