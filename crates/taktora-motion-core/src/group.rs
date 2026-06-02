@@ -171,15 +171,10 @@ impl<const N: usize> AxisGroup<N> {
         for k in 0..N {
             let i = self.order[k] as usize;
             let master = self.axes[i].master_idx.map(|m| self.axes[m as usize].state);
-            let mut next = self.axes[i].motion.update(dt, master);
+            let base = self.axes[i].motion.update(dt, master);
             // Superimposed corrective offset (PLCopen MC_MoveSuperimposed):
             // additive on top of the base motion, in offset space.
-            if let Some(overlay) = self.axes[i].superimposed.as_mut() {
-                let d = overlay.update(dt);
-                next.pos += d.pos;
-                next.vel += d.vel;
-                next.acc += d.acc;
-            }
+            let mut next = self.axes[i].apply_superimposed(base, dt);
             if let Some(period) = self.axes[i].modulo {
                 next.pos = math::rem_euclid(next.pos, period);
             }

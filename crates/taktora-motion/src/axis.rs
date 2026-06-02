@@ -110,8 +110,8 @@ impl AxisRuntime {
     ///
     /// While the drive is not yet enabled this reseeds `arm.motion` to
     /// `Idle(actual)` every cycle for bumpless start (`REQ_0858`), which
-    /// supersedes any motion set by an [`apply_command`](Self::apply_command)
-    /// issued before enable — issue `Power` and await `OperationEnabled` first.
+    /// supersedes any motion set by an `apply_command` issued before enable —
+    /// issue `Power` and await `OperationEnabled` first.
     pub fn tick<D>(&mut self, image: &mut [u8], drive: &D, dt: f64, master: Option<CoreAxisState>)
     where
         D: Cia402Drive<Image = [u8]>,

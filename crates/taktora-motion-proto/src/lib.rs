@@ -89,6 +89,10 @@ pub enum AxisState {
     /// Following a master (gear/cam/flying-saw).
     SynchronizedMotion,
     /// Performing a commanded stop.
+    ///
+    /// Reserved: not yet produced by the NC (a `Stop`/`Halt` ramp currently
+    /// publishes `ContinuousMotion`). Its discriminant position is
+    /// ABI-load-bearing — do not reorder or remove.
     Stopping,
     /// Faulted; quickstopping or stopped.
     ErrorStop,

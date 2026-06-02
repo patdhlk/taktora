@@ -1,5 +1,9 @@
-//! See plan docs/superpowers/plans/2026-06-02-motion-nc-spine.md
+#![no_std]
 #![warn(missing_docs)]
+//! Cyclic process-data fieldbus seam for taktora motion: the `CyclicFieldbus`
+//! trait plus the per-cycle `Validity` and `CycleQuality` reported each
+//! exchange. Implemented by cyclic connectors (`EtherCAT`, later `CANopen`);
+//! consumed by the NC task. `no_std`, no dependencies.
 
 /// Per-device freshness of an input slice this cycle (`REQ_0853`).
 ///
