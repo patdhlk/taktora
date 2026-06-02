@@ -553,11 +553,92 @@ fn dc_from_dto(dto: DcDto) -> Result<DistributedClock, EsiError> {
 
 // ── object dictionary conversion ──────────────────────────────────────────────
 
+/// Derive [`Access`] flags from an optional [`FlagsDto`].
+///
+/// - `"ro"` → read only
+/// - `"wo"` → write only
+/// - `"rw"` → read + write
+/// - `PdoMapping` containing `'T'` or `'R'` → `pdo_mappable`
+fn access_from_flags(f: Option<&FlagsDto>) -> taktora_fieldbus_od_core::Access {
+    use taktora_fieldbus_od_core::Access;
+    let (mut read, mut write, mut pdo_mappable) = (false, false, false);
+    if let Some(f) = f {
+        match f.access.as_deref().map(str::trim) {
+            Some("ro") => read = true,
+            Some("wo") => write = true,
+            Some("rw") => {
+                read = true;
+                write = true;
+            }
+            _ => {}
+        }
+        if let Some(m) = f.pdo_mapping.as_deref() {
+            pdo_mappable = m.contains('T') || m.contains('R');
+        }
+    }
+    Access {
+        read,
+        write,
+        pdo_mappable,
+    }
+}
+
+/// Parse an optional bit-size string into `Option<u32>`.
+fn bitsize_from_str(s: Option<&String>) -> Option<u32> {
+    s.and_then(|x| x.trim().parse::<u32>().ok())
+}
+
+/// Build a single [`DictEntry`] from a leaf `<Object>` (no `<SubItem>` children).
+///
+/// Leaf objects are emitted at `sub_index = 0`.
+fn dict_entry_from_leaf(index: u16, obj: &ObjectDto) -> taktora_fieldbus_od_core::DictEntry {
+    taktora_fieldbus_od_core::DictEntry {
+        index,
+        sub_index: 0,
+        name: obj.name.clone().unwrap_or_default(),
+        data_type: obj
+            .ty
+            .as_deref()
+            .map_or_else(|| DataType::Named(String::new()), DataType::parse_coe_name),
+        bit_size: bitsize_from_str(obj.bit_size.as_ref()),
+        access: access_from_flags(obj.flags.as_ref()),
+        default: obj.info.as_ref().and_then(|i| i.default_data.clone()),
+    }
+}
+
+/// Build one [`DictEntry`] per `<SubItem>` of a compound `<Object>`.
+fn dict_entries_from_compound(
+    index: u16,
+    sub_items: &[SubItemDto],
+) -> Result<Vec<taktora_fieldbus_od_core::DictEntry>, EsiError> {
+    let mut out = Vec::with_capacity(sub_items.len());
+    for si in sub_items {
+        out.push(taktora_fieldbus_od_core::DictEntry {
+            index,
+            sub_index: match &si.sub_index {
+                Some(s) => parse_esi_u8(s, "SubItem.SubIndex")?,
+                None => 0,
+            },
+            name: si.name.clone().unwrap_or_default(),
+            data_type: si
+                .ty
+                .as_deref()
+                .map_or_else(|| DataType::Named(String::new()), DataType::parse_coe_name),
+            bit_size: bitsize_from_str(si.bit_size.as_ref()),
+            access: access_from_flags(si.flags.as_ref()),
+            default: si.info.as_ref().and_then(|i| i.default_data.clone()),
+        });
+    }
+    Ok(out)
+}
+
+/// Convert the `<Profile><Dictionary><Objects>` section of a device into a flat
+/// list of [`DictEntry`] records, one per leaf object or per `<SubItem>`.
+///
+/// Returns an empty vec when the profile contains no `<Objects>` section.
 fn dictionary_from_profile(
     profile: Option<&ProfileDto>,
 ) -> Result<Vec<taktora_fieldbus_od_core::DictEntry>, EsiError> {
-    use taktora_fieldbus_od_core::{Access, DictEntry};
-
     let Some(objects) = profile
         .and_then(|p| p.dictionary.as_ref())
         .and_then(|d| d.objects.as_ref())
@@ -565,67 +646,13 @@ fn dictionary_from_profile(
         return Ok(Vec::new());
     };
 
-    let access_of = |f: &Option<FlagsDto>| -> Access {
-        let (mut read, mut write, mut pdo_mappable) = (false, false, false);
-        if let Some(f) = f {
-            match f.access.as_deref().map(str::trim) {
-                Some("ro") => read = true,
-                Some("wo") => write = true,
-                Some("rw") => {
-                    read = true;
-                    write = true;
-                }
-                _ => {}
-            }
-            if let Some(m) = f.pdo_mapping.as_deref() {
-                pdo_mappable = m.contains('T') || m.contains('R');
-            }
-        }
-        Access {
-            read,
-            write,
-            pdo_mappable,
-        }
-    };
-
-    let bitsize_of = |s: &Option<String>| -> Option<u32> {
-        s.as_deref().and_then(|x| x.trim().parse::<u32>().ok())
-    };
-
     let mut out = Vec::new();
     for obj in &objects.object {
         let index = parse_esi_u16(&obj.index, "Object.Index")?;
         if obj.sub_item.is_empty() {
-            out.push(DictEntry {
-                index,
-                sub_index: 0,
-                name: obj.name.clone().unwrap_or_default(),
-                data_type: obj
-                    .ty
-                    .as_deref()
-                    .map_or_else(|| DataType::Named(String::new()), DataType::parse_coe_name),
-                bit_size: bitsize_of(&obj.bit_size),
-                access: access_of(&obj.flags),
-                default: obj.info.as_ref().and_then(|i| i.default_data.clone()),
-            });
+            out.push(dict_entry_from_leaf(index, obj));
         } else {
-            for si in &obj.sub_item {
-                out.push(DictEntry {
-                    index,
-                    sub_index: match &si.sub_index {
-                        Some(s) => parse_esi_u8(s, "SubItem.SubIndex")?,
-                        None => 0,
-                    },
-                    name: si.name.clone().unwrap_or_default(),
-                    data_type: si
-                        .ty
-                        .as_deref()
-                        .map_or_else(|| DataType::Named(String::new()), DataType::parse_coe_name),
-                    bit_size: bitsize_of(&si.bit_size),
-                    access: access_of(&si.flags),
-                    default: si.info.as_ref().and_then(|i| i.default_data.clone()),
-                });
-            }
+            out.extend(dict_entries_from_compound(index, &obj.sub_item)?);
         }
     }
     Ok(out)
