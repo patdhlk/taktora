@@ -19,6 +19,6 @@
 mod histogram;
 mod minmax;
 
-// TODO: uncommented as symbols land in Tasks 2-4
+// TODO: uncomment as symbols land in Tasks 2-4
 // pub use histogram::{bucket_index, bucket_lower, RollingHistogram, BUCKETS};
 // pub use minmax::MinMaxDeque;
