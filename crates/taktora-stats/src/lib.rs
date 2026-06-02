@@ -19,6 +19,6 @@
 mod histogram;
 mod minmax;
 
-// TODO: uncomment as symbols land in Tasks 2-4
-// pub use histogram::{bucket_index, bucket_lower, RollingHistogram, BUCKETS};
-// pub use minmax::MinMaxDeque;
+pub use histogram::{BUCKETS, bucket_index, bucket_lower};
+// TODO(Task 3): add RollingHistogram to the histogram re-export
+// TODO(Task 4): pub use minmax::MinMaxDeque;
