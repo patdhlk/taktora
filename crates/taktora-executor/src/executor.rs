@@ -76,6 +76,17 @@ pub(crate) struct TaskEntry {
     /// `job`. `None` means no handler — the task is simply skipped
     /// during fault. `REQ_0072`.
     pub(crate) handler_job: Option<Box<dyn FnMut() + Send + 'static>>,
+
+    /// Declared scan period for cyclic tasks (the `TriggerDecl::Interval`
+    /// duration), or `None` for event-driven tasks. Cached at add time so the
+    /// dispatch loop reads it without scanning `decls` per cycle. Gates cycle
+    /// telemetry: only cyclic tasks participate (`REQ_0106`).
+    pub(crate) scan_period: Option<Duration>,
+    /// Last-cycle execute duration in ns, written by the dispatch closure on
+    /// the pool worker and read by the `WaitSet` thread after `barrier()`.
+    /// Shared via `Arc` exactly like `overrun_count`. Sentinel `u64::MAX` =
+    /// "no sample this cycle" (the closure never ran — e.g. a faulted scan).
+    pub(crate) last_took_ns: Arc<AtomicU64>,
 }
 
 /// Top-level executor. One per process is the typical case.
@@ -207,6 +218,8 @@ impl Executor {
         // the `as u32` cast is sound; explicit allow keeps clippy quiet.
         let task_fault = Arc::new(FaultAtomic::new());
         let overrun_count = Arc::new(AtomicU64::new(0));
+        let scan_period = scan_period_from_decls(&decls);
+        let last_took_ns = Arc::new(AtomicU64::new(u64::MAX));
         #[allow(clippy::cast_possible_truncation)]
         let task_idx_u32 = self.tasks.len() as u32;
         let fault_ctx = FaultDispatchCtx {
@@ -232,6 +245,7 @@ impl Executor {
             app_inst,
             item_ptr,
             fault_ctx,
+            Arc::clone(&last_took_ns),
         );
 
         self.tasks.push(TaskEntry {
@@ -243,6 +257,8 @@ impl Executor {
             fault: task_fault,
             overrun_count,
             handler_job: None,
+            scan_period,
+            last_took_ns: Arc::clone(&last_took_ns),
         });
         Ok(id)
     }
@@ -533,6 +549,8 @@ impl Executor {
         // holds. The chain occupies `self.tasks.len()` after the push.
         let task_fault = Arc::new(FaultAtomic::new());
         let overrun_count = Arc::new(AtomicU64::new(0));
+        let scan_period = scan_period_from_decls(&decls);
+        let last_took_ns = Arc::new(AtomicU64::new(u64::MAX));
         #[allow(clippy::cast_possible_truncation)]
         let task_idx_u32 = self.tasks.len() as u32;
 
@@ -546,6 +564,8 @@ impl Executor {
             fault: Arc::clone(&task_fault),
             overrun_count: Arc::clone(&overrun_count),
             handler_job: None,
+            scan_period,
+            last_took_ns: Arc::clone(&last_took_ns),
         });
 
         // After the push, the TaskEntry lives at a stable position in
@@ -587,6 +607,7 @@ impl Executor {
             Arc::clone(&self.iter_err),
             chain_ptr,
             fault_ctx,
+            Arc::clone(&last_took_ns),
         );
         self.tasks[task_idx].job = Some(job);
         Ok(id)
@@ -1461,6 +1482,15 @@ struct FaultDispatchCtx {
     observer: Arc<dyn Observer>,
 }
 
+/// Extract the declared scan period (first `Interval` trigger) from a task's
+/// trigger declarations, or `None` for event-driven tasks.
+fn scan_period_from_decls(decls: &[crate::trigger::TriggerDecl]) -> Option<Duration> {
+    decls.iter().find_map(|d| match d {
+        crate::trigger::TriggerDecl::Interval(dur) => Some(*dur),
+        _ => None,
+    })
+}
+
 /// Build the per-iteration dispatch closure for a `TaskKind::Single`.
 ///
 /// The returned closure is stored on `TaskEntry::job` and invoked once
@@ -1479,6 +1509,7 @@ fn build_single_job(
     app_inst: Option<u32>,
     item_ptr: SendItemPtr,
     fault_ctx: FaultDispatchCtx,
+    last_took_ns: Arc<AtomicU64>,
 ) -> Box<dyn FnMut() + Send + 'static> {
     Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
@@ -1494,6 +1525,10 @@ fn build_single_job(
         #[allow(unsafe_code)]
         let res = run_item_catch_unwind(unsafe { &mut *raw }, &mut ctx);
         let took = started.elapsed();
+        last_took_ns.store(
+            u64::try_from(took.as_nanos()).unwrap_or(u64::MAX),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         mon.post_execute(id.clone(), started, took, res.is_ok());
         if let Err(ref e) = res {
             obs.on_app_error(id.clone(), e.as_ref());
@@ -1564,9 +1599,14 @@ fn build_chain_job(
     err_slot: Arc<std::sync::Mutex<Option<ExecutorError>>>,
     chain_ptr: SendChainPtr,
     fault_ctx: FaultDispatchCtx,
+    last_took_ns: Arc<AtomicU64>,
 ) -> Box<dyn FnMut() + Send + 'static> {
     Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
+        // Overall chain scan timer — the chain's `took` is the wall time
+        // from the first item's pre-execute to the last item's completion
+        // (or early break), mirroring the single-item `took` notion.
+        let chain_started = std::time::Instant::now();
         // SAFETY: barrier() pairs with this invocation; the chain Vec
         // and the items it owns are not touched by the WaitSet thread
         // until barrier() returns. See SendChainPtr safety doc.
@@ -1605,6 +1645,11 @@ fn build_chain_job(
                 }
             }
         }
+        let chain_took = chain_started.elapsed();
+        last_took_ns.store(
+            u64::try_from(chain_took.as_nanos()).unwrap_or(u64::MAX),
+            std::sync::atomic::Ordering::Relaxed,
+        );
     })
 }
 
@@ -1797,6 +1842,7 @@ impl ExecutorGraphBuilder<'_> {
             .or(self.custom_id)
             .unwrap_or_else(auto_id);
         let decls = g.decls.clone();
+        let scan_period = scan_period_from_decls(&decls);
 
         // Box the graph for address stability — per-vertex dispatch
         // closures capture `*const Graph` and must not see it move.
@@ -1824,6 +1870,11 @@ impl ExecutorGraphBuilder<'_> {
             fault: Arc::new(FaultAtomic::new()),
             overrun_count: Arc::new(AtomicU64::new(0)),
             handler_job: None,
+            scan_period,
+            // Graphs dispatch vertices via their own path and do not ferry a
+            // per-task `took`; sentinel = "no sample". Wired for struct
+            // completeness; nothing reads it yet (Task 6).
+            last_took_ns: Arc::new(AtomicU64::new(u64::MAX)),
         });
         Ok(id)
     }
@@ -1873,6 +1924,38 @@ mod tests {
             .find(|t| t.id == task_id)
             .expect("task present");
         assert_eq!(entry.budget, Some(Duration::from_millis(5)));
+    }
+
+    #[test]
+    fn scan_period_cached_for_cyclic_only() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let cyclic = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(5));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .unwrap();
+        let event_driven = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
+
+        let cyclic_entry = exec
+            .tasks
+            .iter()
+            .find(|t| t.id == cyclic)
+            .expect("cyclic task present");
+        assert_eq!(cyclic_entry.scan_period, Some(Duration::from_millis(5)));
+        // Sentinel: no sample has been taken yet.
+        assert_eq!(cyclic_entry.last_took_ns.load(Ordering::Relaxed), u64::MAX);
+
+        let event_entry = exec
+            .tasks
+            .iter()
+            .find(|t| t.id == event_driven)
+            .expect("event-driven task present");
+        assert_eq!(event_entry.scan_period, None);
     }
 
     #[test]
