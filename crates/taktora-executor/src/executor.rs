@@ -695,6 +695,16 @@ impl ExecutorBuilder {
     /// The handler is expected to be time-bounded (the caller's responsibility);
     /// no runtime deadline is imposed.
     ///
+    /// **Observer / monitor containment carve-out**: the panic containment
+    /// described in the executor documentation covers only a user item's
+    /// `execute()` call. Panics that originate in framework-invoked user
+    /// callbacks that run *outside* that inner catch — such as
+    /// [`Observer`](crate::Observer) methods (e.g. `on_app_error`,
+    /// `on_task_fault`) and [`ExecutionMonitor`](crate::ExecutionMonitor)
+    /// methods (e.g. `post_execute`) — escape to this fail-fast boundary and
+    /// cause `abort()`. Those callbacks must therefore be treated as
+    /// non-panicking by the implementor. See `REQ_0123`.
+    ///
     /// If not called, a no-op handler is used and `abort()` is still reached
     /// after any unrecoverable fault.
     #[must_use]
@@ -905,6 +915,7 @@ impl Executor {
         result
     }
 
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(
         unsafe_code,
         clippy::too_many_lines,
@@ -955,7 +966,11 @@ impl Executor {
             // the slot is owned by `self.iter_err`, allocated once at build
             // time. Pool worker closures obtain a refcount-only clone of
             // the `Arc`; the slot itself is reused across iterations.
-            *self.iter_err.lock().unwrap() = None;
+            #[allow(clippy::unwrap_used)]
+            // fail-fast: poison unreachable — the lock is held only over an infallible Option insert/take, and any holder panic aborts the process before another thread observes it (ADR_0065)
+            let mut iter_err_guard = self.iter_err.lock().unwrap();
+            *iter_err_guard = None;
+            drop(iter_err_guard);
 
             // SAFETY: we capture &mut self.tasks via a raw pointer because
             // wait_and_process expects FnMut and Rust can't see the closure
@@ -1058,6 +1073,7 @@ impl Executor {
     /// Order of precedence matches the original inline checks: `WaitSet`
     /// errors, then SIGINT/SIGTERM, then a captured item error, then a stop
     /// request, then the active [`RunMode`] limit.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn after_callback(
         &self,
         cb_result: Result<WaitSetRunResult, iceoryx2::waitset::WaitSetRunError>,
@@ -1081,6 +1097,8 @@ impl Executor {
 
         // Extract the error before dropping the MutexGuard — avoids holding the
         // lock across the return (clippy::significant_drop_in_scrutinee).
+        #[allow(clippy::unwrap_used)]
+        // fail-fast: poison unreachable — the lock is held only over an infallible Option insert/take, and any holder panic aborts the process before another thread observes it (ADR_0065)
         let maybe_err = self.iter_err.lock().unwrap().take();
         if let Some(err) = maybe_err {
             return IterOutcome::Failed(err);
@@ -1187,6 +1205,7 @@ impl DispatchPass<'_, '_, '_> {
     /// dispatches every task whose attachment fired. Always returns
     /// [`CallbackProgression::Continue`]; termination is decided by the
     /// `stop_flag` check in `dispatch_loop` after the callback returns.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(unsafe_code)]
     fn process_attachment(
         &mut self,
@@ -1296,6 +1315,7 @@ impl DispatchPass<'_, '_, '_> {
     /// `Single`/`Chain` tasks submit their pre-built job to the pool;
     /// `Graph` tasks drive one pass and capture the first item error into the
     /// per-iteration error slot.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
     fn dispatch_task(&self, task: &mut TaskEntry) {
         match &mut task.kind {
@@ -1303,6 +1323,8 @@ impl DispatchPass<'_, '_, '_> {
                 // The dispatch closure was pre-allocated at task-add time and
                 // stashed on `task.job`. Submit it via `submit_borrowed` — no
                 // per-iteration Box allocation. Required by REQ_0060.
+                #[allow(clippy::expect_used)]
+                // fail-fast: Single/Chain task.job is always Some — set at add time in build_single_job/build_chain_job and never cleared
                 let job_box = task
                     .job
                     .as_deref_mut()
@@ -1326,6 +1348,8 @@ impl DispatchPass<'_, '_, '_> {
                 // allocation-free in steady state.
                 let outcome = graph.run_once_borrowed(self.pool);
                 if let Some(source) = outcome.error {
+                    #[allow(clippy::unwrap_used)]
+                    // fail-fast: poison unreachable — the lock is held only over an infallible Option insert/take, and any holder panic aborts the process before another thread observes it (ADR_0065)
                     let mut g = self.iter_err.lock().unwrap();
                     if g.is_none() {
                         *g = Some(ExecutorError::Item {

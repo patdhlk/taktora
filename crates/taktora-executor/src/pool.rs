@@ -254,6 +254,7 @@ impl Pool {
     /// Allocates one `Box` per call in threaded mode. For hot-path dispatch
     /// where the closure shape is stable across iterations, prefer
     /// [`Pool::submit_borrowed`] which avoids the allocation.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[track_caller]
     pub(crate) fn submit<F>(&self, f: F)
     where
@@ -266,9 +267,9 @@ impl Pool {
                 self.tracker.complete();
             }
             PoolMode::Threaded { tx, .. } => {
-                // Safe to expect: the channel sender lives in self, and self can't be
-                // dropped while we hold &self. The only path to a closed channel is
-                // Pool::drop, which can't run concurrently with submit().
+                // fail-fast: pool channel only closes in Pool::drop, which
+                // cannot run concurrently with submit
+                #[allow(clippy::expect_used)]
                 tx.send(Job::Owned(Box::new(f)))
                     .expect("pool channel closed");
             }
