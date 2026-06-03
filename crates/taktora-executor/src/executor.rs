@@ -18,6 +18,7 @@ use crate::monitor::{ExecutionMonitor, NoopMonitor};
 use crate::observer::{NoopObserver, Observer};
 use crate::payload::Payload;
 use crate::pool::Pool;
+use crate::stats::{CycleObservation, StatsSnapshot, TaskStatsEntry};
 use crate::task_id::TaskId;
 use crate::task_kind::TaskKind;
 use crate::thread_attrs::ThreadAttributes;
@@ -32,10 +33,29 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+use taktora_stats::ExecutorCycleStats;
 
 /// Monotonically increasing counter so multiple executors in the same process
 /// each get a unique stop-event service name.
 static EXEC_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Executor histogram segment count (`S`) and exact-window length (`W`) for
+/// per-task cycle stats. Fixed at compile time per `ADR_0060`.
+pub(crate) type TaskCycleStats = ExecutorCycleStats<8, 256>;
+
+/// A single wakeup's pending cycle record, stashed on the [`TaskEntry`] between
+/// the pre-dispatch capture and the post-barrier fold. Bundling the pre-dispatch
+/// timestamp with its `faulted` flag in one `Option` makes them impossible to
+/// desync: a cycle is pending iff this is `Some`, and the `faulted` bit is then
+/// always the one captured at the same wakeup (`REQ_0107`).
+#[derive(Clone, Copy)]
+pub(crate) struct CyclePending {
+    /// Pre-dispatch instant for this wakeup (the cycle's `pre`).
+    pub(crate) pre: Instant,
+    /// `true` when this wakeup's scan was fault-routed/skipped, so the
+    /// post-barrier fold records it with `faulted=true`.
+    pub(crate) faulted: bool,
+}
 
 /// One registered task entry.
 pub(crate) struct TaskEntry {
@@ -76,6 +96,32 @@ pub(crate) struct TaskEntry {
     /// `job`. `None` means no handler — the task is simply skipped
     /// during fault. `REQ_0072`.
     pub(crate) handler_job: Option<Box<dyn FnMut() + Send + 'static>>,
+
+    /// Declared scan period for cyclic tasks (the `TriggerDecl::Interval`
+    /// duration), or `None` for event-driven tasks. Cached at add time so the
+    /// dispatch loop reads it without scanning `decls` per cycle. Gates cycle
+    /// telemetry: only cyclic tasks participate (`REQ_0106`).
+    pub(crate) scan_period: Option<Duration>,
+    /// Last-cycle execute duration in ns, written by the dispatch closure on
+    /// the pool worker and read by the `WaitSet` thread after `barrier()`.
+    /// Shared via `Arc` exactly like `overrun_count`. Sentinel `u64::MAX` =
+    /// "no sample this cycle" (the closure never ran — e.g. a faulted scan).
+    pub(crate) last_took_ns: Arc<AtomicU64>,
+
+    /// WaitSet-thread-only timestamp of this task's previous dispatch, for
+    /// computing `actual_period` (`REQ_0101`). Not shared (no atomic) — only the
+    /// single dispatch thread touches it. `None` before the first dispatch.
+    pub(crate) last_dispatch: Option<Instant>,
+
+    /// WaitSet-thread-only stash of the *current* wakeup's pending cycle —
+    /// the pre-dispatch timestamp plus its `faulted` flag — carried across
+    /// `pool.barrier()` so the post-barrier record pass can fold this cycle's
+    /// telemetry without re-reading the clock or allocating a fired-index list.
+    /// `Some` between the pre-dispatch capture and the post-barrier
+    /// `record_cycle_for` `take`; `None` otherwise. Bundling the timestamp and
+    /// the fault flag in one `Option` keeps them from ever desyncing
+    /// (`REQ_0107`). Only the single dispatch thread touches it (no atomic).
+    pub(crate) pending_cycle: Option<CyclePending>,
 }
 
 /// Top-level executor. One per process is the typical case.
@@ -83,6 +129,13 @@ pub struct Executor {
     pub(crate) node: Node<ipc::Service>,
     pub(crate) pool: Arc<Pool>,
     pub(crate) tasks: Vec<TaskEntry>,
+    /// One cycle-stats aggregator per registered task, index-aligned with
+    /// `tasks`. Pushed at task-add time (before `run`), so no steady-state
+    /// allocation (`REQ_0060`, `REQ_0104`). Updated single-writer on the
+    /// `WaitSet` thread (Task 6).
+    pub(crate) cycle_stats: Vec<TaskCycleStats>,
+    /// Histogram sliding-window size in samples (`REQ_0100`).
+    pub(crate) stats_window: u32,
     pub(crate) running: Arc<AtomicBool>,
     pub(crate) stoppable: Stoppable,
     pub(crate) next_id: AtomicU64,
@@ -160,6 +213,32 @@ impl Executor {
         crate::Service::open_or_create(&self.node, name)
     }
 
+    /// Borrowed snapshot of every task's cycle aggregates (`REQ_0103` pull
+    /// path). Relaxed reads; never blocks the dispatch writer.
+    #[must_use]
+    pub fn stats_snapshot(&self) -> StatsSnapshot {
+        let per_task = self
+            .tasks
+            .iter()
+            .zip(self.cycle_stats.iter())
+            .map(|(t, s)| {
+                let snap = s.snapshot();
+                TaskStatsEntry {
+                    task_id: t.id.clone(),
+                    p50_ns: snap.p50_ns,
+                    p95_ns: snap.p95_ns,
+                    p99_ns: snap.p99_ns,
+                    min_ns: snap.min_ns,
+                    max_ns: snap.max_ns,
+                    max_jitter_ns: snap.max_jitter_ns,
+                    max_lateness_ns: snap.max_lateness_ns,
+                    overrun_count: t.overrun_count.load(Ordering::Acquire),
+                }
+            })
+            .collect();
+        StatsSnapshot { per_task }
+    }
+
     /// Add an item to the executor with an auto-generated id.
     pub fn add(&mut self, item: impl ExecutableItem) -> Result<TaskId, ExecutorError> {
         let id = TaskId::new(format!(
@@ -207,6 +286,8 @@ impl Executor {
         // the `as u32` cast is sound; explicit allow keeps clippy quiet.
         let task_fault = Arc::new(FaultAtomic::new());
         let overrun_count = Arc::new(AtomicU64::new(0));
+        let scan_period = scan_period_from_decls(&decls);
+        let last_took_ns = Arc::new(AtomicU64::new(u64::MAX));
         #[allow(clippy::cast_possible_truncation)]
         let task_idx_u32 = self.tasks.len() as u32;
         let fault_ctx = FaultDispatchCtx {
@@ -232,6 +313,7 @@ impl Executor {
             app_inst,
             item_ptr,
             fault_ctx,
+            Arc::clone(&last_took_ns),
         );
 
         self.tasks.push(TaskEntry {
@@ -243,7 +325,13 @@ impl Executor {
             fault: task_fault,
             overrun_count,
             handler_job: None,
+            scan_period,
+            last_took_ns: Arc::clone(&last_took_ns),
+            last_dispatch: None,
+            pending_cycle: None,
         });
+        self.cycle_stats
+            .push(TaskCycleStats::new(self.stats_window));
         Ok(id)
     }
 
@@ -533,6 +621,8 @@ impl Executor {
         // holds. The chain occupies `self.tasks.len()` after the push.
         let task_fault = Arc::new(FaultAtomic::new());
         let overrun_count = Arc::new(AtomicU64::new(0));
+        let scan_period = scan_period_from_decls(&decls);
+        let last_took_ns = Arc::new(AtomicU64::new(u64::MAX));
         #[allow(clippy::cast_possible_truncation)]
         let task_idx_u32 = self.tasks.len() as u32;
 
@@ -546,7 +636,13 @@ impl Executor {
             fault: Arc::clone(&task_fault),
             overrun_count: Arc::clone(&overrun_count),
             handler_job: None,
+            scan_period,
+            last_took_ns: Arc::clone(&last_took_ns),
+            last_dispatch: None,
+            pending_cycle: None,
         });
+        self.cycle_stats
+            .push(TaskCycleStats::new(self.stats_window));
 
         // After the push, the TaskEntry lives at a stable position in
         // `self.tasks` for the duration of this `add_chain_with_id_boxed`
@@ -587,6 +683,7 @@ impl Executor {
             Arc::clone(&self.iter_err),
             chain_ptr,
             fault_ctx,
+            Arc::clone(&last_took_ns),
         );
         self.tasks[task_idx].job = Some(job);
         Ok(id)
@@ -628,6 +725,9 @@ pub struct ExecutorBuilder {
     /// User-supplied fatal handler. `None` → resolved to a no-op `Arc` in
     /// `build()`.
     fatal_handler: Option<FatalHandler>,
+    /// Sliding-window size (samples) for cycle-stats aggregation
+    /// (`REQ_0100`). `None` → resolved to `1024` in `build()`.
+    stats_window: Option<u32>,
 }
 
 impl Default for ExecutorBuilder {
@@ -639,6 +739,7 @@ impl Default for ExecutorBuilder {
             worker_attrs: ThreadAttributes::new(),
             iteration_budget: None,
             fatal_handler: None,
+            stats_window: None,
         }
     }
 }
@@ -672,6 +773,14 @@ impl ExecutorBuilder {
     #[must_use]
     pub const fn iteration_budget(mut self, dur: Duration) -> Self {
         self.iteration_budget = Some(dur);
+        self
+    }
+
+    /// Sliding-window size (samples) for percentile / min-max / jitter /
+    /// lateness aggregation (`REQ_0100`). Default `1024`.
+    #[must_use]
+    pub const fn stats_window(mut self, samples: u32) -> Self {
+        self.stats_window = Some(samples);
         self
     }
 
@@ -788,6 +897,8 @@ impl ExecutorBuilder {
             node,
             pool,
             tasks: Vec::new(),
+            cycle_stats: Vec::new(),
+            stats_window: self.stats_window.unwrap_or(1024),
             running: Arc::new(AtomicBool::new(false)),
             stoppable,
             next_id: AtomicU64::new(0),
@@ -987,6 +1098,10 @@ impl Executor {
             //      after dispatch starts), so the underlying buffer addresses are
             //      stable for the lifetime of `dispatch_loop`.
             let tasks_ptr = &mut self.tasks as *mut Vec<TaskEntry>;
+            // Take the cycle_stats raw pointer before borrowing `observer`, so
+            // the &mut borrow is released first — same discipline as tasks_ptr.
+            let cycle_stats_ptr = &mut self.cycle_stats as *mut Vec<TaskCycleStats>;
+            let observer = &self.observer;
             let pool = &self.pool;
             // Refcount-only clone of the pre-allocated error slot. Pool jobs
             // need a `'static` handle, and an `Arc::clone` does not allocate.
@@ -1030,6 +1145,8 @@ impl Executor {
                         guards: &guards,
                         attachment_to_task: &attachment_to_task,
                         tasks_ptr,
+                        cycle_stats_ptr,
+                        observer,
                         exec_fault_ptr,
                         exec_start_ptr,
                         stop_listener_ptr,
@@ -1188,6 +1305,10 @@ struct DispatchPass<'a, 'g, 'w> {
     attachment_to_task: &'a [usize],
     /// Raw pointer to `Executor::tasks`.
     tasks_ptr: *mut Vec<TaskEntry>,
+    /// Raw pointer to `Executor::cycle_stats` (index-aligned with `tasks`).
+    cycle_stats_ptr: *mut Vec<TaskCycleStats>,
+    /// Borrow of the executor's observer for the `on_cycle_stats` push.
+    observer: &'a Arc<dyn Observer>,
     /// Raw pointer to `Executor::exec_fault` inner state.
     exec_fault_ptr: *const ExecutorFaultAtomic,
     /// Raw pointer to `Executor::start_time`.
@@ -1235,16 +1356,135 @@ impl DispatchPass<'_, '_, '_> {
             // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072). When it
             // routes to a (possible) handler, normal dispatch is skipped.
             if self.handle_fault_routing(task) {
+                // REQ_0107: a faulted/fault-routed scan STILL advances
+                // cycle_index and emits on_cycle_stats, or the executor's count
+                // desyncs from the connector's join key (FEAT_0038). took/jitter
+                // are None (poison-safe); the index always moves. Allocation-free:
+                // a CyclePending { Instant, bool } written onto the TaskEntry,
+                // no heap.
+                if task.scan_period.is_some() {
+                    task.pending_cycle = Some(CyclePending {
+                        pre: Instant::now(),
+                        faulted: true,
+                    });
+                }
                 continue;
             }
+
+            // Stash the pre-dispatch instant so the post-barrier record pass
+            // can fold this cycle's telemetry. Allocation-free: the timestamp
+            // lives on the TaskEntry, not in a per-wakeup Vec. `take`n in the
+            // post-barrier loop below — guarantees exactly-once even if two
+            // guards map to the same task. `faulted: false`: a task that faulted
+            // last wakeup and recovered this one records the normal path (the
+            // whole CyclePending is overwritten, so the flag can't be stale).
+            task.pending_cycle = Some(CyclePending {
+                pre: Instant::now(),
+                faulted: false,
+            });
 
             self.dispatch_task(task);
         }
 
         // Wait for all submitted jobs to finish before leaving the callback
-        // scope (validates item_ptr safety contract).
+        // scope (validates item_ptr safety contract). The barrier also makes
+        // every worker's `last_took_ns` Release-store visible to the record
+        // pass below.
         self.pool.barrier();
+
+        // Post-barrier telemetry fold. The source of truth for "this task was
+        // dispatched this wakeup and owes a record" is `pending_cycle`,
+        // set in the dispatch loop above — not the guard fired-status. Keying
+        // solely on the stash (rather than re-querying `has_event_from`)
+        // removes any dependency on the fired-status query being stable across
+        // a second scan, so a dispatched cycle can never be silently
+        // under-recorded (which would lag `cycle_index` — the desync FEAT_0038
+        // must avoid). `take` clears the stash, guaranteeing exactly-once.
+        // Allocation-free: iterate task indices in place.
+        // SAFETY: same single-writer WaitSet-thread discipline as the dispatch
+        // loop above; barrier-bounded, no in-flight pool job aliases `tasks`.
+        let task_count = unsafe { (*self.tasks_ptr).len() };
+        for task_idx in 0..task_count {
+            // SAFETY: single-writer WaitSet thread; borrow released before
+            // the record_cycle_for call (which re-derefs tasks_ptr).
+            let pending = unsafe { (&mut *self.tasks_ptr)[task_idx].pending_cycle.take() };
+            if let Some(CyclePending { pre, faulted }) = pending {
+                self.record_cycle_for(task_idx, faulted, pre);
+            }
+        }
+
         CallbackProgression::Continue
+    }
+
+    /// Fold one scan cycle's telemetry and push it to the observer. Called
+    /// once per fired CYCLIC attachment per wakeup. `faulted = true` (Task 10)
+    /// means the scan was skipped/errored: `took`/`jitter`/`lateness` are
+    /// unmeasured. Event-driven tasks (no `scan_period`) are skipped entirely
+    /// (`REQ_0106`).
+    #[allow(unsafe_code)]
+    fn record_cycle_for(&mut self, task_idx: usize, faulted: bool, pre: Instant) {
+        // SAFETY: single-writer WaitSet thread; same discipline as tasks_ptr.
+        let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
+        let Some(period) = task.scan_period else {
+            return; // event-driven: no cycle telemetry
+        };
+        let period_ns = u64::try_from(period.as_nanos()).unwrap_or(u64::MAX);
+
+        // Release/Acquire pairing with the worker store (M2): `swap` acquires
+        // the worker's Release-store and resets the sentinel atomically.
+        let took_raw = task.last_took_ns.swap(u64::MAX, Ordering::AcqRel);
+        let took = if faulted || took_raw == u64::MAX {
+            None
+        } else {
+            Some(took_raw)
+        };
+
+        // actual_period + jitter vs the previous dispatch (REQ_0101). Always
+        // advance `last_dispatch` (even on a faulted attempt) so the next
+        // cycle's period is measured from this wakeup. On a faulted scan the
+        // jitter sample is suppressed (poison-safe: REQ_0107) — we don't fold a
+        // jitter measurement for a skipped scan — but `actual_period_ns` still
+        // reports the observed wakeup spacing.
+        let (actual_period_ns, jitter_raw) =
+            task.last_dispatch.replace(pre).map_or((0, None), |prev| {
+                let ap = u64::try_from(pre.duration_since(prev).as_nanos()).unwrap_or(u64::MAX);
+                (ap, Some(ap.abs_diff(period_ns)))
+            });
+        let jitter = if faulted { None } else { jitter_raw };
+
+        // SAFETY: cycle_stats is index-aligned with tasks; single-writer.
+        let stats = unsafe { &mut (&mut *self.cycle_stats_ptr)[task_idx] };
+
+        // Deadline lateness (REQ_0106): signed offset of the actual start
+        // (`pre`) from the nominal grid point this cycle was due — grid point
+        // n = exec_start + n*period, where n is the index this cycle receives.
+        // Positive => started late; negative => early. Captures steady drift
+        // (jitter is blind to a constant offset; lateness is not).
+        let lateness = if period_ns > 0 && !faulted {
+            // SAFETY: exec_start_ptr derefs the Executor owning this dispatch_loop.
+            let exec_start = *unsafe { &*self.exec_start_ptr }.get_or_init(Instant::now);
+            let idx = stats.cycles_recorded(); // index this cycle will get
+            let elapsed_ns =
+                i64::try_from(pre.duration_since(exec_start).as_nanos()).unwrap_or(i64::MAX);
+            let expected_ns =
+                i64::try_from(u128::from(idx) * u128::from(period_ns)).unwrap_or(i64::MAX);
+            Some(elapsed_ns.saturating_sub(expected_ns))
+        } else {
+            None
+        };
+
+        let cycle_index = stats.record_cycle(took, jitter, lateness);
+
+        let obs = CycleObservation {
+            cycle_index,
+            task_id: task.id.clone(),
+            period_ns,
+            actual_period_ns,
+            jitter_ns: jitter.unwrap_or(0),
+            lateness_ns: lateness.unwrap_or(0),
+            took_ns: took.unwrap_or(0),
+        };
+        self.observer.on_cycle_stats(&obs);
     }
 
     /// Applies the pre-dispatch fault gate for `Single`/`Chain` tasks.
@@ -1461,6 +1701,15 @@ struct FaultDispatchCtx {
     observer: Arc<dyn Observer>,
 }
 
+/// Extract the declared scan period (first `Interval` trigger) from a task's
+/// trigger declarations, or `None` for event-driven tasks.
+fn scan_period_from_decls(decls: &[crate::trigger::TriggerDecl]) -> Option<Duration> {
+    decls.iter().find_map(|d| match d {
+        crate::trigger::TriggerDecl::Interval(dur) => Some(*dur),
+        _ => None,
+    })
+}
+
 /// Build the per-iteration dispatch closure for a `TaskKind::Single`.
 ///
 /// The returned closure is stored on `TaskEntry::job` and invoked once
@@ -1479,6 +1728,7 @@ fn build_single_job(
     app_inst: Option<u32>,
     item_ptr: SendItemPtr,
     fault_ctx: FaultDispatchCtx,
+    last_took_ns: Arc<AtomicU64>,
 ) -> Box<dyn FnMut() + Send + 'static> {
     Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
@@ -1494,6 +1744,13 @@ fn build_single_job(
         #[allow(unsafe_code)]
         let res = run_item_catch_unwind(unsafe { &mut *raw }, &mut ctx);
         let took = started.elapsed();
+        // Release pairs with the WaitSet-thread Acquire (swap) in
+        // `record_cycle_for` (M2). `pool.barrier()` also fences, but the
+        // explicit pairing documents intent and is robust on weak-memory archs.
+        last_took_ns.store(
+            u64::try_from(took.as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Release,
+        );
         mon.post_execute(id.clone(), started, took, res.is_ok());
         if let Err(ref e) = res {
             obs.on_app_error(id.clone(), e.as_ref());
@@ -1515,6 +1772,10 @@ fn build_single_job(
 /// owner inside [`TaskEntry`] — the handler closure stored in
 /// `handler_job` is the sole owner — so the simpler owning form is
 /// both sound and avoids the aliasing dance the main item needs.
+/// (Unlike [`build_single_job`], this closure does NOT update
+/// `last_took_ns` — the handler runs in place of the main item, so the
+/// main item's `last_took_ns` keeps its sentinel `u64::MAX` = "no
+/// sample this cycle".)
 /// `REQ_0072`.
 #[allow(clippy::too_many_arguments)]
 fn build_handler_job(
@@ -1564,9 +1825,14 @@ fn build_chain_job(
     err_slot: Arc<std::sync::Mutex<Option<ExecutorError>>>,
     chain_ptr: SendChainPtr,
     fault_ctx: FaultDispatchCtx,
+    last_took_ns: Arc<AtomicU64>,
 ) -> Box<dyn FnMut() + Send + 'static> {
     Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
+        // Overall chain scan timer — the chain's `took` is the wall time
+        // from the first item's pre-execute to the last item's completion
+        // (or early break), mirroring the single-item `took` notion.
+        let chain_started = std::time::Instant::now();
         // SAFETY: barrier() pairs with this invocation; the chain Vec
         // and the items it owns are not touched by the WaitSet thread
         // until barrier() returns. See SendChainPtr safety doc.
@@ -1605,6 +1871,13 @@ fn build_chain_job(
                 }
             }
         }
+        let chain_took = chain_started.elapsed();
+        // Release pairs with the WaitSet-thread Acquire (swap) in
+        // `record_cycle_for` (M2). See the Single-job store for the rationale.
+        last_took_ns.store(
+            u64::try_from(chain_took.as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Release,
+        );
     })
 }
 
@@ -1797,6 +2070,7 @@ impl ExecutorGraphBuilder<'_> {
             .or(self.custom_id)
             .unwrap_or_else(auto_id);
         let decls = g.decls.clone();
+        let scan_period = scan_period_from_decls(&decls);
 
         // Box the graph for address stability — per-vertex dispatch
         // closures capture `*const Graph` and must not see it move.
@@ -1824,7 +2098,17 @@ impl ExecutorGraphBuilder<'_> {
             fault: Arc::new(FaultAtomic::new()),
             overrun_count: Arc::new(AtomicU64::new(0)),
             handler_job: None,
+            scan_period,
+            // Graphs dispatch vertices via their own path and do not ferry a
+            // per-task `took`; sentinel = "no sample". Wired for struct
+            // completeness; nothing reads it yet (Task 6).
+            last_took_ns: Arc::new(AtomicU64::new(u64::MAX)),
+            last_dispatch: None,
+            pending_cycle: None,
         });
+        self.executor
+            .cycle_stats
+            .push(TaskCycleStats::new(self.executor.stats_window));
         Ok(id)
     }
 }
@@ -1873,6 +2157,67 @@ mod tests {
             .find(|t| t.id == task_id)
             .expect("task present");
         assert_eq!(entry.budget, Some(Duration::from_millis(5)));
+    }
+
+    #[test]
+    fn scan_period_cached_for_cyclic_only() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let cyclic = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(5));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .unwrap();
+        let event_driven = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
+
+        let cyclic_entry = exec
+            .tasks
+            .iter()
+            .find(|t| t.id == cyclic)
+            .expect("cyclic task present");
+        assert_eq!(cyclic_entry.scan_period, Some(Duration::from_millis(5)));
+        // Sentinel: no sample has been taken yet.
+        assert_eq!(cyclic_entry.last_took_ns.load(Ordering::Relaxed), u64::MAX);
+
+        let event_entry = exec
+            .tasks
+            .iter()
+            .find(|t| t.id == event_driven)
+            .expect("event-driven task present");
+        assert_eq!(event_entry.scan_period, None);
+    }
+
+    #[test]
+    fn cycle_stats_index_aligned_with_tasks() {
+        use core::time::Duration;
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .stats_window(512)
+            .build()
+            .unwrap();
+        // Builder option flows through to the executor.
+        assert_eq!(exec.stats_window, 512);
+        // No tasks yet → both Vecs empty and aligned.
+        assert_eq!(exec.cycle_stats.len(), exec.tasks.len());
+
+        // Cyclic single-item add path.
+        exec.add(crate::item::item_with_triggers(
+            |d| {
+                d.interval(Duration::from_millis(5));
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ))
+        .unwrap();
+        // Event-driven single-item add path.
+        exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
+
+        assert_eq!(exec.tasks.len(), 2);
+        assert_eq!(exec.cycle_stats.len(), exec.tasks.len());
     }
 
     #[test]

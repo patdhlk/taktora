@@ -2,6 +2,7 @@
 
 use crate::error::ExecutorError;
 use crate::fault::{ExecutorFaultReason, FaultReason};
+use crate::stats::CycleObservation;
 use crate::task_id::TaskId;
 
 /// Generic user event carried by [`Observer::on_send_event`].
@@ -79,8 +80,58 @@ pub trait Observer: Send + Sync {
     /// Called once when the executor transitions from `Faulted` back
     /// to `Running` (manual clear via `Executor::clear_executor_fault`).
     fn on_executor_clear(&self) {}
+
+    /// Fires once per scan cycle of a cyclic task, including a faulted scan
+    /// (`REQ_0103`, `REQ_0107`). Default no-op for backward compatibility.
+    ///
+    /// **Containment:** runs on the executor's `WaitSet` thread outside the
+    /// per-item panic catch — a panic here routes to the fail-fast boundary
+    /// (`REQ_0123`). Implementations must not panic.
+    fn on_cycle_stats(&self, _obs: &CycleObservation) {}
 }
 
 /// No-op observer used when the user does not configure one.
 pub struct NoopObserver;
 impl Observer for NoopObserver {}
+
+#[cfg(test)]
+mod cycle_stats_hook_tests {
+    use super::*;
+    use crate::TaskId;
+    use crate::stats::CycleObservation;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct CountingObs(Arc<AtomicU64>);
+    impl Observer for CountingObs {
+        fn on_cycle_stats(&self, _: &CycleObservation) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn sample_obs() -> CycleObservation {
+        CycleObservation {
+            cycle_index: 0,
+            task_id: TaskId::from("t"),
+            period_ns: 0,
+            actual_period_ns: 0,
+            jitter_ns: 0,
+            lateness_ns: 0,
+            took_ns: 0,
+        }
+    }
+
+    #[test]
+    fn default_on_cycle_stats_is_noop() {
+        let noop = NoopObserver;
+        noop.on_cycle_stats(&sample_obs()); // default no-op: must compile & not panic
+    }
+
+    #[test]
+    fn overridden_on_cycle_stats_fires() {
+        let n = Arc::new(AtomicU64::new(0));
+        let c = CountingObs(Arc::clone(&n));
+        c.on_cycle_stats(&sample_obs());
+        assert_eq!(n.load(Ordering::Relaxed), 1);
+    }
+}

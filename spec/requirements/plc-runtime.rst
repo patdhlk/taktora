@@ -510,10 +510,18 @@ Scan-cycle observability
    bucket layout shall be fixed at compile time so the per-sample update
    path is allocation-free; see :need:`REQ_0104` and :need:`ADR_0060`.
 
+   Implementation note (2026-06-03): the current ``taktora-stats``
+   histogram uses octave buckets (~one-octave estimate error); achieving
+   the ≤ 1% bound requires a sub-octave bucket refinement, tracked as
+   separate work. The p50/p95/p99 reporting and sliding window are
+   implemented; this requirement remains ``draft`` pending that precision
+   refinement.
+
 .. req:: Per-task maximum jitter
    :id: REQ_0101
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0021
+   :links: BB_0050, IMPL_0070, TEST_0191
 
    The runtime shall report the maximum observed jitter — defined as the
    absolute difference between actual and declared scan period — per
@@ -535,8 +543,9 @@ Scan-cycle observability
 
 .. req:: Statistics query API
    :id: REQ_0103
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0021
+   :links: BB_0051, IMPL_0070, TEST_0193
 
    Cycle-cycle statistics shall be available via two distinct paths:
 
@@ -560,9 +569,10 @@ Scan-cycle observability
 
 .. req:: Allocation-free telemetry update
    :id: REQ_0104
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0021
    :refines: REQ_0060
+   :links: BB_0053, IMPL_0070, TEST_0194
 
    The runtime's per-sample telemetry update path — the code that runs
    inside the dispatch loop's timing hooks to update the histogram,
@@ -578,8 +588,9 @@ Scan-cycle observability
 
 .. req:: Per-task exact min/max execute duration
    :id: REQ_0105
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0021
+   :links: BB_0050, IMPL_0070, TEST_0849
 
    In addition to the bucket-quantised percentiles of :need:`REQ_0100`,
    the runtime shall report the **exact** minimum and maximum
@@ -597,8 +608,9 @@ Scan-cycle observability
 
 .. req:: Per-task deadline lateness
    :id: REQ_0106
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0021
+   :links: BB_0050, IMPL_0070, TEST_0850
 
    For each cyclic task, the runtime shall report **deadline lateness** —
    the signed offset between the task's actual task-logic start (the
@@ -617,8 +629,9 @@ Scan-cycle observability
 
 .. req:: Per-task scan index and faulted-scan emission
    :id: REQ_0107
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0021
+   :links: IMPL_0070, TEST_0851
 
    The runtime shall maintain, per cyclic task, a monotonic zero-indexed
    ``cycle_index`` (scan count) incremented once per scan **attempt**, and

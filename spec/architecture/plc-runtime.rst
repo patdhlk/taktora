@@ -485,15 +485,23 @@ per-sample update path), and per-task aggregate slots allocated at
 
    **Module ``crates/taktora-executor/src/stats/`` (thin wrapper)**
 
-   * ``mod.rs`` — re-exports the ``taktora-stats`` primitives plus the
-     executor-side ``CycleStats``, ``CycleObservation``,
-     ``StatsSnapshot``.
-   * ``cycle.rs`` — ``CycleStats`` struct (wrapping the shared
-     histogram + min/max deque + atomics) plus the
-     ``CycleObservation { task_id, period_ns, actual_period_ns,
-     jitter_ns, lateness_ns, took_ns }`` value type carried by
-     ``on_cycle_stats``. ``lateness_ns: i64`` is the signed deadline
-     lateness of :need:`REQ_0106`.
+   * ``mod.rs`` — defines the std-side value types only:
+     ``CycleObservation { cycle_index, task_id, period_ns,
+     actual_period_ns, jitter_ns, lateness_ns, took_ns }``,
+     ``StatsSnapshot``, and ``TaskStatsEntry``.
+     ``lateness_ns: i64`` is the signed deadline lateness of
+     :need:`REQ_0106`; ``cycle_index`` is the monotonic per-task scan
+     count and FEAT_0038 join key of :need:`REQ_0107`.
+     There is no ``cycle.rs`` and no executor-side ``CycleStats`` struct.
+
+   The per-task aggregator (``ExecutorCycleStats<S,W>``) lives in the
+   ``no_std`` ``taktora-stats`` crate, mirroring ``ConnectorCycleStats``
+   per :need:`ADR_0062`. It holds a ``CycleStatsCore`` (histogram +
+   exact min/max) plus ``MinMaxDeque`` windows for jitter and lateness,
+   and publishes derived scalars to relaxed atomics for the pull
+   snapshot. The executor's ``stats`` module carries only the std-side
+   push/pull value types (``CycleObservation``, ``StatsSnapshot``,
+   ``TaskStatsEntry``).
 
    **In ``crates/taktora-executor/src/observer.rs``**
 
@@ -504,18 +512,19 @@ per-sample update path), and per-task aggregate slots allocated at
 
    **In ``crates/taktora-executor/src/executor.rs``**
 
-   * Add a ``Vec<CycleStats>`` field on ``Executor``, sized at
+   * Add a ``Vec<ExecutorCycleStats>`` field on ``Executor``, sized at
      ``build`` time from the registered-task count. Pre-allocate per
      :need:`REQ_0060`.
-   * In the ``dispatch_loop`` post-execute integration: record
-     ``took`` into ``CycleStats[task].hist`` and into the min/max
-     deque, compute ``period_jitter`` against the task's declared scan
-     period and ``lateness`` against the nominal grid point, update
-     ``max_jitter_ns`` and ``max_lateness_ns`` via ``fetch_max``,
-     increment ``overrun_count`` if ``took > period``, then call
-     ``observer.on_cycle_stats(&obs)``.
+   * In the ``dispatch_loop`` post-execute integration: fold
+     ``took``, ``jitter``, and ``lateness`` into the task's
+     ``ExecutorCycleStats`` via ``record_cycle(...)`` — windowed max
+     uses ``MinMaxDeque`` (not ``fetch_max``), then call
+     ``observer.on_cycle_stats(&obs)``. The pre-existing
+     ``overrun_count`` counter (:need:`REQ_0102`) is read at snapshot
+     time.
    * Add public ``Executor::stats_snapshot(&self) -> StatsSnapshot``
-     that walks ``self.cycle_stats`` and emits a snapshot.
+     that reads the published relaxed atomics from each
+     ``ExecutorCycleStats`` and assembles the snapshot.
 
    **Verification**
 

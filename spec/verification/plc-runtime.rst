@@ -129,9 +129,14 @@ Test cases verifying the scan-cycle observability sub-feature
    Lives under
    ``crates/taktora-executor/src/stats/histogram.rs`` ``#[cfg(test)]``.
 
+   **Status note (2026-06-03).** Remains ``open``: the shipped
+   ``taktora-stats`` histogram uses octave buckets, so the ≤ 1%
+   assertion is not yet achievable; this test awaits the sub-octave
+   bucket refinement tracked against :need:`REQ_0100`.
+
 .. test:: Per-task max jitter under synthetic period violation
    :id: TEST_0191
-   :status: open
+   :status: implemented
    :verifies: REQ_0101
 
    **Goal.** A synthetic period violation produces the correct
@@ -158,7 +163,7 @@ Test cases verifying the scan-cycle observability sub-feature
 
 .. test:: Overrun counter increments exactly per overrun cycle
    :id: TEST_0192
-   :status: open
+   :status: implemented
    :verifies: REQ_0102
 
    **Goal.** ``overrun_count`` increments exactly once per cycle that
@@ -183,7 +188,7 @@ Test cases verifying the scan-cycle observability sub-feature
 
 .. test:: Push and pull stat paths agree
    :id: TEST_0193
-   :status: open
+   :status: implemented
    :verifies: REQ_0103
 
    **Goal.** Each completed scan cycle delivers exactly one
@@ -212,7 +217,7 @@ Test cases verifying the scan-cycle observability sub-feature
 
 .. test:: Allocation-free telemetry update
    :id: TEST_0194
-   :status: open
+   :status: implemented
    :verifies: REQ_0104
 
    **Goal.** The per-sample telemetry update path performs zero heap
@@ -240,6 +245,94 @@ Test cases verifying the scan-cycle observability sub-feature
 
    Lives under
    ``crates/taktora-executor/tests/no_alloc_cycle_stats.rs``.
+
+.. test:: Exact windowed min/max retain observed extremes
+   :id: TEST_0849
+   :status: implemented
+   :verifies: REQ_0105
+
+   **Goal.** The ``stats_snapshot`` ``min_ns``/``max_ns`` retain the
+   exact observed execute-duration extremes, not bucket centroids.
+
+   **Fixture.** Executor (``worker_threads(0)``) with one cyclic task at
+   3 ms scan period. The task body sleeps for ~1 ms normally and ~20 ms
+   on exactly one cycle.
+
+   **Steps.**
+
+   1. Build executor; register the cyclic task with a 3 ms period.
+   2. Run 20 cycles, injecting the single ~20 ms spike on one cycle.
+   3. Read ``stats_snapshot().per_task[0]``.
+   4. Assert ``max_ns`` ∈ [18 ms, 30 ms] — the exact 20 ms spike, well
+      above the ~16.77 ms octave-bucket lower edge reported by
+      ``p99_ns``, proving exact retention rather than bucket
+      quantisation.
+   5. Assert ``min_ns`` is small (< 5 ms) and ``min_ns < max_ns``.
+
+   **Expected outcome.** The exact extremes are retained, distinct from
+   the bucket-quantised percentiles.
+
+   Lives under
+   ``crates/taktora-executor/tests/cycle_stats_minmax.rs``.
+
+.. test:: Deadline lateness accumulates under steady drift
+   :id: TEST_0850
+   :status: implemented
+   :verifies: REQ_0106
+
+   **Goal.** ``max_lateness_ns`` reflects the accumulating signed offset
+   from the nominal grid, exceeding one period — the grid-anchored model
+   of :need:`REQ_0106`, not a phase-within-period readout.
+
+   **Fixture.** Executor (``worker_threads(0)``) with one cyclic task at
+   5 ms scan period. The task body sleeps ~7 ms every cycle (steady
+   drift).
+
+   **Steps.**
+
+   1. Build executor; register the cyclic task with a 5 ms period.
+   2. Run 40 cycles.
+   3. Assert
+      ``stats_snapshot().per_task[0].max_lateness_ns >= 10 ms`` — far
+      exceeding the 5 ms period, which is impossible under a
+      phase-within-period model.
+
+   **Expected outcome.** The accumulating deadline lateness is reported.
+
+   Lives under
+   ``crates/taktora-executor/tests/cycle_stats_lateness.rs``.
+
+.. test:: Cycle index is monotonic across faulted scans
+   :id: TEST_0851
+   :status: implemented
+   :verifies: REQ_0107
+
+   **Goal.** The per-task ``cycle_index`` is gap-free monotonic and
+   ``on_cycle_stats`` fires on every scan attempt **including**
+   faulted/fault-routed scans — the :need:`FEAT_0038` cross-layer join
+   invariant.
+
+   **Fixture.** Executor (``worker_threads(0)``) with one cyclic task at
+   5 ms scan period and a 2 ms budget. The task body sleeps ~6 ms, which
+   breaches the budget and faults on cycle 0, so the later wakeups are
+   fault-routed. A custom ``Observer`` records each
+   ``(cycle_index, took_ns)``.
+
+   **Steps.**
+
+   1. Build executor; register the cyclic task with a 5 ms period and a
+      2 ms budget.
+   2. Run 6 cycles.
+   3. Assert exactly 6 ``on_cycle_stats`` emissions.
+   4. Assert ``cycle_index`` is contiguous ``0..=5``.
+   5. Assert cycle 0 reports ``took_ns > 0`` and the faulted cycles
+      report ``took_ns == 0`` (poison-safe).
+
+   **Expected outcome.** The ``cycle_index`` never lags across faults;
+   the executor count stays equal to the connector's per-cycle index.
+
+   Lives under
+   ``crates/taktora-executor/tests/cycle_stats_faulted_scan.rs``.
 
 ----
 
