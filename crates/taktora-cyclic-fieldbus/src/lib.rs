@@ -6,8 +6,10 @@
 //! consumed by the NC task. `no_std`.
 
 mod observation;
+mod telemetry;
 
 pub use observation::{CycleObservation, CycleOutcome};
+pub use telemetry::{ConnectorCycleObserver, CyclicFieldbusTelemetry, NoopConnectorObserver};
 
 /// Per-device freshness of an input slice this cycle (`REQ_0853`).
 ///
