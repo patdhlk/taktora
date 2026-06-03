@@ -43,7 +43,7 @@ pub enum FatalSite {
 
 /// An `Arc`-wrapped callback invoked once on the fail-fast path.
 ///
-/// **Contract** (from [`ExecutorBuilder::on_fatal`]):
+/// **Contract** (from [`crate::ExecutorBuilder::on_fatal`]):
 /// - Runs over known-unsound executor state.
 /// - MUST NOT touch executor internals.
 /// - A panic inside the handler routes straight to `abort()`.
