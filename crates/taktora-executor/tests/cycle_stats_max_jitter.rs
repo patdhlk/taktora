@@ -1,13 +1,18 @@
 //! `TEST_0191` — synthetic period violation produces elevated `max_jitter_ns`
 //! (`REQ_0101`).
 //!
-//! A cyclic task with a 10 ms scan period sleeps an extra 5 ms on every 5th
-//! cycle.  Because `actual_period` is measured pre-to-pre (the `WaitSet` must
-//! drain `barrier()` before it can service the next interval wakeup), the body
-//! sleep pushes the subsequent dispatch timestamp forward by roughly the extra
-//! sleep duration.  After 60 cycles the windowed max jitter must be at least
-//! 1 ms (clearly elevated above zero-jitter baseline) and at most 8 ms
-//! (generous upper bound to absorb timer resolution / CI scheduler noise).
+//! A cyclic task with a 10 ms scan period sleeps for 15 ms on every 5th cycle.
+//! The body sleep **exceeds** the period, so the cycle cannot complete within
+//! its 10 ms grid slot — `actual_period` (measured pre-to-pre, since the
+//! `WaitSet` must drain `barrier()` before servicing the next interval wakeup)
+//! is forced to stretch to >= 15 ms on every violation cycle, yielding a
+//! guaranteed jitter of |15 ms - 10 ms| = 5 ms regardless of platform timer
+//! behaviour. An injected delay *shorter* than the period would instead be
+//! absorbed by the interval timer's slack and produce ~zero jitter (this is
+//! the bug the earlier 5 ms-on-10 ms version had: it passed on macOS by
+//! accident but measured ~0 on Linux CI). After 60 cycles the windowed max
+//! jitter must be clearly elevated (>= 2 ms) and bounded (<= 30 ms, absorbing
+//! the shorter catch-up cycle that follows each violation plus CI noise).
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -31,19 +36,20 @@ fn max_jitter_reflects_synthetic_period_violation() {
         },
         move |_ctx| {
             let n = cc.fetch_add(1, Ordering::Relaxed);
-            // Inject a 5 ms body overrun on every 5th cycle (0-indexed: cycles 4, 9, 14, …).
-            // With 60 cycles there are 12 such violations, giving the windowed
-            // max jitter plenty of samples to register the elevated delay.
+            // Inject a 15 ms body on every 5th cycle (0-indexed: cycles 4, 9, …).
+            // 15 ms > the 10 ms period, so the cycle cannot fit its grid slot and
+            // the period is forced to stretch — a real, platform-independent
+            // period violation. With 60 cycles there are 12 such violations.
             if n % 5 == 4 {
-                std::thread::sleep(Duration::from_millis(5));
+                std::thread::sleep(Duration::from_millis(15));
             }
             Ok(ControlFlow::Continue)
         },
     ))
     .expect("add task");
 
-    // 60 WaitSet iterations @ 10 ms nominal = ~0.6 s; the 12 extra 5 ms
-    // sleeps add ~60 ms on top — total wall time well under 2 s.
+    // 60 WaitSet iterations @ 10 ms nominal = ~0.6 s; the 12 violation cycles
+    // run ~15 ms each — total wall time well under 2 s.
     exec.run_n(60).expect("run_n");
 
     let snap = exec.stats_snapshot();
@@ -52,19 +58,21 @@ fn max_jitter_reflects_synthetic_period_violation() {
     let max_jitter_ns = snap.per_task[0].max_jitter_ns;
     println!("TEST_0191: max_jitter_ns = {max_jitter_ns}");
 
-    // Lower bound: at least 1 ms — the 5 ms body sleep must register as
-    // clearly elevated jitter on the following cycle's pre-to-pre delta.
+    // Lower bound: at least 2 ms. The 15 ms body on a 10 ms period forces a
+    // >= 5 ms period stretch on every violation cycle, so the windowed max
+    // jitter is guaranteed well above 2 ms on any platform.
     assert!(
-        max_jitter_ns >= 1_000_000,
-        "expected max_jitter_ns >= 1 ms (got {max_jitter_ns} ns); \
-         the 5 ms injected delay should be visible in the windowed jitter"
+        max_jitter_ns >= 2_000_000,
+        "expected max_jitter_ns >= 2 ms (got {max_jitter_ns} ns); \
+         the 15 ms body on a 10 ms period must register as elevated jitter"
     );
 
-    // Upper bound: at most 8 ms — no systematic drift should accumulate
-    // beyond the injected 5 ms plus a generous timer-resolution allowance.
+    // Upper bound: at most 30 ms — absorbs the short catch-up cycle that
+    // follows each violation (the interval timer firing immediately to regain
+    // the grid) plus CI scheduler noise, while still catching runaway drift.
     assert!(
-        max_jitter_ns <= 8_000_000,
-        "expected max_jitter_ns <= 8 ms (got {max_jitter_ns} ns); \
-         jitter appears systematically higher than the 5 ms injection"
+        max_jitter_ns <= 30_000_000,
+        "expected max_jitter_ns <= 30 ms (got {max_jitter_ns} ns); \
+         jitter is implausibly high — likely runaway scheduler starvation"
     );
 }
