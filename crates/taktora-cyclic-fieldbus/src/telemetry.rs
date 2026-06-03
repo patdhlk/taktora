@@ -23,8 +23,9 @@ impl ConnectorCycleObserver for NoopConnectorObserver {}
 /// Pull path (`REQ_0265`): snapshot accessor for per-bus cycle aggregates.
 ///
 /// A cyclic connector that collects cycle telemetry exposes a borrowed-free
-/// snapshot of its current per-bus aggregates, readable concurrently with
-/// the cyclic exchange via relaxed-atomic reads. `N` is the device count.
+/// snapshot of its current per-bus aggregates, intended to be readable
+/// concurrently with the cyclic exchange (e.g. via relaxed-atomic reads).
+/// `N` is the device count.
 pub trait CyclicFieldbusTelemetry<const N: usize> {
     /// Current per-bus aggregate snapshot.
     fn cycle_stats(&self) -> ConnectorCycleSnapshot<N>;
