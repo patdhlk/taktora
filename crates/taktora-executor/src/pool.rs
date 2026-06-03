@@ -8,6 +8,7 @@
 #![allow(clippy::redundant_pub_crate)]
 
 use crate::error::ExecutorError;
+use crate::fatal::FatalDispatch;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -102,6 +103,11 @@ impl Tracker {
 pub(crate) struct Pool {
     mode: PoolMode,
     tracker: Arc<Tracker>,
+    /// Fatal-dispatch handle. Stored so Task 3 can call `fatal.fire()` from the
+    /// pool worker boundary. Not yet invoked — wired in Task 3.
+    // wired in Task 3
+    #[allow(dead_code)]
+    pub(crate) fatal: Arc<FatalDispatch>,
 }
 
 /// Internal execution mode for the pool.
@@ -122,16 +128,19 @@ enum PoolMode {
 impl Pool {
     /// Create a new pool. `n_workers == 0` selects inline mode; any positive
     /// value spawns that many OS threads. `attrs` controls thread names,
-    /// CPU affinity, and scheduling priority.
+    /// CPU affinity, and scheduling priority. `fatal` is stored for use by
+    /// the pool worker panic boundary (Task 3).
     pub(crate) fn new(
         n_workers: usize,
         attrs: crate::thread_attrs::ThreadAttributes,
+        fatal: Arc<FatalDispatch>,
     ) -> Result<Self, ExecutorError> {
         let tracker = Arc::new(Tracker::default());
         if n_workers == 0 {
             return Ok(Self {
                 mode: PoolMode::Inline,
                 tracker,
+                fatal,
             });
         }
 
@@ -191,6 +200,7 @@ impl Pool {
                 shutdown,
             },
             tracker,
+            fatal,
         })
     }
 
@@ -280,12 +290,17 @@ impl Drop for Pool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fatal::FatalDispatch;
     use crate::thread_attrs::ThreadAttributes;
     use std::sync::atomic::AtomicU32;
 
+    fn noop_fatal() -> Arc<FatalDispatch> {
+        Arc::new(FatalDispatch::new(Arc::new(|_| {})))
+    }
+
     #[test]
     fn inline_pool_runs_synchronously() {
-        let pool = Pool::new(0, ThreadAttributes::new()).unwrap();
+        let pool = Pool::new(0, ThreadAttributes::new(), noop_fatal()).unwrap();
         let counter = Arc::new(AtomicU32::new(0));
         for _ in 0..10 {
             let c = Arc::clone(&counter);
@@ -299,7 +314,7 @@ mod tests {
 
     #[test]
     fn threaded_pool_runs_concurrently_and_barriers() {
-        let pool = Pool::new(4, ThreadAttributes::new()).unwrap();
+        let pool = Pool::new(4, ThreadAttributes::new(), noop_fatal()).unwrap();
         let counter = Arc::new(AtomicU32::new(0));
         for _ in 0..100 {
             let c = Arc::clone(&counter);
@@ -314,14 +329,14 @@ mod tests {
 
     #[test]
     fn barrier_with_no_work_returns_immediately() {
-        let pool = Pool::new(2, ThreadAttributes::new()).unwrap();
+        let pool = Pool::new(2, ThreadAttributes::new(), noop_fatal()).unwrap();
         pool.barrier();
         // No assertion — must not deadlock.
     }
 
     #[test]
     fn submitted_panic_is_caught_and_completion_counted() {
-        let pool = Pool::new(2, ThreadAttributes::new()).unwrap();
+        let pool = Pool::new(2, ThreadAttributes::new(), noop_fatal()).unwrap();
         pool.submit(|| panic!("kaboom"));
         pool.submit(|| {});
         pool.barrier();
