@@ -9,7 +9,13 @@
 //! * [`MinMaxDeque`] — exact windowed min/max via a monotonic deque.
 //!   Backs `REQ_0105`.
 //!
-//! Both are `&mut`-based and contain no `unsafe`, no allocation, and no
+//! A composite built on these two primitives:
+//!
+//! * [`CycleStatsCore`] — per-quantity bundle wrapping one
+//!   `RollingHistogram` and one `MinMaxDeque` for a single nanosecond
+//!   measurement (e.g. connector wire-round duration). `BB_0054`.
+//!
+//! Both primitives are `&mut`-based and contain no `unsafe`, no allocation, and no
 //! interior mutability. Concurrent (lossy) reads for a stats snapshot are
 //! the consumer's responsibility: recompute and publish derived values to
 //! relaxed atomics after each `&mut` update (see the executor / connector
