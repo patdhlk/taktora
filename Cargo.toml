@@ -34,6 +34,7 @@ members = [
     "crates/taktora-motion-core",
     "crates/taktora-motion-core-tests",
     "crates/taktora-cyclic-fieldbus",
+    "crates/taktora-cyclic-fieldbus-tests",
     "crates/taktora-cia402",
     "crates/taktora-motion-proto",
     "crates/taktora-motion",

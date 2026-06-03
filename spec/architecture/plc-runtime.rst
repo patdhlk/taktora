@@ -396,39 +396,73 @@ per-sample update path), and per-task aggregate slots allocated at
    :need:`REQ_0111` harness exposes raw samples for finer offline
    analysis when needed.
 
+   **Amendment (:need:`REQ_0105`, :need:`REQ_0106`).** The histogram is
+   retained as the percentile estimator, but two quantities are added
+   alongside it because the histogram cannot supply them:
+
+   * *Exact windowed min/max* (:need:`REQ_0105`). Snapshot subtraction
+     ages out counts, not extrema — once the snapshot holding the
+     worst-case sample is subtracted, the true maximum is unrecoverable
+     from bucket counts. Exact windowed min/max therefore use a
+     fixed-capacity **monotonic deque** (one for min, one for max), sized
+     to the window at ``Executor::build`` time. Update and ageing are
+     amortised O(1); memory is bounded by the window length.
+   * *Deadline lateness* (:need:`REQ_0106`). A signed quantity (the task
+     may start early or late) measured against the nominal periodic grid,
+     distinct from the unsigned period jitter the histogram/max-jitter
+     path already tracks. Its windowed maximum is held in an atomic field
+     analogous to ``max_jitter_ns``.
+
+   Both additions preserve the allocation-free, bounded-time per-sample
+   update contract of :need:`REQ_0104`.
+
 .. building-block:: Per-task cycle statistics
    :id: BB_0050
    :status: open
-   :implements: REQ_0100
+   :implements: REQ_0100, REQ_0105, REQ_0106
    :refines: ADR_0060
 
    ``CycleStats`` — per-task statistics owned by ``Executor``,
-   allocated once at ``Executor::build`` time. Three fields:
+   allocated once at ``Executor::build`` time. Fields:
 
    * ``hist: Histogram`` — fixed-bucket histogram of execute durations
      per :need:`ADR_0060`.
+   * ``min_max: MinMaxDeque`` — fixed-capacity monotonic deques holding
+     the exact windowed min and max execute duration (per
+     :need:`REQ_0105`); the histogram cannot recover an exact extremum
+     after snapshot subtraction.
    * ``max_jitter_ns: AtomicU64`` — windowed maximum of
      ``|actual_period - declared_period|`` (per :need:`REQ_0101`).
+   * ``max_lateness_ns: AtomicI64`` — windowed maximum signed deadline
+     lateness against the nominal grid (per :need:`REQ_0106`); signed
+     because a task may start early or late.
    * ``overrun_count: AtomicU64`` — monotonic counter, incremented when
      a scan-cycle exceeds the declared period (per :need:`REQ_0102`).
 
-   One ``CycleStats`` per registered task; the array is sized at
-   ``Executor::build``. Update paths use relaxed atomic stores so
-   workers do not synchronise on the stats field.
+   The histogram, deques, and atomic fields are provided by the shared
+   ``taktora-stats`` primitive (:need:`ADR_0062`), not reimplemented in
+   the executor. One ``CycleStats`` per registered task; the array is
+   sized at ``Executor::build``. Update paths use relaxed atomic stores
+   so workers do not synchronise on the stats field.
 
 .. building-block:: Statistics snapshot view
    :id: BB_0051
    :status: open
-   :implements: REQ_0103
+   :implements: REQ_0103, REQ_0105, REQ_0106
    :refines: ADR_0060
 
    ``StatsSnapshot`` — borrowed view returned by the pull API
    (``Executor::stats_snapshot``). Per-task entries carry
-   ``{ task_id, p50_ns, p95_ns, p99_ns, max_jitter_ns,
-   overrun_count }`` computed from the matching :need:`BB_0050` at
-   the moment of the call. The snapshot itself is a thin slice over
-   pre-allocated buffers on ``Executor``; the caller may clone it for
-   off-stack consumption but the runtime side never allocates.
+   ``{ task_id, p50_ns, p95_ns, p99_ns, min_ns, max_ns,
+   max_jitter_ns, max_lateness_ns, overrun_count }`` computed from the
+   matching :need:`BB_0050` at the moment of the call (``min_ns`` /
+   ``max_ns`` per :need:`REQ_0105`, ``max_lateness_ns`` per
+   :need:`REQ_0106`). The read is lossy-but-cheap: fields are loaded
+   with relaxed atomics and may reflect samples taken microseconds
+   apart, so the writer (dispatch loop) never blocks on a reader. The
+   snapshot itself is a thin slice over pre-allocated buffers on
+   ``Executor``; the caller may clone it for off-stack consumption but
+   the runtime side never allocates.
 
 .. impl:: Stats module — taktora-executor/src/stats/
    :id: IMPL_0070
@@ -439,18 +473,27 @@ per-sample update path), and per-task aggregate slots allocated at
    Concrete Rust changes that realise :need:`BB_0050` and
    :need:`BB_0051`.
 
-   **New module ``crates/taktora-executor/src/stats/``**
+   **Shared primitive — ``taktora-stats`` crate** (per :need:`ADR_0062`)
 
-   * ``mod.rs`` — public re-exports (``CycleStats``,
-     ``CycleObservation``, ``StatsSnapshot``).
-   * ``histogram.rs`` — ``Histogram`` with the fixed bucket table
-     from :need:`ADR_0060`. Public API: ``record(value_ns)``,
-     ``percentile(q: f32) -> u64``. The record path is ``#[inline]``
-     and contains no allocation (verified by :need:`TEST_0194`).
-   * ``cycle.rs`` — ``CycleStats`` struct plus the
+   The allocation-free ``Histogram`` (fixed bucket table from
+   :need:`ADR_0060`), the fixed-capacity ``MinMaxDeque``
+   (:need:`REQ_0105`), and the atomic aggregate fields live in the
+   ``no_std`` ``taktora-stats`` crate so the connector layer
+   (:need:`ADR_0063`) reuses the same code. The executor depends on it;
+   this supersedes the earlier plan to define the histogram inside
+   ``taktora-executor``.
+
+   **Module ``crates/taktora-executor/src/stats/`` (thin wrapper)**
+
+   * ``mod.rs`` — re-exports the ``taktora-stats`` primitives plus the
+     executor-side ``CycleStats``, ``CycleObservation``,
+     ``StatsSnapshot``.
+   * ``cycle.rs`` — ``CycleStats`` struct (wrapping the shared
+     histogram + min/max deque + atomics) plus the
      ``CycleObservation { task_id, period_ns, actual_period_ns,
-     jitter_ns, took_ns }`` value type carried by
-     ``on_cycle_stats``.
+     jitter_ns, lateness_ns, took_ns }`` value type carried by
+     ``on_cycle_stats``. ``lateness_ns: i64`` is the signed deadline
+     lateness of :need:`REQ_0106`.
 
    **In ``crates/taktora-executor/src/observer.rs``**
 
@@ -465,10 +508,11 @@ per-sample update path), and per-task aggregate slots allocated at
      ``build`` time from the registered-task count. Pre-allocate per
      :need:`REQ_0060`.
    * In the ``dispatch_loop`` post-execute integration: record
-     ``took`` into ``CycleStats[task].hist``, compute
-     ``period_jitter`` against the task's declared scan period,
-     update ``max_jitter_ns`` via ``fetch_max``, increment
-     ``overrun_count`` if ``took > period``, then call
+     ``took`` into ``CycleStats[task].hist`` and into the min/max
+     deque, compute ``period_jitter`` against the task's declared scan
+     period and ``lateness`` against the nominal grid point, update
+     ``max_jitter_ns`` and ``max_lateness_ns`` via ``fetch_max``,
+     increment ``overrun_count`` if ``took > period``, then call
      ``observer.on_cycle_stats(&obs)``.
    * Add public ``Executor::stats_snapshot(&self) -> StatsSnapshot``
      that walks ``self.cycle_stats`` and emits a snapshot.
@@ -480,6 +524,71 @@ per-sample update path), and per-task aggregate slots allocated at
    * Overrun counter — :need:`TEST_0192`.
    * Push/pull contract — :need:`TEST_0193`.
    * Allocation-free update — :need:`TEST_0194`.
+
+.. arch-decision:: Shared no_std taktora-stats crate
+   :id: ADR_0062
+   :status: open
+   :refines: REQ_0104
+
+   **Context.** The allocation-free statistics primitive (fixed-bucket
+   histogram per :need:`ADR_0060`, the monotonic min/max deque of
+   :need:`REQ_0105`, the atomic aggregate fields) is needed in two
+   places: the executor's scan-cycle stats (:need:`BB_0050`) and the
+   connector's cycle telemetry (:need:`ADR_0063`). The connector seam
+   ``taktora-cyclic-fieldbus`` is ``#![no_std]`` with zero dependencies,
+   so any primitive it reuses must itself be ``no_std`` and
+   allocation-free. The original design (``IMPL_0070``) placed the
+   histogram inside ``taktora-executor`` (a ``std`` crate).
+
+   **Decision.** Extract the primitive into a new ``#![no_std]``,
+   zero-dependency, allocation-free workspace crate ``taktora-stats``,
+   depended on by both ``taktora-executor`` and the connector layer.
+   ``taktora-executor``'s ``stats`` module becomes a thin ``std``-side
+   wrapper that adds the ``Instant`` clock reads and the ``Observer``
+   wiring; the math lives once in ``taktora-stats``.
+
+   **Alternatives considered.**
+
+   * *Keep stats in ``taktora-executor``, duplicate for the connector.*
+     Avoids a new crate, but forks the allocation-free histogram logic
+     into two implementations that must be kept bit-identical and both
+     pass :need:`TEST_0194`-style allocation audits. Rejected: the
+     primitive is exactly the kind of subtle, invariant-heavy code that
+     must not be duplicated.
+   * *Put the primitive in ``taktora-cyclic-fieldbus``.* Would avoid a
+     new crate name, but burdens the fieldbus seam with statistics
+     concerns and inverts the dependency (the executor would depend on a
+     fieldbus crate for stats). Rejected on layering grounds.
+
+   **Consequences.**
+
+   ✅ One allocation-free implementation, one :need:`TEST_0194` audit,
+   reused at both layers.
+   ✅ ``no_std`` from the start keeps the primitive usable on the
+   connector seam and any future embedded target.
+   ❌ One more workspace crate to version and publish. Acceptable; the
+   crate is small and stable once the bucket layout is fixed.
+
+.. building-block:: taktora-stats crate
+   :id: BB_0053
+   :status: open
+   :implements: REQ_0104, REQ_0105
+   :refines: ADR_0062
+
+   The ``taktora-stats`` workspace crate. ``#![no_std]``, zero runtime
+   dependencies. Public surface:
+
+   * ``Histogram`` — fixed log-linear bucket table (:need:`ADR_0060`);
+     ``record(value_ns)`` (``#[inline]``, allocation-free),
+     ``percentile(q) -> u64``, snapshot-ring windowing.
+   * ``MinMaxDeque`` — fixed-capacity monotonic deque pair giving exact
+     windowed min/max (:need:`REQ_0105`); ``record(value)`` amortised
+     O(1), ageing by sequence index.
+   * Atomic aggregate helpers (``fetch_max`` over ``AtomicU64`` /
+     ``AtomicI64``) for the max-jitter / max-lateness / overrun fields.
+
+   Consumed by :need:`BB_0050` (executor) and the connector telemetry
+   building blocks (:need:`ADR_0063`).
 
 ----
 
@@ -537,16 +646,76 @@ sole measurement path.
    CI; what the harness uniquely validates is the *absolute envelope*,
    not behavioural correctness.
 
+.. arch-decision:: Motion-flavored adapted reference workload
+   :id: ADR_0064
+   :status: open
+   :refines: REQ_0111
+
+   **Context.** :need:`REQ_0111` requires a representative, repeatable
+   load profile for the jitter harness. The recognised prior art is the
+   ROS 2 real-time working group reference system: a fixed,
+   version-controlled node graph (sensor / transform / fusion / cyclic /
+   command archetypes) with a designated hot path, a per-node CPU
+   calibration tool, and a defined KPI set (hot-path latency, cyclic-node
+   period jitter, dropped samples). Two postures: a faithful port of
+   that graph (so taktora numbers compare apples-to-apples with published
+   reference-system results), or an adapted graph shaped for motion
+   control.
+
+   **Decision.** Adapt, do not faithfully port. Reuse the reference
+   system's *node archetypes*, *KPI definitions*, and *per-node CPU
+   calibration* methodology, but lay out a smaller topology shaped like a
+   motion-control application (a cyclic NC-style node on the hot path,
+   feeding setpoints; auxiliary sensor/fusion nodes off the hot path).
+
+   **Alternatives considered.**
+
+   * *Faithful port of the full reference-system graph.* Yields direct
+     cross-framework comparability ("taktora executor vs other executors
+     on the standard graph"). Rejected as the primary harness because the
+     graph is autonomy-perception-shaped, not motion-shaped; the hot path
+     and node mix do not resemble a taktora motion deployment, so the
+     headline numbers would not characterise the load taktora actually
+     runs.
+   * *Bespoke topology from scratch, no reference-system lineage.*
+     Maximum freedom, but discards the reference system's hard-won KPI
+     definitions and calibration discipline and invites
+     ad-hoc/unrepeatable load. Rejected.
+
+   **Consequences.**
+
+   ✅ The measured load resembles a real taktora motion deployment, so
+   the envelope is meaningful for the product's actual use.
+   ✅ KPI definitions and per-node calibration are inherited, keeping the
+   harness rigorous and tier-portable.
+   ❌ Numbers are **not** directly comparable to published
+   reference-system executor results (the graph differs). Documented as a
+   deliberate trade: domain relevance over cross-framework comparability.
+
 .. building-block:: xtask-preempt-rt harness
    :id: BB_0052
    :status: open
    :implements: REQ_0111
-   :refines: ADR_0061
+   :refines: ADR_0061, ADR_0064
 
-   Workspace member ``xtask-preempt-rt`` — a cargo bin that
-   constructs a representative ``Executor``, runs it for a configurable
-   number of scan cycles, and writes ``CycleObservation`` records to
-   stdout as NDJSON.
+   Workspace member ``xtask-preempt-rt`` — a cargo bin that constructs
+   the motion-flavored reference topology (:need:`ADR_0064`), runs it
+   for a configurable number of scan cycles, and writes
+   ``CycleObservation`` records to stdout as NDJSON.
+
+   * **Workload.** The reference topology of :need:`ADR_0064` — a fixed
+     graph of motion-shaped node archetypes with a designated hot path —
+     not an ad-hoc executor. Per-node synthetic CPU work is tuned by a
+     ``number_cruncher``-style calibration step so the absolute load is
+     comparable across the dev / Pi5 / PREEMPT_RT tiers.
+   * **Warm-up.** The first N scan cycles (configurable) are discarded
+     before statistics are collected, so cache/page-fault warm-up does
+     not contaminate the steady-state envelope.
+   * **Usage.** Runs on all three tiers, but as a **local** developer
+     tool only — it is never wired as a blocking cloud-CI gate, per
+     :need:`ADR_0061`. Cloud runners are neither PREEMPT_RT nor quiet
+     enough to measure jitter reliably; the published envelope
+     (:need:`REQ_0110`) comes from a manual run on a tuned target.
 
    CLI shape:
 

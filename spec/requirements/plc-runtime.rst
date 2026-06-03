@@ -572,6 +572,45 @@ Scan-cycle observability
    :need:`TEST_0170` (``CountingAllocator`` covering pool worker
    threads); see :need:`TEST_0194`.
 
+.. req:: Per-task exact min/max execute duration
+   :id: REQ_0105
+   :status: draft
+   :satisfies: FEAT_0021
+
+   In addition to the bucket-quantised percentiles of :need:`REQ_0100`,
+   the runtime shall report the **exact** minimum and maximum
+   execute-duration observed per registered task, over the same sliding
+   window as :need:`REQ_0100`. "Exact" means the reported values are
+   actual observed samples, not bucket centroids — the absolute
+   worst-case sample is retained, not merely the top occupied bucket.
+
+   The min/max shall age out with the window (lifetime extrema are out of
+   scope, consistent with :need:`REQ_0101`). The implementation shall be
+   allocation-free per :need:`REQ_0104`; a fixed-capacity monotonic deque
+   (sized to the window at ``Executor::build`` time) is the intended
+   mechanism, since the histogram of :need:`ADR_0060` cannot recover an
+   exact extremum after ageing-out by snapshot subtraction.
+
+.. req:: Per-task deadline lateness
+   :id: REQ_0106
+   :status: draft
+   :satisfies: FEAT_0021
+
+   For each cyclic task, the runtime shall report **deadline lateness** —
+   the signed offset between the task's actual task-logic start (the
+   ``pre_execute`` instant) and the nominal periodic grid point at which
+   it was due to start — over the same sliding window as
+   :need:`REQ_0100`. Positive lateness means the task started late.
+
+   Deadline lateness is distinct from the period jitter of
+   :need:`REQ_0101`: jitter captures the spread of the measured period
+   and is blind to a constant offset, whereas lateness captures steady
+   drift or constant offset from the grid. The reported aggregate shall
+   include at least the windowed maximum (most-late) lateness; the raw
+   per-cycle ``lateness_ns`` is delivered on the push path of
+   :need:`REQ_0103`. Event-driven (non-cyclic) tasks have no declared
+   period and therefore report no lateness.
+
 PREEMPT_RT validation
 ~~~~~~~~~~~~~~~~~~~~~
 

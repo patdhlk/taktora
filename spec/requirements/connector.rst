@@ -1794,6 +1794,83 @@ to keep the umbrella's traceability complete.
 
 ----
 
+Connector cycle telemetry
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. feat:: Connector cycle telemetry
+   :id: FEAT_0038
+   :status: open
+   :satisfies: FEAT_0030
+
+   First-class, connector-layer timing and quality statistics for cyclic
+   connectors — the intra-bus quantities only the connector can observe.
+   Per the hybrid measurement split (:need:`ADR_0063`), the connector
+   measures what it alone sees (wire-round duration, working-counter
+   quality, per-device freshness); the executor separately measures the
+   cadence of the task that drives the exchange. The telemetry reuses the
+   shared ``taktora-stats`` primitive (:need:`ADR_0062`) so it stays
+   ``no_std`` and allocation-free, matching the
+   ``taktora-cyclic-fieldbus`` seam.
+
+.. req:: Wire-round duration statistics
+   :id: REQ_0262
+   :status: draft
+   :satisfies: FEAT_0038
+
+   A cyclic connector shall report, per bus, the duration spent inside
+   ``CyclicFieldbus::exchange()`` performing the wire round — as p50 /
+   p95 / p99 percentiles (via the :need:`ADR_0062` histogram) plus the
+   exact windowed min and max. The window size is configured at connector
+   build time. The per-cycle update shall be allocation-free.
+
+   This is distinct from the executor-measured NC-task execute duration,
+   which brackets ``exchange()`` and includes the task's own work.
+
+.. req:: Working-counter quality counter
+   :id: REQ_0263
+   :status: draft
+   :satisfies: FEAT_0038
+
+   A cyclic connector shall expose a monotonic per-bus counter that
+   increments on each cycle whose working-counter (or protocol-equivalent
+   participation check) does not match the expected device set — i.e. the
+   condition that drives a transition to :need:`REQ_0230`'s ``Degraded``
+   state. The counter tracks lifetime occurrences and does not reset on
+   recovery.
+
+.. req:: Freshness and staleness statistics
+   :id: REQ_0264
+   :status: draft
+   :satisfies: FEAT_0038
+
+   A cyclic connector shall report, per bus, a monotonic count of cycles
+   that were not all-devices-fresh (``CycleQuality::all_devices_fresh ==
+   false``), and, per device, the maximum consecutive-stale run observed
+   (the largest ``Validity::Stale { cycles }`` reached). These quantify
+   how often and how badly devices dropped out of the cyclic exchange.
+
+.. req:: Connector statistics query API
+   :id: REQ_0265
+   :status: draft
+   :satisfies: FEAT_0038
+
+   Connector cycle statistics shall be available by the same two paths as
+   the executor (:need:`REQ_0103`):
+
+   * **Push** — a per-cycle observation
+     (``cycle_index``, ``wire_round_ns``, ``all_devices_fresh``,
+     ``wc_ok``, ``stale_device_count``) delivered once per completed
+     ``exchange()``.
+   * **Pull** — a borrowed snapshot of the current per-bus aggregates
+     (wire-round p50/p95/p99/min/max, working-counter-mismatch count,
+     not-all-fresh count, per-device max-stale), readable concurrently
+     with the cyclic exchange via relaxed-atomic reads.
+
+   Both paths shall be allocation-free on the connector side and shall
+   not require ``std`` (the cyclic-fieldbus seam is ``#![no_std]``).
+
+----
+
 Cross-cutting traceability
 --------------------------
 
