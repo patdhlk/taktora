@@ -43,6 +43,20 @@ static EXEC_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// per-task cycle stats. Fixed at compile time per `ADR_0060`.
 pub(crate) type TaskCycleStats = ExecutorCycleStats<8, 256>;
 
+/// A single wakeup's pending cycle record, stashed on the [`TaskEntry`] between
+/// the pre-dispatch capture and the post-barrier fold. Bundling the pre-dispatch
+/// timestamp with its `faulted` flag in one `Option` makes them impossible to
+/// desync: a cycle is pending iff this is `Some`, and the `faulted` bit is then
+/// always the one captured at the same wakeup (`REQ_0107`).
+#[derive(Clone, Copy)]
+pub(crate) struct CyclePending {
+    /// Pre-dispatch instant for this wakeup (the cycle's `pre`).
+    pub(crate) pre: Instant,
+    /// `true` when this wakeup's scan was fault-routed/skipped, so the
+    /// post-barrier fold records it with `faulted=true`.
+    pub(crate) faulted: bool,
+}
+
 /// One registered task entry.
 pub(crate) struct TaskEntry {
     /// Task identifier.
@@ -99,18 +113,15 @@ pub(crate) struct TaskEntry {
     /// single dispatch thread touches it. `None` before the first dispatch.
     pub(crate) last_dispatch: Option<Instant>,
 
-    /// WaitSet-thread-only stash of the *current* wakeup's pre-dispatch
-    /// timestamp, carried across `pool.barrier()` so the post-barrier record
-    /// pass can fold this cycle's telemetry without re-reading the clock or
-    /// allocating a fired-index list. `Some` between the pre-dispatch capture
-    /// and the post-barrier `record_cycle_for` `take`; `None` otherwise. Only
-    /// the single dispatch thread touches it (no atomic).
-    pub(crate) pending_cycle_pre: Option<Instant>,
-
-    /// Set alongside `pending_cycle_pre` when this wakeup's scan was
-    /// fault-routed/skipped, so the post-barrier fold records it with
-    /// `faulted=true` (`REQ_0107`: faulted scans still advance `cycle_index`).
-    pub(crate) pending_faulted: bool,
+    /// WaitSet-thread-only stash of the *current* wakeup's pending cycle —
+    /// the pre-dispatch timestamp plus its `faulted` flag — carried across
+    /// `pool.barrier()` so the post-barrier record pass can fold this cycle's
+    /// telemetry without re-reading the clock or allocating a fired-index list.
+    /// `Some` between the pre-dispatch capture and the post-barrier
+    /// `record_cycle_for` `take`; `None` otherwise. Bundling the timestamp and
+    /// the fault flag in one `Option` keeps them from ever desyncing
+    /// (`REQ_0107`). Only the single dispatch thread touches it (no atomic).
+    pub(crate) pending_cycle: Option<CyclePending>,
 }
 
 /// Top-level executor. One per process is the typical case.
@@ -317,8 +328,7 @@ impl Executor {
             scan_period,
             last_took_ns: Arc::clone(&last_took_ns),
             last_dispatch: None,
-            pending_cycle_pre: None,
-            pending_faulted: false,
+            pending_cycle: None,
         });
         self.cycle_stats
             .push(TaskCycleStats::new(self.stats_window));
@@ -629,8 +639,7 @@ impl Executor {
             scan_period,
             last_took_ns: Arc::clone(&last_took_ns),
             last_dispatch: None,
-            pending_cycle_pre: None,
-            pending_faulted: false,
+            pending_cycle: None,
         });
         self.cycle_stats
             .push(TaskCycleStats::new(self.stats_window));
@@ -1351,10 +1360,13 @@ impl DispatchPass<'_, '_, '_> {
                 // cycle_index and emits on_cycle_stats, or the executor's count
                 // desyncs from the connector's join key (FEAT_0038). took/jitter
                 // are None (poison-safe); the index always moves. Allocation-free:
-                // an Instant + a bool written onto the TaskEntry, no heap.
+                // a CyclePending { Instant, bool } written onto the TaskEntry,
+                // no heap.
                 if task.scan_period.is_some() {
-                    task.pending_cycle_pre = Some(Instant::now());
-                    task.pending_faulted = true;
+                    task.pending_cycle = Some(CyclePending {
+                        pre: Instant::now(),
+                        faulted: true,
+                    });
                 }
                 continue;
             }
@@ -1363,10 +1375,13 @@ impl DispatchPass<'_, '_, '_> {
             // can fold this cycle's telemetry. Allocation-free: the timestamp
             // lives on the TaskEntry, not in a per-wakeup Vec. `take`n in the
             // post-barrier loop below — guarantees exactly-once even if two
-            // guards map to the same task. Clear `pending_faulted`: a task that
-            // faulted last wakeup and recovered this one records the normal path.
-            task.pending_cycle_pre = Some(Instant::now());
-            task.pending_faulted = false;
+            // guards map to the same task. `faulted: false`: a task that faulted
+            // last wakeup and recovered this one records the normal path (the
+            // whole CyclePending is overwritten, so the flag can't be stale).
+            task.pending_cycle = Some(CyclePending {
+                pre: Instant::now(),
+                faulted: false,
+            });
 
             self.dispatch_task(task);
         }
@@ -1378,7 +1393,7 @@ impl DispatchPass<'_, '_, '_> {
         self.pool.barrier();
 
         // Post-barrier telemetry fold. The source of truth for "this task was
-        // dispatched this wakeup and owes a record" is `pending_cycle_pre`,
+        // dispatched this wakeup and owes a record" is `pending_cycle`,
         // set in the dispatch loop above — not the guard fired-status. Keying
         // solely on the stash (rather than re-querying `has_event_from`)
         // removes any dependency on the fired-status query being stable across
@@ -1390,13 +1405,10 @@ impl DispatchPass<'_, '_, '_> {
         // loop above; barrier-bounded, no in-flight pool job aliases `tasks`.
         let task_count = unsafe { (*self.tasks_ptr).len() };
         for task_idx in 0..task_count {
-            let (pre, faulted) = {
-                // SAFETY: single-writer WaitSet thread; borrow released before
-                // the record_cycle_for call (which re-derefs tasks_ptr).
-                let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
-                (task.pending_cycle_pre.take(), task.pending_faulted)
-            };
-            if let Some(pre) = pre {
+            // SAFETY: single-writer WaitSet thread; borrow released before
+            // the record_cycle_for call (which re-derefs tasks_ptr).
+            let pending = unsafe { (&mut *self.tasks_ptr)[task_idx].pending_cycle.take() };
+            if let Some(CyclePending { pre, faulted }) = pending {
                 self.record_cycle_for(task_idx, faulted, pre);
             }
         }
@@ -2092,8 +2104,7 @@ impl ExecutorGraphBuilder<'_> {
             // completeness; nothing reads it yet (Task 6).
             last_took_ns: Arc::new(AtomicU64::new(u64::MAX)),
             last_dispatch: None,
-            pending_cycle_pre: None,
-            pending_faulted: false,
+            pending_cycle: None,
         });
         self.executor
             .cycle_stats
