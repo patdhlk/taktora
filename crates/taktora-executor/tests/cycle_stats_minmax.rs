@@ -74,34 +74,36 @@ fn min_max_retain_exact_observed_extremes() {
          centroid truncation, proving exact retention is broken",
         max_ns = s.max_ns,
     );
-    // Upper bound 60ms: generous to absorb macOS/CI scheduler overshoot on
-    // sleep(20ms). The proof of exactness is entirely in the >=18ms lower
-    // bound — a centroid would land well below that, so the upper bound is
-    // just a sanity-check for completely runaway measurements.
+    // Upper bound: a loose 5 s garbage guard only. We deliberately do NOT
+    // assert a tight ceiling: `max_ns` is a measured wall-clock duration and a
+    // loaded/shared CI runner can stretch a sleep(20ms) to tens of ms (~87 ms
+    // observed on macOS CI) — the deque is *correctly* retaining that real
+    // sample. A tight ceiling would test the CI scheduler, not REQ_0105. The
+    // exactness proof is entirely the >=18ms lower bound vs the bucketed
+    // centroid; this guard only catches a garbage/overflow value.
     assert!(
-        s.max_ns <= 60_000_000,
-        "max_ns must be at most 60ms (got {max_ns}ns); \
-         the injected sleep was 20ms — a value this large indicates \
-         an incorrect measurement or extreme scheduler starvation",
+        s.max_ns <= 5_000_000_000,
+        "max_ns = {max_ns}ns exceeds 5s — impossible for a sub-second run; \
+         indicates a computation bug, not a measured duration",
         max_ns = s.max_ns,
     );
 
-    // --- Min: must reflect the ~1ms floor ---
+    // --- Min: an exact small sample, distinct from the spike ---
+    // `min_ns` is positive (a real sample was retained) and strictly below the
+    // 20ms spike, proving the deque holds a distinct *minimum* extreme — not
+    // the same sample as max. We do NOT assert a tight "~1ms" ceiling on min:
+    // its magnitude is scheduler-dependent (every body sleep can be stretched
+    // under load), and min < max is guaranteed by construction (one cycle
+    // sleeps 20ms more than all others, so its took is always the largest).
     assert!(
         s.min_ns >= 1,
         "min_ns must be positive (got {min_ns}ns)",
         min_ns = s.min_ns,
     );
     assert!(
-        s.min_ns <= 5_000_000,
-        "min_ns must reflect the ~1ms floor (got {min_ns}ns — expected <= 5ms)",
-        min_ns = s.min_ns,
-    );
-
-    // --- Ordering ---
-    assert!(
         s.min_ns < s.max_ns,
-        "min_ns ({min_ns}) must be strictly less than max_ns ({max_ns})",
+        "min_ns ({min_ns}) must be strictly less than max_ns ({max_ns}) — \
+         the deque must retain distinct min and max extremes",
         min_ns = s.min_ns,
         max_ns = s.max_ns,
     );
