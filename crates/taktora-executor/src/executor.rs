@@ -106,6 +106,11 @@ pub(crate) struct TaskEntry {
     /// and the post-barrier `record_cycle_for` `take`; `None` otherwise. Only
     /// the single dispatch thread touches it (no atomic).
     pub(crate) pending_cycle_pre: Option<Instant>,
+
+    /// Set alongside `pending_cycle_pre` when this wakeup's scan was
+    /// fault-routed/skipped, so the post-barrier fold records it with
+    /// `faulted=true` (`REQ_0107`: faulted scans still advance `cycle_index`).
+    pub(crate) pending_faulted: bool,
 }
 
 /// Top-level executor. One per process is the typical case.
@@ -313,6 +318,7 @@ impl Executor {
             last_took_ns: Arc::clone(&last_took_ns),
             last_dispatch: None,
             pending_cycle_pre: None,
+            pending_faulted: false,
         });
         self.cycle_stats
             .push(TaskCycleStats::new(self.stats_window));
@@ -624,6 +630,7 @@ impl Executor {
             last_took_ns: Arc::clone(&last_took_ns),
             last_dispatch: None,
             pending_cycle_pre: None,
+            pending_faulted: false,
         });
         self.cycle_stats
             .push(TaskCycleStats::new(self.stats_window));
@@ -1338,10 +1345,17 @@ impl DispatchPass<'_, '_, '_> {
             let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
 
             // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072). When it
-            // routes to a (possible) handler, normal dispatch is skipped. The
-            // faulted-scan telemetry record is Task 10; here a fault-routed
-            // task simply records nothing this wakeup.
+            // routes to a (possible) handler, normal dispatch is skipped.
             if self.handle_fault_routing(task) {
+                // REQ_0107: a faulted/fault-routed scan STILL advances
+                // cycle_index and emits on_cycle_stats, or the executor's count
+                // desyncs from the connector's join key (FEAT_0038). took/jitter
+                // are None (poison-safe); the index always moves. Allocation-free:
+                // an Instant + a bool written onto the TaskEntry, no heap.
+                if task.scan_period.is_some() {
+                    task.pending_cycle_pre = Some(Instant::now());
+                    task.pending_faulted = true;
+                }
                 continue;
             }
 
@@ -1349,8 +1363,10 @@ impl DispatchPass<'_, '_, '_> {
             // can fold this cycle's telemetry. Allocation-free: the timestamp
             // lives on the TaskEntry, not in a per-wakeup Vec. `take`n in the
             // post-barrier loop below — guarantees exactly-once even if two
-            // guards map to the same task.
+            // guards map to the same task. Clear `pending_faulted`: a task that
+            // faulted last wakeup and recovered this one records the normal path.
             task.pending_cycle_pre = Some(Instant::now());
+            task.pending_faulted = false;
 
             self.dispatch_task(task);
         }
@@ -1374,9 +1390,14 @@ impl DispatchPass<'_, '_, '_> {
         // loop above; barrier-bounded, no in-flight pool job aliases `tasks`.
         let task_count = unsafe { (*self.tasks_ptr).len() };
         for task_idx in 0..task_count {
-            let pre = unsafe { (&mut *self.tasks_ptr)[task_idx].pending_cycle_pre.take() };
+            let (pre, faulted) = {
+                // SAFETY: single-writer WaitSet thread; borrow released before
+                // the record_cycle_for call (which re-derefs tasks_ptr).
+                let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
+                (task.pending_cycle_pre.take(), task.pending_faulted)
+            };
             if let Some(pre) = pre {
-                self.record_cycle_for(task_idx, false, pre);
+                self.record_cycle_for(task_idx, faulted, pre);
             }
         }
 
@@ -1406,12 +1427,18 @@ impl DispatchPass<'_, '_, '_> {
             Some(took_raw)
         };
 
-        // actual_period + jitter vs the previous dispatch (REQ_0101).
-        let (actual_period_ns, jitter) =
+        // actual_period + jitter vs the previous dispatch (REQ_0101). Always
+        // advance `last_dispatch` (even on a faulted attempt) so the next
+        // cycle's period is measured from this wakeup. On a faulted scan the
+        // jitter sample is suppressed (poison-safe: REQ_0107) — we don't fold a
+        // jitter measurement for a skipped scan — but `actual_period_ns` still
+        // reports the observed wakeup spacing.
+        let (actual_period_ns, jitter_raw) =
             task.last_dispatch.replace(pre).map_or((0, None), |prev| {
                 let ap = u64::try_from(pre.duration_since(prev).as_nanos()).unwrap_or(u64::MAX);
                 (ap, Some(ap.abs_diff(period_ns)))
             });
+        let jitter = if faulted { None } else { jitter_raw };
 
         // SAFETY: cycle_stats is index-aligned with tasks; single-writer.
         let stats = unsafe { &mut (&mut *self.cycle_stats_ptr)[task_idx] };
@@ -2066,6 +2093,7 @@ impl ExecutorGraphBuilder<'_> {
             last_took_ns: Arc::new(AtomicU64::new(u64::MAX)),
             last_dispatch: None,
             pending_cycle_pre: None,
+            pending_faulted: false,
         });
         self.executor
             .cycle_stats
