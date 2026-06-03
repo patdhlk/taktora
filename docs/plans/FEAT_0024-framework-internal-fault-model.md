@@ -158,9 +158,10 @@ Reused by both the item layer and `FatalContext::cause`.
 - Green = `cargo clippy -p taktora-executor -- -D warnings` passes.
 
 ### Commit 5 — retro-document item-panic containment → REQ_0124, IMPL_0086, TEST_0825
-- No production change. Add **TEST_0825**: a user item panicking in `execute` drives that
-  task to `Faulted` (`PanickedTask`), leaves siblings running, and does **not** invoke the
-  fatal handler nor abort (assert the recording handler was *not* called).
+- No production change. Add **TEST_0825**: a user item panicking in `execute` is caught and
+  surfaced via `on_app_error` as a `PanickedTask`, leaves the task `Running` (containment is
+  NOT a `Faulted` transition — `Faulted` is reserved for deadline breaches, REQ_0070), leaves
+  siblings running, and does **not** invoke the fatal handler nor abort.
 - This is the regression guard that the inner layer never escalates to the fail-fast path.
 
 ---
