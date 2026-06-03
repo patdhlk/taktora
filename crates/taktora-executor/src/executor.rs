@@ -1361,19 +1361,19 @@ impl DispatchPass<'_, '_, '_> {
         // pass below.
         self.pool.barrier();
 
-        // Post-barrier telemetry fold: re-scan the same guards (cheap,
-        // allocation-free) and record exactly once per fired cyclic task whose
-        // pre-dispatch instant we stashed above. `take` clears the stash so a
-        // task is never double-recorded within one wakeup.
-        for (i, guard) in self.guards.iter().enumerate() {
-            let fired =
-                attachment_id.has_event_from(guard) || attachment_id.has_missed_deadline(guard);
-            if !fired {
-                continue;
-            }
-            let task_idx = self.attachment_to_task[i];
-            // SAFETY: same single-writer WaitSet-thread discipline as the
-            // dispatch loop above; barrier-bounded, no aliasing.
+        // Post-barrier telemetry fold. The source of truth for "this task was
+        // dispatched this wakeup and owes a record" is `pending_cycle_pre`,
+        // set in the dispatch loop above — not the guard fired-status. Keying
+        // solely on the stash (rather than re-querying `has_event_from`)
+        // removes any dependency on the fired-status query being stable across
+        // a second scan, so a dispatched cycle can never be silently
+        // under-recorded (which would lag `cycle_index` — the desync FEAT_0038
+        // must avoid). `take` clears the stash, guaranteeing exactly-once.
+        // Allocation-free: iterate task indices in place.
+        // SAFETY: same single-writer WaitSet-thread discipline as the dispatch
+        // loop above; barrier-bounded, no in-flight pool job aliases `tasks`.
+        let task_count = unsafe { (*self.tasks_ptr).len() };
+        for task_idx in 0..task_count {
             let pre = unsafe { (&mut *self.tasks_ptr)[task_idx].pending_cycle_pre.take() };
             if let Some(pre) = pre {
                 self.record_cycle_for(task_idx, false, pre);
