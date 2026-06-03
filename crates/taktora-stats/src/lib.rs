@@ -16,8 +16,10 @@
 //! integration plans).
 #![cfg_attr(not(test), no_std)]
 
+mod cyclestats;
 mod histogram;
 mod minmax;
 
+pub use cyclestats::CycleStatsCore;
 pub use histogram::{BUCKETS, RollingHistogram, bucket_index, bucket_lower};
 pub use minmax::MinMaxDeque;
