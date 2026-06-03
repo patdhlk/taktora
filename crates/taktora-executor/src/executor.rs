@@ -32,10 +32,15 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+use taktora_stats::ExecutorCycleStats;
 
 /// Monotonically increasing counter so multiple executors in the same process
 /// each get a unique stop-event service name.
 static EXEC_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Executor histogram segment count (`S`) and exact-window length (`W`) for
+/// per-task cycle stats. Fixed at compile time per `ADR_0060`.
+pub(crate) type TaskCycleStats = ExecutorCycleStats<8, 256>;
 
 /// One registered task entry.
 pub(crate) struct TaskEntry {
@@ -94,6 +99,13 @@ pub struct Executor {
     pub(crate) node: Node<ipc::Service>,
     pub(crate) pool: Arc<Pool>,
     pub(crate) tasks: Vec<TaskEntry>,
+    /// One cycle-stats aggregator per registered task, index-aligned with
+    /// `tasks`. Pushed at task-add time (before `run`), so no steady-state
+    /// allocation (`REQ_0060`, `REQ_0104`). Updated single-writer on the
+    /// `WaitSet` thread (Task 6).
+    pub(crate) cycle_stats: Vec<TaskCycleStats>,
+    /// Histogram sliding-window size in samples (`REQ_0100`).
+    pub(crate) stats_window: u32,
     pub(crate) running: Arc<AtomicBool>,
     pub(crate) stoppable: Stoppable,
     pub(crate) next_id: AtomicU64,
@@ -260,6 +272,8 @@ impl Executor {
             scan_period,
             last_took_ns: Arc::clone(&last_took_ns),
         });
+        self.cycle_stats
+            .push(TaskCycleStats::new(self.stats_window));
         Ok(id)
     }
 
@@ -567,6 +581,8 @@ impl Executor {
             scan_period,
             last_took_ns: Arc::clone(&last_took_ns),
         });
+        self.cycle_stats
+            .push(TaskCycleStats::new(self.stats_window));
 
         // After the push, the TaskEntry lives at a stable position in
         // `self.tasks` for the duration of this `add_chain_with_id_boxed`
@@ -649,6 +665,9 @@ pub struct ExecutorBuilder {
     /// User-supplied fatal handler. `None` → resolved to a no-op `Arc` in
     /// `build()`.
     fatal_handler: Option<FatalHandler>,
+    /// Sliding-window size (samples) for cycle-stats aggregation
+    /// (`REQ_0100`). `None` → resolved to `1024` in `build()`.
+    stats_window: Option<u32>,
 }
 
 impl Default for ExecutorBuilder {
@@ -660,6 +679,7 @@ impl Default for ExecutorBuilder {
             worker_attrs: ThreadAttributes::new(),
             iteration_budget: None,
             fatal_handler: None,
+            stats_window: None,
         }
     }
 }
@@ -693,6 +713,14 @@ impl ExecutorBuilder {
     #[must_use]
     pub const fn iteration_budget(mut self, dur: Duration) -> Self {
         self.iteration_budget = Some(dur);
+        self
+    }
+
+    /// Sliding-window size (samples) for percentile / min-max / jitter /
+    /// lateness aggregation (`REQ_0100`). Default `1024`.
+    #[must_use]
+    pub const fn stats_window(mut self, samples: u32) -> Self {
+        self.stats_window = Some(samples);
         self
     }
 
@@ -809,6 +837,8 @@ impl ExecutorBuilder {
             node,
             pool,
             tasks: Vec::new(),
+            cycle_stats: Vec::new(),
+            stats_window: self.stats_window.unwrap_or(1024),
             running: Arc::new(AtomicBool::new(false)),
             stoppable,
             next_id: AtomicU64::new(0),
@@ -1527,7 +1557,7 @@ fn build_single_job(
         let took = started.elapsed();
         last_took_ns.store(
             u64::try_from(took.as_nanos()).unwrap_or(u64::MAX),
-            std::sync::atomic::Ordering::Relaxed,
+            Ordering::Relaxed,
         );
         mon.post_execute(id.clone(), started, took, res.is_ok());
         if let Err(ref e) = res {
@@ -1550,6 +1580,10 @@ fn build_single_job(
 /// owner inside [`TaskEntry`] — the handler closure stored in
 /// `handler_job` is the sole owner — so the simpler owning form is
 /// both sound and avoids the aliasing dance the main item needs.
+/// (Unlike [`build_single_job`], this closure does NOT update
+/// `last_took_ns` — the handler runs in place of the main item, so the
+/// main item's `last_took_ns` keeps its sentinel `u64::MAX` = "no
+/// sample this cycle".)
 /// `REQ_0072`.
 #[allow(clippy::too_many_arguments)]
 fn build_handler_job(
@@ -1648,7 +1682,7 @@ fn build_chain_job(
         let chain_took = chain_started.elapsed();
         last_took_ns.store(
             u64::try_from(chain_took.as_nanos()).unwrap_or(u64::MAX),
-            std::sync::atomic::Ordering::Relaxed,
+            Ordering::Relaxed,
         );
     })
 }
@@ -1876,6 +1910,9 @@ impl ExecutorGraphBuilder<'_> {
             // completeness; nothing reads it yet (Task 6).
             last_took_ns: Arc::new(AtomicU64::new(u64::MAX)),
         });
+        self.executor
+            .cycle_stats
+            .push(TaskCycleStats::new(self.executor.stats_window));
         Ok(id)
     }
 }
@@ -1956,6 +1993,35 @@ mod tests {
             .find(|t| t.id == event_driven)
             .expect("event-driven task present");
         assert_eq!(event_entry.scan_period, None);
+    }
+
+    #[test]
+    fn cycle_stats_index_aligned_with_tasks() {
+        use core::time::Duration;
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .stats_window(512)
+            .build()
+            .unwrap();
+        // Builder option flows through to the executor.
+        assert_eq!(exec.stats_window, 512);
+        // No tasks yet → both Vecs empty and aligned.
+        assert_eq!(exec.cycle_stats.len(), exec.tasks.len());
+
+        // Cyclic single-item add path.
+        exec.add(crate::item::item_with_triggers(
+            |d| {
+                d.interval(Duration::from_millis(5));
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ))
+        .unwrap();
+        // Event-driven single-item add path.
+        exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
+
+        assert_eq!(exec.tasks.len(), 2);
+        assert_eq!(exec.cycle_stats.len(), exec.tasks.len());
     }
 
     #[test]
