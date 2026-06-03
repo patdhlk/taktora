@@ -542,10 +542,14 @@ Scan-cycle observability
 
    * **Push** — the ``Observer`` trait shall expose an
      ``on_cycle_stats(&CycleObservation)`` callback (provided as a no-op
-     default for backward compatibility) that fires once per completed
-     scan cycle with the raw per-cycle observation (``task_id``,
-     ``period_ns``, ``actual_period_ns``, ``jitter_ns``, ``took_ns``).
-     The push path delivers raw samples, not aggregates.
+     default for backward compatibility) that fires once per scan cycle
+     (including a faulted scan, see :need:`REQ_0107`) with the raw
+     per-cycle observation (``cycle_index``, ``task_id``, ``period_ns``,
+     ``actual_period_ns``, ``jitter_ns``, ``took_ns``). The
+     ``cycle_index`` is the monotonic scan count of :need:`REQ_0107`,
+     the join key by which a cyclic connector's telemetry (:need:`REQ_0265`)
+     composes with the executor's. The push path delivers raw samples,
+     not aggregates.
    * **Pull** — ``Executor::stats_snapshot()`` shall return a borrowed
      view of the current per-task aggregates (``p50``, ``p95``, ``p99``,
      ``max_jitter_ns``, ``overrun_count``), readable concurrently with
@@ -610,6 +614,29 @@ Scan-cycle observability
    per-cycle ``lateness_ns`` is delivered on the push path of
    :need:`REQ_0103`. Event-driven (non-cyclic) tasks have no declared
    period and therefore report no lateness.
+
+.. req:: Per-task scan index and faulted-scan emission
+   :id: REQ_0107
+   :status: draft
+   :satisfies: FEAT_0021
+
+   The runtime shall maintain, per cyclic task, a monotonic zero-indexed
+   ``cycle_index`` (scan count) incremented once per scan **attempt**, and
+   shall include it in the push observation of :need:`REQ_0103`. The
+   runtime shall fire ``on_cycle_stats`` and increment ``cycle_index`` on
+   **every** scan attempt, including a scan whose task logic returned an
+   error or was otherwise faulted — not only completed scans.
+
+   This exists so the executor's telemetry composes with a cyclic
+   connector's (:need:`FEAT_0038`): because the NC task fires exactly once
+   per bus cycle (one-network-one-process), the executor's per-task
+   ``cycle_index`` equals the connector's per-cycle ``cycle_index``
+   (:need:`REQ_0265`, :need:`REQ_0267`) for the same cycle, giving a
+   consumer an explicit join key. Were the executor to skip a faulted
+   scan, its count would lag the connector's from the first fault onward
+   and every downstream pairing would desync — so emit-on-fault is
+   required symmetrically on both layers. The update is allocation-free
+   per :need:`REQ_0104`.
 
 PREEMPT_RT validation
 ~~~~~~~~~~~~~~~~~~~~~
