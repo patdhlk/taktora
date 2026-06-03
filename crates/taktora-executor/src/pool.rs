@@ -8,7 +8,7 @@
 #![allow(clippy::redundant_pub_crate)]
 
 use crate::error::ExecutorError;
-use crate::fatal::FatalDispatch;
+use crate::fatal::{FatalDispatch, FatalSite, guard_or_fatal};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -103,10 +103,8 @@ impl Tracker {
 pub(crate) struct Pool {
     mode: PoolMode,
     tracker: Arc<Tracker>,
-    /// Fatal-dispatch handle. Stored so Task 3 can call `fatal.fire()` from the
-    /// pool worker boundary. Not yet invoked — wired in Task 3.
-    // wired in Task 3
-    #[allow(dead_code)]
+    /// Fatal-dispatch handle. Invoked from the pool worker / inline-submit
+    /// panic boundaries to fail-fast on a framework-internal panic.
     pub(crate) fatal: Arc<FatalDispatch>,
 }
 
@@ -153,6 +151,7 @@ impl Pool {
             let tracker = Arc::clone(&tracker);
             let shutdown = Arc::clone(&shutdown);
             let attrs = Arc::clone(&attrs);
+            let fatal = Arc::clone(&fatal);
             let name = {
                 #[cfg(feature = "thread_attrs")]
                 {
@@ -173,7 +172,7 @@ impl Pool {
                     while !shutdown.load(Ordering::Acquire) {
                         match rx.recv() {
                             Ok(Job::Owned(f)) => {
-                                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+                                guard_or_fatal(&fatal, FatalSite::PoolWorker, f);
                                 tracker.complete();
                             }
                             Ok(Job::Borrowed(b)) => {
@@ -181,9 +180,9 @@ impl Pool {
                                 // barrier() pairs with this invocation
                                 // to ensure exclusive access.
                                 #[allow(unsafe_code)]
-                                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                                    || unsafe { (*b.0)() },
-                                ));
+                                guard_or_fatal(&fatal, FatalSite::PoolWorker, || unsafe {
+                                    (*b.0)();
+                                });
                                 tracker.complete();
                             }
                             Err(_) => break,
@@ -204,6 +203,21 @@ impl Pool {
         })
     }
 
+    /// Test-only constructor injecting a specific `FatalDispatch` (e.g. one with
+    /// a recording terminal) so the panic boundary can be observed without
+    /// aborting the test process.
+    #[cfg(test)]
+    pub(crate) fn new_with_fatal(
+        n_workers: usize,
+        fatal: Arc<FatalDispatch>,
+    ) -> Result<Self, ExecutorError> {
+        Self::new(
+            n_workers,
+            crate::thread_attrs::ThreadAttributes::new(),
+            fatal,
+        )
+    }
+
     /// Submit a job to the pool. In inline mode the job runs immediately on
     /// the calling thread; in threaded mode it is enqueued for a worker.
     ///
@@ -218,7 +232,7 @@ impl Pool {
         self.tracker.submit();
         match &self.mode {
             PoolMode::Inline => {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+                guard_or_fatal(&self.fatal, FatalSite::InlineSubmit, f);
                 self.tracker.complete();
             }
             PoolMode::Threaded { tx, .. } => {
@@ -248,9 +262,9 @@ impl Pool {
         match &self.mode {
             PoolMode::Inline => {
                 // SAFETY: caller invariant.
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+                guard_or_fatal(&self.fatal, FatalSite::InlineSubmit, || unsafe {
                     (*job.0)();
-                }));
+                });
                 self.tracker.complete();
             }
             PoolMode::Threaded { tx, .. } => {
@@ -298,6 +312,111 @@ mod tests {
         Arc::new(FatalDispatch::new(Arc::new(|_| {})))
     }
 
+    type Recorder = Arc<Mutex<Vec<(FatalSite, String)>>>;
+
+    /// A `FatalDispatch` whose terminal records `(site, cause)` rather than
+    /// aborting, so the pool's panic boundary can be observed in-process.
+    fn recording_fatal() -> (Recorder, Arc<FatalDispatch>) {
+        let rec: Recorder = Arc::new(Mutex::new(Vec::new()));
+        let rec2 = Arc::clone(&rec);
+        let dispatch = FatalDispatch::with_terminal(Arc::new(|_| {}), move |ctx| {
+            rec2.lock().unwrap().push((ctx.site, ctx.cause.clone()));
+        });
+        (rec, Arc::new(dispatch))
+    }
+
+    #[test]
+    fn inline_pool_panic_fires_fatal_with_inline_submit_site() {
+        let (rec, fatal) = recording_fatal();
+        let pool = Pool::new_with_fatal(0, fatal).unwrap();
+        pool.submit(|| panic!("synthetic infra panic"));
+        pool.barrier();
+        let entries = rec.lock().unwrap().clone();
+        assert_eq!(entries.len(), 1, "fatal must fire exactly once");
+        assert_eq!(entries[0].0, FatalSite::InlineSubmit);
+        assert_eq!(entries[0].1, "synthetic infra panic");
+    }
+
+    #[test]
+    fn threaded_pool_panic_fires_fatal_with_pool_worker_site() {
+        let (rec, fatal) = recording_fatal();
+        let pool = Pool::new_with_fatal(2, fatal).unwrap();
+        pool.submit(|| panic!("synthetic infra panic"));
+        pool.barrier();
+        let entries = rec.lock().unwrap().clone();
+        assert_eq!(entries.len(), 1, "fatal must fire exactly once");
+        assert_eq!(entries[0].0, FatalSite::PoolWorker);
+        assert_eq!(entries[0].1, "synthetic infra panic");
+    }
+
+    // ── TEST_0824 — subprocess SIGABRT ────────────────────────────────────────
+
+    /// Env-var guarded child branch: build a *real* abort-terminal pool and
+    /// drive a panicking job through the framework boundary, which must
+    /// `std::process::abort()` (SIGABRT).
+    #[cfg(unix)]
+    const ABORT_CHILD_ENV: &str = "TAKTORA_EXECUTOR_ABORT_CHILD";
+
+    #[cfg(unix)]
+    #[test]
+    fn pool_panic_aborts_process_with_sigabrt() {
+        use std::os::unix::process::ExitStatusExt;
+
+        if std::env::var(ABORT_CHILD_ENV).is_ok() {
+            // --- child branch ---
+            // Real abort-terminal dispatch. Submitting a panicking job through
+            // the boundary must abort the process.
+            let fatal = Arc::new(FatalDispatch::new(Arc::new(|_| {})));
+            let pool = Pool::new(2, ThreadAttributes::new(), fatal).unwrap();
+            pool.submit(|| panic!("synthetic infra panic in child"));
+            pool.barrier();
+            // Should never get here — the worker boundary aborted.
+            std::process::exit(0);
+        }
+
+        // --- parent branch ---
+        // Bounded wait: spawn the child and poll `try_wait` so a misbehaving
+        // child that fails to abort fails this test loudly instead of hanging
+        // CI forever. The child's stdout/stderr are nulled — it deliberately
+        // panics and aborts, and that noise ("Aborted", panic message) would
+        // otherwise pollute CI logs.
+        let poll_interval = std::time::Duration::from_millis(50);
+        let max_wait = std::time::Duration::from_secs(30);
+
+        let exe = std::env::current_exe().expect("current_exe");
+        let mut child = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "pool::tests::pool_panic_aborts_process_with_sigabrt",
+            ])
+            .env(ABORT_CHILD_ENV, "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn child test process");
+
+        let deadline = std::time::Instant::now() + max_wait;
+
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("try_wait on child test process") {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                // Best-effort kill so we don't leak the process, then fail
+                // loudly rather than hang the suite.
+                let _ = child.kill();
+                panic!("child did not abort within 30s");
+            }
+            std::thread::sleep(poll_interval);
+        };
+
+        assert_eq!(
+            status.signal(),
+            Some(6),
+            "child must die via SIGABRT (signal 6); status: {status:?}"
+        );
+    }
+
     #[test]
     fn inline_pool_runs_synchronously() {
         let pool = Pool::new(0, ThreadAttributes::new(), noop_fatal()).unwrap();
@@ -335,19 +454,25 @@ mod tests {
     }
 
     #[test]
-    fn submitted_panic_is_caught_and_completion_counted() {
-        let pool = Pool::new(2, ThreadAttributes::new(), noop_fatal()).unwrap();
+    fn submitted_panic_fires_fatal_and_completion_is_counted() {
+        // A framework-boundary panic now fails fast (fires the fatal dispatch).
+        // Under a recording terminal (instead of abort) we can observe that the
+        // fatal fired AND that `tracker.complete()` still ran afterward, so the
+        // barrier does not hang. A regression of "tracker.complete() skipped on
+        // the fatal path" would surface here as a 60s hang / counter mismatch.
+        let (rec, fatal) = recording_fatal();
+        let pool = Pool::new_with_fatal(2, fatal).unwrap();
         pool.submit(|| panic!("kaboom"));
         pool.submit(|| {});
         pool.barrier();
-        // Both jobs must be marked complete even though one panicked. If they
-        // weren't, barrier would have hung — but we make the postcondition
-        // explicit so a future regression of "tracker.complete() skipped on
-        // panic" surfaces as an assertion failure rather than a 60s hang.
         assert_eq!(
             pool.tracker.submitted.load(Ordering::SeqCst),
             pool.tracker.completed.load(Ordering::SeqCst),
             "submitted vs completed counters diverged after panic"
         );
+        let entries = rec.lock().unwrap().clone();
+        assert_eq!(entries.len(), 1, "exactly one fatal should have fired");
+        assert_eq!(entries[0].0, FatalSite::PoolWorker);
+        assert_eq!(entries[0].1, "kaboom");
     }
 }

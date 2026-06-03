@@ -8,7 +8,7 @@
 use crate::Channel;
 use crate::context::Stoppable;
 use crate::error::ExecutorError;
-use crate::fatal::{FatalDispatch, FatalHandler, panic_payload_message};
+use crate::fatal::{FatalDispatch, FatalHandler, FatalSite, guard_or_fatal, panic_payload_message};
 use crate::fault::{
     ExecutorFaultAtomic, ExecutorFaultReason, ExecutorFaultState, FaultAtomic, FaultReason,
     FaultState, duration_to_ms_sat, instant_to_since_ms,
@@ -122,11 +122,9 @@ pub struct Executor {
     /// executor — `get_or_init` is idempotent and wait-free.
     pub(crate) start_time: Arc<OnceLock<Instant>>,
 
-    /// Fatal-dispatch handle. Called once on the fail-fast path (Task 3).
-    /// Stored on the `Executor` so the executor-thread boundary (run loop)
-    /// can reach it; the pool holds a separate `Arc::clone`.
-    // wired in Task 3
-    #[allow(dead_code)]
+    /// Fatal-dispatch handle. Called once on the fail-fast path from the
+    /// executor-thread run-loop boundary; the pool holds a separate
+    /// `Arc::clone` for its own worker / inline-submit boundaries.
     pub(crate) fatal_dispatch: Arc<FatalDispatch>,
 }
 
@@ -999,26 +997,49 @@ impl Executor {
             // triggered by an executor-wide fault.
             let exec_start_ptr = &*self.start_time as *const OnceLock<Instant>;
 
-            // Bundle the per-iteration captures into a single context the
-            // WaitSet callback delegates to. Keeping the closure a thin
-            // adapter over `DispatchPass::process_attachment` keeps the
-            // dispatch logic in named, individually-measurable functions.
-            let mut pass = DispatchPass {
-                guards: &guards,
-                attachment_to_task: &attachment_to_task,
-                tasks_ptr,
-                exec_fault_ptr,
-                exec_start_ptr,
-                stop_listener_ptr,
-                pool,
-                iter_err: &iter_err_inner,
-            };
+            // Wrap the per-iteration dispatch body in the framework panic
+            // boundary. A panic escaping here is *infrastructure* (the WaitSet
+            // drive, pool submission/barrier, or dispatch wiring) — not a user
+            // item panic, which is already caught and faulted inside
+            // `run_item_catch_unwind`. On such a panic `guard_or_fatal` runs the
+            // user fatal handler then aborts in production. Under a test
+            // terminal it returns `None`, in which case we must NOT keep
+            // iterating over possibly-corrupt executor state, so we break out.
+            let Some(cb_result) =
+                guard_or_fatal(&self.fatal_dispatch, FatalSite::ExecutorRunLoop, || {
+                    // Bundle the per-iteration captures into a single context the
+                    // WaitSet callback delegates to. Keeping the closure a thin
+                    // adapter over `DispatchPass::process_attachment` keeps the
+                    // dispatch logic in named, individually-measurable functions.
+                    let mut pass = DispatchPass {
+                        guards: &guards,
+                        attachment_to_task: &attachment_to_task,
+                        tasks_ptr,
+                        exec_fault_ptr,
+                        exec_start_ptr,
+                        stop_listener_ptr,
+                        pool,
+                        iter_err: &iter_err_inner,
+                    };
 
-            let cb_result = waitset.wait_and_process_once(
-                |attachment_id: WaitSetAttachmentId<ipc::Service>| {
-                    pass.process_attachment(&attachment_id)
-                },
-            );
+                    waitset.wait_and_process_once(
+                        |attachment_id: WaitSetAttachmentId<ipc::Service>| {
+                            pass.process_attachment(&attachment_id)
+                        },
+                    )
+                })
+            else {
+                // Only reachable under a test terminal (production aborts in
+                // `fire`). Bail out of the run loop rather than continuing over
+                // possibly-corrupt executor state.
+                //
+                // Unreachable in production: the production terminal aborts
+                // before returning, so this branch exists solely so a
+                // `#[cfg(test)]` recording terminal can unwind the loop.
+                // Consequently, silently discarding any pending `iter_err`
+                // here is immaterial to production behavior.
+                break Ok(());
+            };
 
             // Funnel the post-callback decision (interrupt / item error /
             // stop request / run-mode termination) through one helper that
@@ -1955,12 +1976,12 @@ mod tests {
 
     #[test]
     fn build_without_on_fatal_succeeds() {
+        use crate::fatal::{FatalContext, FatalSite};
+        use std::sync::{Arc, Mutex};
         // Default builder (no on_fatal) must build successfully.
         let exec = Executor::builder().worker_threads(0).build().unwrap();
         // The fatal_dispatch field is present; fire via a test terminal to
         // confirm the no-op handler doesn't blow up.
-        use crate::fatal::{FatalContext, FatalSite};
-        use std::sync::{Arc, Mutex};
         let reached: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
         let reached2 = Arc::clone(&reached);
         let test_dispatch = crate::fatal::FatalDispatch::with_terminal(
@@ -2003,9 +2024,9 @@ mod tests {
             site: FatalSite::ExecutorRunLoop,
         });
         assert!(*reached.lock().unwrap(), "terminal not reached");
-        let log = called.lock().unwrap();
+        let log = called.lock().unwrap().clone();
         assert_eq!(
-            *log,
+            log,
             vec!["my-cause"],
             "handler should have been called with cause"
         );

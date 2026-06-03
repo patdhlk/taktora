@@ -6,8 +6,6 @@
 //! `executor.rs` (Task 1) because it is the natural extraction point for
 //! panic-payload introspection shared by the fatal path.
 
-// `FatalDispatch` fields and `fire` are wired in Task 3.
-#![allow(dead_code)]
 // This is a private module; pub(crate) on items is intentional — they are used
 // by executor.rs / pool.rs once Task 3 wires the hot path.
 #![allow(clippy::redundant_pub_crate)]
@@ -106,7 +104,39 @@ impl FatalDispatch {
         // terminal returns, but test closures hold no cross-unwind invariants.
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.handler)(ctx)));
         // Production terminal diverges (abort). Test terminal records + returns.
+        //
+        // Deliberately NOT catch-guarded: the production terminal is
+        // `std::process::abort()`, which cannot unwind, so there is nothing to
+        // catch. A panicking terminal can only come from a `#[cfg(test)]`
+        // fixture, where it is a test bug that must surface loudly rather than
+        // be masked.
         (self.terminal)(ctx);
+    }
+}
+
+/// Run `f`, converting any escaping (framework-internal) panic into a fail-fast.
+/// Returns `Some(r)` on success. On panic, calls `fatal.fire(...)`; in production
+/// `fire` aborts and this never returns, so the `None` is observable only under a
+/// test terminal.
+pub(crate) fn guard_or_fatal<R>(
+    fatal: &FatalDispatch,
+    site: FatalSite,
+    f: impl FnOnce() -> R,
+) -> Option<R> {
+    // SAFETY: on the production path `fatal.fire` calls std::process::abort() and
+    // the process never resumes use of any state captured by `f`, so a
+    // possibly-inconsistent captured state is never observed after the panic.
+    // (The test terminal returns, but test closures hold no cross-unwind
+    // invariants.) This matches the existing AssertUnwindSafe convention in this
+    // crate's catch-unwind boundaries.
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(r) => Some(r),
+        Err(payload) => {
+            let cause =
+                panic_payload_message(&*payload).unwrap_or_else(|| "framework panic".to_string());
+            fatal.fire(&FatalContext { cause, site });
+            None
+        }
     }
 }
 
@@ -195,9 +225,9 @@ mod tests {
             site: FatalSite::PoolWorker,
         });
 
-        let log = order.lock().unwrap();
+        let log = order.lock().unwrap().clone();
         assert_eq!(
-            *log,
+            log,
             vec!["handler", "terminal"],
             "handler must run before terminal"
         );
@@ -215,13 +245,86 @@ mod tests {
             site: FatalSite::ExecutorRunLoop,
         });
 
-        let entries = log.lock().unwrap();
+        let entries = log.lock().unwrap().clone();
         // Terminal must have been reached even though handler panicked.
         assert!(
             entries.iter().any(|e| e.contains("terminal:cause-xyz")),
-            "terminal not reached after handler panic; log: {:?}",
-            *entries
+            "terminal not reached after handler panic; log: {entries:?}"
         );
+    }
+
+    // ── guard_or_fatal (TEST_0823 mechanism) ──────────────────────────────────
+
+    /// Helper: a `FatalDispatch` whose terminal records `(site, cause)` into a
+    /// shared Vec instead of aborting, so the boundary is observable in-process.
+    type Recorder = Arc<Mutex<Vec<(FatalSite, String)>>>;
+
+    fn recording_dispatch() -> (Recorder, FatalDispatch) {
+        let rec: Recorder = Arc::new(Mutex::new(Vec::new()));
+        let rec2 = Arc::clone(&rec);
+        let handler: FatalHandler = Arc::new(|_ctx| {});
+        let dispatch = FatalDispatch::with_terminal(handler, move |ctx| {
+            rec2.lock().unwrap().push((ctx.site, ctx.cause.clone()));
+        });
+        (rec, dispatch)
+    }
+
+    #[test]
+    fn guard_or_fatal_success_returns_some_and_does_not_fire() {
+        let (rec, dispatch) = recording_dispatch();
+        let out = guard_or_fatal(&dispatch, FatalSite::ExecutorRunLoop, || 7_u32);
+        assert_eq!(out, Some(7));
+        assert!(
+            rec.lock().unwrap().is_empty(),
+            "terminal must not fire on success"
+        );
+    }
+
+    #[test]
+    fn guard_or_fatal_panic_fires_once_with_site_and_cause() {
+        let (rec, dispatch) = recording_dispatch();
+        let out: Option<()> = guard_or_fatal(&dispatch, FatalSite::PoolWorker, || {
+            panic!("synthetic infra panic")
+        });
+        // Under the recording terminal `fire` returns, so `guard_or_fatal`
+        // yields `None`.
+        assert!(
+            out.is_none(),
+            "panic path must yield None under test terminal"
+        );
+        let entries = rec.lock().unwrap().clone();
+        assert_eq!(entries.len(), 1, "fatal must fire exactly once");
+        assert_eq!(entries[0].0, FatalSite::PoolWorker);
+        assert_eq!(entries[0].1, "synthetic infra panic");
+    }
+
+    #[test]
+    fn guard_or_fatal_propagates_run_loop_site() {
+        // Covers the ExecutorRunLoop site via the same mechanism (a full
+        // end-to-end executor trigger that panics *inside* the WaitSet drive is
+        // impractical to provoke deterministically without an artificial fault
+        // injection seam, so the boundary is proven at the helper level).
+        let (rec, dispatch) = recording_dispatch();
+        let out: Option<()> = guard_or_fatal(&dispatch, FatalSite::ExecutorRunLoop, || {
+            panic!("run-loop boom")
+        });
+        assert!(out.is_none());
+        let entries = rec.lock().unwrap().clone();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, FatalSite::ExecutorRunLoop);
+        assert_eq!(entries[0].1, "run-loop boom");
+    }
+
+    #[test]
+    fn guard_or_fatal_non_string_payload_uses_fallback_cause() {
+        let (rec, dispatch) = recording_dispatch();
+        let out: Option<()> = guard_or_fatal(&dispatch, FatalSite::InlineSubmit, || {
+            std::panic::panic_any(42_u32)
+        });
+        assert!(out.is_none());
+        let entries = rec.lock().unwrap().clone();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].1, "framework panic");
     }
 
     #[test]
@@ -238,11 +341,10 @@ mod tests {
             site: FatalSite::InlineSubmit,
         });
 
-        let entries = log.lock().unwrap();
+        let entries = log.lock().unwrap().clone();
         assert!(
             entries.iter().any(|e| e.contains("terminal:default")),
-            "terminal not reached for default no-op handler; log: {:?}",
-            *entries
+            "terminal not reached for default no-op handler; log: {entries:?}"
         );
     }
 }
