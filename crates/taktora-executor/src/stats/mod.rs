@@ -109,10 +109,11 @@ mod tests {
             lateness_ns: -120,
             took_ns: 1_000_000,
         };
-        // Verify Clone is implemented and produces an independent copy.
+        // Verify Clone is implemented and produces an independent copy;
+        // both original and copy are read so the clone is genuinely exercised.
         let copy = obs.clone();
-        drop(obs);
-        assert_eq!(copy.cycle_index, 3);
+        assert_eq!(obs.cycle_index, 3);
+        assert_eq!(copy.cycle_index, obs.cycle_index);
         assert_eq!(copy.task_id.as_str(), "t0");
         assert_eq!(copy.lateness_ns, -120);
     }
