@@ -2506,6 +2506,114 @@ spec text that needed amendment during implementation.
 
 ----
 
+Connector cycle telemetry
+-------------------------
+
+Detailed design for the **connector cycle telemetry** sub-feature
+(:need:`FEAT_0038`). The split between connector-measured and
+executor-measured quantities is the central decision; the building
+blocks reuse the shared ``taktora-stats`` primitive (:need:`ADR_0062`).
+
+.. arch-decision:: Hybrid two-layer timing measurement
+   :id: ADR_0063
+   :status: open
+   :refines: REQ_0265
+
+   **Context.** Full timing visibility for a cyclic motion deployment
+   spans two layers: the executor (when did the NC task fire, how long
+   did its logic take) and the connector (how long was the wire round,
+   did every device participate, were inputs fresh). A single layer
+   cannot measure all of it. Critically, ``taktora-cyclic-fieldbus`` is
+   ``#![no_std]`` with **no clock** — it can time a wire round only if
+   the bus driver hands it a duration, and it cannot timestamp absolute
+   cadence at all. ``exchange()`` also owns cycle timing, so an outside
+   observer cannot separate "waiting for the cycle phase" from "the wire
+   round" from "the NC task's own work".
+
+   **Decision.** Split measurement by what each layer can actually
+   observe:
+
+   * The **connector** measures the quantities only it sees — wire-round
+     duration, working-counter quality, per-device freshness/staleness
+     (:need:`REQ_0262`, :need:`REQ_0263`, :need:`REQ_0264`).
+   * The **executor** measures the NC task's period jitter and deadline
+     lateness (:need:`REQ_0101`, :need:`REQ_0106`). Since the NC task
+     fires once per bus cycle (one-network-one-process), its period
+     **is** the observable bus-cycle cadence.
+
+   Neither layer double-counts; the two snapshots compose into the full
+   picture.
+
+   **Alternatives considered.**
+
+   * *Connector self-instruments everything, including cadence/jitter.*
+     Symmetric and uniform, but requires a monotonic clock inside the
+     ``no_std`` connector seam — smuggling ``std`` (or a clock trait)
+     into a layer that deliberately has none. Rejected.
+   * *Executor brackets ``exchange()`` from outside and owns all timing.*
+     One stats engine, but the executor cannot separate cycle-phase wait
+     from wire round from NC work, so bus-cycle and wire-round quantities
+     are simply not observable. Rejected: the most diagnostic numbers
+     would be unmeasurable.
+
+   **Consequences.**
+
+   ✅ Each quantity is measured where it is actually observable; no
+   clock is forced into ``no_std``.
+   ✅ The connector telemetry reuses :need:`ADR_0062` and stays
+   allocation-free.
+   ❌ A consumer wanting the "full" timing picture must read two
+   snapshots (executor + connector) and compose them. Documented;
+   acceptable given the layering.
+
+.. building-block:: Connector cycle telemetry
+   :id: BB_0054
+   :status: open
+   :implements: REQ_0262, REQ_0263, REQ_0264, REQ_0265
+   :refines: ADR_0063
+
+   ``ConnectorCycleStats`` — per-bus telemetry held by a cyclic
+   connector, allocated at connector build time. Fields:
+
+   * ``wire_round: CycleStatsCore`` — the shared ``taktora-stats``
+     histogram + min/max deque over wire-round duration
+     (:need:`REQ_0262`).
+   * ``wc_mismatch_count: AtomicU64`` — working-counter-mismatch counter
+     (:need:`REQ_0263`).
+   * ``not_all_fresh_count: AtomicU64`` — cycles that were not
+     all-devices-fresh (:need:`REQ_0264`).
+   * ``per_device_max_stale: [AtomicU32; N]`` — max consecutive-stale
+     run per device (:need:`REQ_0264`).
+
+   Updated inside ``exchange()`` from the ``CycleQuality`` /
+   ``Validity`` already produced each cycle; the per-cycle push
+   observation and the pull snapshot of :need:`REQ_0265` read these
+   fields with relaxed atomics. ``no_std`` and allocation-free, reusing
+   :need:`BB_0053`.
+
+.. impl:: Connector telemetry — taktora-cyclic-fieldbus + cyclic connectors
+   :id: IMPL_0072
+   :status: open
+   :implements: BB_0054
+   :refines: REQ_0265
+
+   Concrete Rust changes that realise :need:`BB_0054`.
+
+   * In ``taktora-cyclic-fieldbus``: add an optional
+     ``CycleObservation`` value type and a ``cycle_stats()`` accessor on
+     a telemetry extension trait, both ``no_std``. The wire-round
+     duration is supplied by the implementing connector (the seam does
+     not own a clock).
+   * In each cyclic connector (``taktora-connector-ethercat`` first):
+     hold a ``ConnectorCycleStats`` (:need:`BB_0054`), record
+     wire-round duration measured around the bus driver's round inside
+     ``exchange()``, fold ``CycleQuality`` / ``Validity`` into the
+     working-counter and freshness counters, and expose the pull
+     snapshot.
+   * Depends on ``taktora-stats`` (:need:`BB_0053`).
+
+----
+
 Cross-cutting traceability
 --------------------------
 
