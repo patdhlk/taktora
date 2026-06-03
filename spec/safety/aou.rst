@@ -192,3 +192,22 @@ carries the responsibility as AoUs rather than as TSRs.
    covers daemon-down windows only and is lost on process restart.
 
    :Validates: :need:`REQ_0814`
+
+.. aou:: Output-slave watchdog enabled and bounded
+   :id: AOU_0016
+   :status: open
+
+   Every fieldbus output slave has its sync-manager (process-data)
+   watchdog **enabled**, with a timeout bounded at or below FTTI/2
+   (≤ 50 ms given the assumed 100 ms FTTI). This is load-bearing for the
+   runtime's fail-fast failure model (:need:`REQ_0123`, :need:`ADR_0065`):
+   on a framework-invariant abort the master stops emitting process-data
+   frames and runs no destructors, so the slave watchdog is the **sole**
+   mechanism that drives outputs to their configured safe state. If the
+   watchdog is disabled the outputs hold their last commanded value
+   indefinitely; if its timeout exceeds FTTI/2 the safe-state transition
+   misses budget. Taktora does not model or program the SM watchdog
+   today; enforcing this bound at config time is tracked separately (see
+   :need:`ADR_0065`).
+
+   :Validates: :need:`AFSR_0004`, :need:`REQ_0123`

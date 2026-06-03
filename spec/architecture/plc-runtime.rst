@@ -658,3 +658,143 @@ Cycle-overrun fault primitive (FEAT_0018)
    :code:`build_handler_job` closure builder in
    :code:`crates/taktora-executor/src/executor.rs`, plus the
    pre-dispatch routing decision in :code:`dispatch_loop`.
+
+----
+
+Framework internal-fault model (FEAT_0024)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. arch-decision:: Abort on framework-invariant violation; watchdog drives outputs safe
+   :id: ADR_0065
+   :status: open
+   :refines: REQ_0123
+
+   **Context.** The cyclic dispatch path has two nested
+   :code:`catch_unwind` layers. The **inner** layer
+   (:code:`run_item_catch_unwind`, ``executor.rs``) wraps each user
+   item and converts a task panic into a ``PanickedTask`` error that
+   drives the :need:`FEAT_0018` fault machine — the task-isolation
+   guarantee of :need:`AFSR_0004`. The **outer** layer (the pool worker
+   loop and inline-submit path, ``pool.rs``) wraps every job and today
+   **swallows** whatever it catches (:code:`let _ = catch_unwind(...)`).
+
+   Because user-item panics are already neutralised by the inner layer,
+   the *only* panics that can reach the outer layer are framework-
+   internal: a poisoned dispatch ``Mutex`` (``first_err``, ``done_cv``,
+   ``iter_err``), a ``ready_ring`` overflow, broken in-degree
+   accounting. Swallowing these is actively dangerous: e.g. a panic in
+   the ``ready_ring.push().expect()`` path leaves ``pending``
+   decremented but successors un-enqueued, so :code:`run_once_borrowed`
+   spins on its 5 ms ``wait_timeout`` **forever** — a silent cyclic-task
+   hang with outputs frozen at their last value and **no fault
+   surfaced**, violating :need:`AFSR_0004`. In a control loop a frozen
+   actuator is an undefined-state event.
+
+   The runtime stays on ``panic = "unwind"`` globally — the inner
+   catch-and-fault mechanism depends on unwinding, so a global
+   ``panic = "abort"`` is not an option.
+
+   **Decision.** Treat any panic reaching the outer (framework) boundary
+   as a non-recoverable internal-invariant violation and **fail fast**:
+   invoke a best-effort, time-bounded user fatal handler
+   (:need:`REQ_0125`), then :code:`std::process::abort`. The boundary is
+   installed at every runtime-thread top — pool worker loop, inline
+   submit, and the executor dispatch thread's run loop. User-item panics
+   continue to be caught and faulted at the inner layer (:need:`REQ_0124`),
+   never reaching the abort path.
+
+   The **documented output failure model** on abort is: ``abort`` runs
+   no destructors (so :code:`EthercatGateway::Drop`'s graceful tokio
+   shutdown does *not* run) → the master thread stops emitting
+   process-data frames → each output slave's sync-manager watchdog
+   expires → the slave drops OP → SAFE-OP and applies its configured
+   safe-state values. Outputs hold their last commanded value for up to
+   the watchdog timeout, then go safe — with **zero dependency on
+   taktora code running after the violation**. This robustness is the
+   point: the safe-state path cannot be defeated by the corrupt state
+   that triggered the abort. Its load-bearing precondition is
+   :need:`AOU_0016` (watchdog enabled, timeout ≤ FTTI/2).
+
+   **Alternatives considered.**
+
+   * *Controlled stop / run the fault handler (REQ_0072) over the broken
+     state.* Rejected: once a dispatch invariant is violated the locks,
+     ring, and in-degree counters are untrustworthy; executing more
+     framework logic over them — including a fault handler — is less
+     safe than aborting, and the watchdog already provides the
+     output-safe guarantee without it.
+   * *Global* ``panic = "abort"``. Rejected: deletes the inner
+     catch-and-fault path, collapsing per-task isolation so one task's
+     panic kills the whole control process.
+   * *Best-effort "drive outputs safe" frame before abort.* Rejected:
+     runs master code over state just declared untrustworthy, for a
+     guarantee the slave watchdog already provides. (A *narrow*
+     last-gasp that does **not** touch executor internals — GPIO pin,
+     black-box flush — is permitted via the :need:`REQ_0125` handler.)
+   * *Static enforcement of the watchdog bound now.* Deferred, not
+     rejected: the SM watchdog is not modelled in
+     ``taktora-ethercat-esi`` / ``taktora-ethercat-netcfg`` today, so
+     the ≤ FTTI/2 bound cannot be validated at config time. The bound
+     is recorded as :need:`AOU_0016`; modelling + validation is a
+     separate dependent slice.
+
+   **Consequences.**
+
+   ✅ Infrastructure panics can no longer silently hang the executor;
+   they become an immediate, observable process abort.
+   ✅ The fail-fast path is exercisable in CI via an injected fatal
+   handler (:need:`REQ_0125`), so it does not rot.
+   ✅ The output-safe guarantee depends on no post-panic taktora code.
+   ❌ The output-safe timing is bounded by the slave watchdog, not by
+   taktora; correctness rests on :need:`AOU_0016` holding. Enforcement
+   of the ≤ FTTI/2 bound is deferred until the SM watchdog is modelled.
+   ❌ ``abort`` skips all destructors process-wide; any non-watchdog
+   cleanup (e.g. log flush) must be done in the :need:`REQ_0125`
+   handler.
+
+.. building-block:: Framework fail-fast boundary
+   :id: BB_0094
+   :status: open
+   :implements: FEAT_0024
+
+   The outer (framework) panic boundary, realised at every runtime
+   thread top: the pool worker loop and inline-submit path in
+   :code:`crates/taktora-executor/src/pool.rs`, and the executor
+   dispatch thread's run loop in
+   :code:`crates/taktora-executor/src/executor.rs`. Each converts a
+   caught panic into a call through the registered fatal handler
+   followed by :code:`std::process::abort`, replacing today's
+   :code:`let _ = catch_unwind(...)` swallow. Carries the
+   ``on_fatal`` registration on :code:`ExecutorBuilder` and the
+   ``FatalContext`` cause type.
+
+.. impl:: Fail-fast boundary and fatal handler
+   :id: IMPL_0085
+   :status: open
+   :implements: REQ_0123, REQ_0125
+
+   Replace the swallowing :code:`let _ = catch_unwind(...)` in
+   ``pool.rs`` (worker loop and inline submit) and wrap the executor
+   dispatch thread's run loop, routing a caught payload through
+   :code:`Executor`'s registered ``on_fatal`` handler (default no-op,
+   itself catch-guarded) then :code:`std::process::abort`. Add the
+   ``on_fatal`` builder setter and ``FatalContext`` (captured payload
+   message + thread/site label). Function-scoped
+   :code:`#[deny(clippy::unwrap_used, clippy::expect_used,
+   clippy::panic)]` on the cyclic-path fns, with each intentional
+   fail-fast site annotated :code:`#[allow(...)] // fail-fast: <invariant>`.
+
+.. impl:: User-item panic containment
+   :id: IMPL_0086
+   :status: implemented
+   :implements: REQ_0124
+
+   Existing :code:`run_item_catch_unwind` in
+   :code:`crates/taktora-executor/src/executor.rs` — retro-documented:
+   catches the item panic and builds a ``PanickedTask`` ``ItemError``,
+   which the dispatch paths surface via ``Observer::on_app_error`` and
+   propagate as the item's error result (stopping downstream items per
+   :need:`REQ_0022`). It does **not** drive the :need:`FEAT_0018`
+   ``Faulted`` state — that is reserved for deadline breaches
+   (:need:`REQ_0070`) — and it never reaches the fail-fast boundary of
+   :need:`REQ_0123`.

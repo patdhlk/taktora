@@ -8,6 +8,7 @@
 use crate::Channel;
 use crate::context::Stoppable;
 use crate::error::ExecutorError;
+use crate::fatal::{FatalDispatch, FatalHandler, FatalSite, guard_or_fatal, panic_payload_message};
 use crate::fault::{
     ExecutorFaultAtomic, ExecutorFaultReason, ExecutorFaultState, FaultAtomic, FaultReason,
     FaultState, duration_to_ms_sat, instant_to_since_ms,
@@ -120,6 +121,11 @@ pub struct Executor {
     /// in `Arc` so dispatch closures share the same `OnceLock` with the
     /// executor — `get_or_init` is idempotent and wait-free.
     pub(crate) start_time: Arc<OnceLock<Instant>>,
+
+    /// Fatal-dispatch handle. Called once on the fail-fast path from the
+    /// executor-thread run-loop boundary; the pool holds a separate
+    /// `Arc::clone` for its own worker / inline-submit boundaries.
+    pub(crate) fatal_dispatch: Arc<FatalDispatch>,
 }
 
 // SAFETY: `IxListener<ipc::Service>` is `!Send` for the same Rc-based
@@ -619,6 +625,9 @@ pub struct ExecutorBuilder {
     /// Executor-wide iteration budget (`REQ_0071`). `None` means no
     /// executor-wide check.
     iteration_budget: Option<Duration>,
+    /// User-supplied fatal handler. `None` → resolved to a no-op `Arc` in
+    /// `build()`.
+    fatal_handler: Option<FatalHandler>,
 }
 
 impl Default for ExecutorBuilder {
@@ -629,6 +638,7 @@ impl Default for ExecutorBuilder {
             monitor: None,
             worker_attrs: ThreadAttributes::new(),
             iteration_budget: None,
+            fatal_handler: None,
         }
     }
 }
@@ -675,6 +685,37 @@ impl ExecutorBuilder {
         self
     }
 
+    /// Register a best-effort last-gasp handler invoked once on the fail-fast
+    /// path immediately before `std::process::abort()`.
+    ///
+    /// **Contract**: runs over known-unsound executor state — MUST NOT touch
+    /// executor internals; a panic inside the handler routes straight to
+    /// `abort()`.
+    ///
+    /// The handler is expected to be time-bounded (the caller's responsibility);
+    /// no runtime deadline is imposed.
+    ///
+    /// **Observer / monitor containment carve-out**: the panic containment
+    /// described in the executor documentation covers only a user item's
+    /// `execute()` call. Panics that originate in framework-invoked user
+    /// callbacks that run *outside* that inner catch — such as
+    /// [`Observer`](crate::Observer) methods (e.g. `on_app_error`,
+    /// `on_task_fault`) and [`ExecutionMonitor`](crate::ExecutionMonitor)
+    /// methods (e.g. `post_execute`) — escape to this fail-fast boundary and
+    /// cause `abort()`. Those callbacks must therefore be treated as
+    /// non-panicking by the implementor. See `REQ_0123`.
+    ///
+    /// If not called, a no-op handler is used and `abort()` is still reached
+    /// after any unrecoverable fault.
+    #[must_use]
+    pub fn on_fatal(
+        mut self,
+        handler: impl Fn(&crate::FatalContext) + Send + Sync + 'static,
+    ) -> Self {
+        self.fatal_handler = Some(Arc::new(handler));
+        self
+    }
+
     /// Build the [`Executor`]. Creates a fresh iceoryx2 node and wires up the
     /// internal stop-event service so that any `Stoppable` clone (taken before
     /// or after `run()`) will wake the `WaitSet` when `stop()` is called.
@@ -692,7 +733,18 @@ impl ExecutorBuilder {
             .map_err(ExecutorError::iceoryx2)?;
 
         let n_workers = self.worker_threads.unwrap_or_else(num_cpus::get_physical);
-        let pool = Arc::new(Pool::new(n_workers, self.worker_attrs)?);
+
+        // Resolve the fatal handler: use the user-supplied one or fall back to a no-op.
+        let fatal_handler: FatalHandler = self
+            .fatal_handler
+            .unwrap_or_else(|| Arc::new(|_ctx: &crate::FatalContext| {}));
+        let fatal_dispatch = Arc::new(FatalDispatch::new(fatal_handler));
+
+        let pool = Arc::new(Pool::new(
+            n_workers,
+            self.worker_attrs,
+            Arc::clone(&fatal_dispatch),
+        )?);
 
         // Build the internal stop event service with a unique-per-process name
         // so multiple executors in the same process don't collide.
@@ -748,6 +800,7 @@ impl ExecutorBuilder {
             exec_fault_task_idx: Arc::new(AtomicU32::new(0)),
             exec_fault_budget_ms: Arc::new(AtomicU32::new(0)),
             start_time: Arc::new(OnceLock::new()),
+            fatal_dispatch,
         };
 
         Ok(exec)
@@ -862,6 +915,7 @@ impl Executor {
         result
     }
 
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(
         unsafe_code,
         clippy::too_many_lines,
@@ -912,7 +966,11 @@ impl Executor {
             // the slot is owned by `self.iter_err`, allocated once at build
             // time. Pool worker closures obtain a refcount-only clone of
             // the `Arc`; the slot itself is reused across iterations.
-            *self.iter_err.lock().unwrap() = None;
+            #[allow(clippy::unwrap_used)]
+            // fail-fast: poison unreachable — the lock is held only over an infallible Option insert/take, and any holder panic aborts the process before another thread observes it (ADR_0065)
+            let mut iter_err_guard = self.iter_err.lock().unwrap();
+            *iter_err_guard = None;
+            drop(iter_err_guard);
 
             // SAFETY: we capture &mut self.tasks via a raw pointer because
             // wait_and_process expects FnMut and Rust can't see the closure
@@ -954,26 +1012,49 @@ impl Executor {
             // triggered by an executor-wide fault.
             let exec_start_ptr = &*self.start_time as *const OnceLock<Instant>;
 
-            // Bundle the per-iteration captures into a single context the
-            // WaitSet callback delegates to. Keeping the closure a thin
-            // adapter over `DispatchPass::process_attachment` keeps the
-            // dispatch logic in named, individually-measurable functions.
-            let mut pass = DispatchPass {
-                guards: &guards,
-                attachment_to_task: &attachment_to_task,
-                tasks_ptr,
-                exec_fault_ptr,
-                exec_start_ptr,
-                stop_listener_ptr,
-                pool,
-                iter_err: &iter_err_inner,
-            };
+            // Wrap the per-iteration dispatch body in the framework panic
+            // boundary. A panic escaping here is *infrastructure* (the WaitSet
+            // drive, pool submission/barrier, or dispatch wiring) — not a user
+            // item panic, which is already caught and faulted inside
+            // `run_item_catch_unwind`. On such a panic `guard_or_fatal` runs the
+            // user fatal handler then aborts in production. Under a test
+            // terminal it returns `None`, in which case we must NOT keep
+            // iterating over possibly-corrupt executor state, so we break out.
+            let Some(cb_result) =
+                guard_or_fatal(&self.fatal_dispatch, FatalSite::ExecutorRunLoop, || {
+                    // Bundle the per-iteration captures into a single context the
+                    // WaitSet callback delegates to. Keeping the closure a thin
+                    // adapter over `DispatchPass::process_attachment` keeps the
+                    // dispatch logic in named, individually-measurable functions.
+                    let mut pass = DispatchPass {
+                        guards: &guards,
+                        attachment_to_task: &attachment_to_task,
+                        tasks_ptr,
+                        exec_fault_ptr,
+                        exec_start_ptr,
+                        stop_listener_ptr,
+                        pool,
+                        iter_err: &iter_err_inner,
+                    };
 
-            let cb_result = waitset.wait_and_process_once(
-                |attachment_id: WaitSetAttachmentId<ipc::Service>| {
-                    pass.process_attachment(&attachment_id)
-                },
-            );
+                    waitset.wait_and_process_once(
+                        |attachment_id: WaitSetAttachmentId<ipc::Service>| {
+                            pass.process_attachment(&attachment_id)
+                        },
+                    )
+                })
+            else {
+                // Only reachable under a test terminal (production aborts in
+                // `fire`). Bail out of the run loop rather than continuing over
+                // possibly-corrupt executor state.
+                //
+                // Unreachable in production: the production terminal aborts
+                // before returning, so this branch exists solely so a
+                // `#[cfg(test)]` recording terminal can unwind the loop.
+                // Consequently, silently discarding any pending `iter_err`
+                // here is immaterial to production behavior.
+                break Ok(());
+            };
 
             // Funnel the post-callback decision (interrupt / item error /
             // stop request / run-mode termination) through one helper that
@@ -992,6 +1073,7 @@ impl Executor {
     /// Order of precedence matches the original inline checks: `WaitSet`
     /// errors, then SIGINT/SIGTERM, then a captured item error, then a stop
     /// request, then the active [`RunMode`] limit.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn after_callback(
         &self,
         cb_result: Result<WaitSetRunResult, iceoryx2::waitset::WaitSetRunError>,
@@ -1015,6 +1097,8 @@ impl Executor {
 
         // Extract the error before dropping the MutexGuard — avoids holding the
         // lock across the return (clippy::significant_drop_in_scrutinee).
+        #[allow(clippy::unwrap_used)]
+        // fail-fast: poison unreachable — the lock is held only over an infallible Option insert/take, and any holder panic aborts the process before another thread observes it (ADR_0065)
         let maybe_err = self.iter_err.lock().unwrap().take();
         if let Some(err) = maybe_err {
             return IterOutcome::Failed(err);
@@ -1121,6 +1205,7 @@ impl DispatchPass<'_, '_, '_> {
     /// dispatches every task whose attachment fired. Always returns
     /// [`CallbackProgression::Continue`]; termination is decided by the
     /// `stop_flag` check in `dispatch_loop` after the callback returns.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(unsafe_code)]
     fn process_attachment(
         &mut self,
@@ -1230,6 +1315,7 @@ impl DispatchPass<'_, '_, '_> {
     /// `Single`/`Chain` tasks submit their pre-built job to the pool;
     /// `Graph` tasks drive one pass and capture the first item error into the
     /// per-iteration error slot.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
     fn dispatch_task(&self, task: &mut TaskEntry) {
         match &mut task.kind {
@@ -1237,6 +1323,8 @@ impl DispatchPass<'_, '_, '_> {
                 // The dispatch closure was pre-allocated at task-add time and
                 // stashed on `task.job`. Submit it via `submit_borrowed` — no
                 // per-iteration Box allocation. Required by REQ_0060.
+                #[allow(clippy::expect_used)]
+                // fail-fast: Single/Chain task.job is always Some — set at add time in build_single_job/build_chain_job and never cleared
                 let job_box = task
                     .job
                     .as_deref_mut()
@@ -1260,6 +1348,8 @@ impl DispatchPass<'_, '_, '_> {
                 // allocation-free in steady state.
                 let outcome = graph.run_once_borrowed(self.pool);
                 if let Some(source) = outcome.error {
+                    #[allow(clippy::unwrap_used)]
+                    // fail-fast: poison unreachable — the lock is held only over an infallible Option insert/take, and any holder panic aborts the process before another thread observes it (ADR_0065)
                     let mut g = self.iter_err.lock().unwrap();
                     if g.is_none() {
                         *g = Some(ExecutorError::Item {
@@ -1530,20 +1620,14 @@ impl core::fmt::Display for PanickedTask {
 impl std::error::Error for PanickedTask {}
 
 /// Execute `item` inside `catch_unwind`, converting any panic into an `Err`.
-#[allow(clippy::option_if_let_else)]
 fn run_item_catch_unwind(
     item: &mut dyn ExecutableItem,
     ctx: &mut crate::context::Context<'_>,
 ) -> crate::ExecuteResult {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| item.execute(ctx))).unwrap_or_else(
         |payload| {
-            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
-                (*s).to_string()
-            } else if let Some(s) = payload.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "panicked task".to_string()
-            };
+            let msg =
+                panic_payload_message(&*payload).unwrap_or_else(|| "panicked task".to_string());
             Err::<crate::ControlFlow, crate::ItemError>(Box::new(PanickedTask(msg)))
         },
     )
@@ -1910,5 +1994,65 @@ mod tests {
     fn executor_fault_state_starts_running() {
         let exec = Executor::builder().worker_threads(0).build().unwrap();
         assert_eq!(exec.executor_fault_state(), ExecutorFaultState::Running);
+    }
+
+    // --- on_fatal / FatalDispatch integration tests ---
+
+    #[test]
+    fn build_without_on_fatal_succeeds() {
+        use crate::fatal::{FatalContext, FatalSite};
+        use std::sync::{Arc, Mutex};
+        // Default builder (no on_fatal) must build successfully.
+        let exec = Executor::builder().worker_threads(0).build().unwrap();
+        // The fatal_dispatch field is present; fire via a test terminal to
+        // confirm the no-op handler doesn't blow up.
+        let reached: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+        let reached2 = Arc::clone(&reached);
+        let test_dispatch = crate::fatal::FatalDispatch::with_terminal(
+            exec.fatal_dispatch.handler().clone(),
+            move |_| {
+                *reached2.lock().unwrap() = true;
+            },
+        );
+        test_dispatch.fire(&FatalContext {
+            cause: "test".to_string(),
+            site: FatalSite::PoolWorker,
+        });
+        assert!(*reached.lock().unwrap(), "terminal not reached");
+    }
+
+    #[test]
+    fn on_fatal_handler_is_stored_and_invoked() {
+        use crate::fatal::{FatalContext, FatalSite};
+        use std::sync::{Arc, Mutex};
+        let called: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let called2 = Arc::clone(&called);
+        let exec = Executor::builder()
+            .worker_threads(0)
+            .on_fatal(move |ctx| {
+                called2.lock().unwrap().push(ctx.cause.clone());
+            })
+            .build()
+            .unwrap();
+        // Verify the handler fires via a test terminal.
+        let reached: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+        let reached2 = Arc::clone(&reached);
+        let test_dispatch = crate::fatal::FatalDispatch::with_terminal(
+            exec.fatal_dispatch.handler().clone(),
+            move |_| {
+                *reached2.lock().unwrap() = true;
+            },
+        );
+        test_dispatch.fire(&FatalContext {
+            cause: "my-cause".to_string(),
+            site: FatalSite::ExecutorRunLoop,
+        });
+        assert!(*reached.lock().unwrap(), "terminal not reached");
+        let log = called.lock().unwrap().clone();
+        assert_eq!(
+            log,
+            vec!["my-cause"],
+            "handler should have been called with cause"
+        );
     }
 }
