@@ -79,22 +79,32 @@ impl Tracker {
         self.submitted.fetch_add(1, Ordering::SeqCst);
     }
 
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn complete(&self) {
         self.completed.fetch_add(1, Ordering::SeqCst);
         // Acquire+drop the lock to establish happens-before with the waiter,
         // then notify *after* releasing — avoids a wake-then-sleep cycle under
         // high completion rate.
-        drop(self.lock.lock().unwrap());
+        #[allow(clippy::unwrap_used)]
+        // fail-fast: mutex poison is unreachable under the abort boundary (ADR_0065)
+        let guard = self.lock.lock().unwrap();
+        drop(guard); // release BEFORE notifying (see comment above)
         self.cv.notify_all();
     }
 
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(clippy::significant_drop_tightening)]
     fn wait_for_quiescence(&self) {
         // The guard must be held across every cv.wait() call; clippy's
         // suggestion to drop it early would break the condvar contract.
+        // fail-fast: mutex poison is unreachable under the abort boundary (ADR_0065)
+        #[allow(clippy::unwrap_used)]
         let mut g = self.lock.lock().unwrap();
         while self.submitted.load(Ordering::SeqCst) != self.completed.load(Ordering::SeqCst) {
-            g = self.cv.wait(g).unwrap();
+            // fail-fast: mutex poison is unreachable under the abort boundary (ADR_0065)
+            #[allow(clippy::unwrap_used)]
+            let next = self.cv.wait(g).unwrap();
+            g = next;
         }
     }
 }
@@ -121,6 +131,44 @@ enum PoolMode {
         /// Set to `true` to ask workers to exit after draining.
         shutdown: Arc<std::sync::atomic::AtomicBool>,
     },
+}
+
+/// Cyclic worker-loop body — processes jobs from `rx` until `shutdown` is
+/// set or the channel is closed. Extracted from the closure inside
+/// [`Pool::new`] so the no-panic classification gate can be applied to
+/// exactly this function (not to `Pool::new` build-time setup code).
+///
+/// The `#[deny(...)]` below ensures every `unwrap`/`expect`/`panic!` on
+/// this hot path is an explicitly classified fail-fast; any new unclassified
+/// site will be a compile error.
+#[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// Each Arc is an owned clone given to the spawned thread; pass-by-value
+// is intentional — the thread takes ownership of its share.
+#[allow(clippy::needless_pass_by_value)]
+#[allow(unsafe_code)]
+fn run_worker(
+    rx: Receiver<Job>,
+    tracker: Arc<Tracker>,
+    shutdown: Arc<std::sync::atomic::AtomicBool>,
+    fatal: Arc<FatalDispatch>,
+) {
+    while !shutdown.load(Ordering::Acquire) {
+        match rx.recv() {
+            Ok(Job::Owned(f)) => {
+                guard_or_fatal(&fatal, FatalSite::PoolWorker, f);
+                tracker.complete();
+            }
+            Ok(Job::Borrowed(b)) => {
+                // SAFETY: see BorrowedJob — caller's barrier() pairs with
+                // this invocation to ensure exclusive access.
+                guard_or_fatal(&fatal, FatalSite::PoolWorker, || unsafe {
+                    (*b.0)();
+                });
+                tracker.complete();
+            }
+            Err(_) => break,
+        }
+    }
 }
 
 impl Pool {
@@ -169,25 +217,7 @@ impl Pool {
                 .name(name)
                 .spawn(move || {
                     attrs.apply_to_self(i);
-                    while !shutdown.load(Ordering::Acquire) {
-                        match rx.recv() {
-                            Ok(Job::Owned(f)) => {
-                                guard_or_fatal(&fatal, FatalSite::PoolWorker, f);
-                                tracker.complete();
-                            }
-                            Ok(Job::Borrowed(b)) => {
-                                // SAFETY: see BorrowedJob — caller's
-                                // barrier() pairs with this invocation
-                                // to ensure exclusive access.
-                                #[allow(unsafe_code)]
-                                guard_or_fatal(&fatal, FatalSite::PoolWorker, || unsafe {
-                                    (*b.0)();
-                                });
-                                tracker.complete();
-                            }
-                            Err(_) => break,
-                        }
-                    }
+                    run_worker(rx, tracker, shutdown, fatal);
                 })
                 .map_err(|e| ExecutorError::Builder(format!("spawn worker: {e}")))?;
             handles.push(h);
@@ -255,6 +285,7 @@ impl Pool {
     /// See [`BorrowedJob::new`] — caller must hold exclusive access to the
     /// closure between submissions and pair every submit with `barrier()`
     /// before the closure could be touched again.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[track_caller]
     #[allow(unsafe_code)]
     pub(crate) unsafe fn submit_borrowed(&self, job: BorrowedJob) {
@@ -268,6 +299,9 @@ impl Pool {
                 self.tracker.complete();
             }
             PoolMode::Threaded { tx, .. } => {
+                // fail-fast: pool channel only closes in Pool::drop, which
+                // cannot run concurrently with dispatch
+                #[allow(clippy::expect_used)]
                 tx.send(Job::Borrowed(job)).expect("pool channel closed");
             }
         }

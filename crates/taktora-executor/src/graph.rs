@@ -344,6 +344,7 @@ unsafe impl Send for SendGraphPtr {}
 unsafe impl Sync for SendGraphPtr {}
 
 impl Graph {
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn finalise_skipped(&self, i: usize) {
         if self.pending.fetch_sub(1, Ordering::AcqRel) == 1 {
             self.notify_done();
@@ -354,6 +355,7 @@ impl Graph {
         }
     }
 
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn cancel_subtree(&self, root: usize) {
         // Iterative DFS using a small stack on the heap. The stack is
         // bounded by the number of vertices and used only on the stop
@@ -377,7 +379,11 @@ impl Graph {
         }
     }
 
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn notify_done(&self) {
+        // fail-fast: poison is unreachable — a holder panic aborts the process
+        // before any other thread observes the lock (ADR_0065)
+        #[allow(clippy::unwrap_used)]
         let _g = self.done_cv.0.lock().unwrap();
         self.done_cv.1.notify_all();
     }
@@ -393,6 +399,7 @@ impl Graph {
     /// All captures are `Arc::clone`s (refcount-only at build time)
     /// and `Copy` primitives; no per-iteration allocation occurs in
     /// the resulting closures. Required for `REQ_0060`.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
     pub(crate) fn prepare_dispatch(
         self: &mut Box<Self>,
@@ -466,6 +473,10 @@ impl Graph {
                     Err(_) => g.stop_flag.store(true, Ordering::Release),
                 }
                 if let Err(e) = res {
+                    // fail-fast: poison is unreachable — a holder panic aborts
+                    // the process before any other thread observes the lock
+                    // (ADR_0065)
+                    #[allow(clippy::unwrap_used)]
                     let mut fe = g.first_err.lock().unwrap();
                     if fe.is_none() {
                         *fe = Some(e);
@@ -480,10 +491,10 @@ impl Graph {
                 } else {
                     for &j in &g.successors[i] {
                         if g.counters[j].fetch_sub(1, Ordering::AcqRel) == 1 {
-                            // Ring is sized to `next_power_of_two(n)` so
-                            // every vertex becoming ready exactly once
-                            // fits. If this fires the graph's
-                            // accounting is broken.
+                            // fail-fast: ring is sized to next_power_of_two(n_vertices);
+                            // each vertex becomes ready at most once per run, so overflow
+                            // means broken in-degree accounting
+                            #[allow(clippy::expect_used)]
                             g.ready_ring
                                 .push(j)
                                 .expect("ready_ring sized to n_vertices");
@@ -502,6 +513,7 @@ impl Graph {
     /// in the steady state — runtime state was pre-allocated by
     /// `Graph::finish` and per-vertex closures by `prepare_dispatch`.
     /// Required by `REQ_0060`.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(unsafe_code)]
     pub(crate) fn run_once_borrowed(&mut self, pool: &Pool) -> GraphRunOutcome {
         let n = self.items.len();
@@ -513,7 +525,12 @@ impl Graph {
         self.pending.store(n, Ordering::Relaxed);
         self.stop_flag.store(false, Ordering::Relaxed);
         self.stop_chain_seen.store(false, Ordering::Relaxed);
-        *self.first_err.lock().unwrap() = None;
+        // fail-fast: poison is unreachable — a holder panic aborts the process
+        // before any other thread observes the lock (ADR_0065)
+        #[allow(clippy::unwrap_used)]
+        {
+            *self.first_err.lock().unwrap() = None;
+        }
         self.ready_ring.reset();
 
         // Seed: dispatch every initially-ready vertex (those whose
@@ -539,11 +556,17 @@ impl Graph {
             if self.pending.load(Ordering::Acquire) == 0 {
                 break;
             }
+            // fail-fast: poison is unreachable — a holder panic aborts the
+            // process before any other thread observes the lock (ADR_0065)
+            #[allow(clippy::unwrap_used)]
             let guard = self.done_cv.0.lock().unwrap();
             if self.pending.load(Ordering::Acquire) == 0 {
                 drop(guard);
                 break;
             }
+            // fail-fast: condvar poison is unreachable under the abort
+            // boundary (ADR_0065)
+            #[allow(clippy::unwrap_used)]
             drop(
                 self.done_cv
                     .1
@@ -555,6 +578,9 @@ impl Graph {
         // Final drain.
         while self.ready_ring.pop().is_some() {}
 
+        // fail-fast: poison is unreachable — a holder panic aborts the process
+        // before any other thread observes the lock (ADR_0065)
+        #[allow(clippy::unwrap_used)]
         let mut first_err = self.first_err.lock().unwrap();
         GraphRunOutcome {
             error: first_err.take(),
@@ -564,6 +590,7 @@ impl Graph {
 
     /// Submit vertex `i`'s pre-built closure to the pool. Allocation-free
     /// (uses `Pool::submit_borrowed`).
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(unsafe_code)]
     fn dispatch_vertex(&mut self, pool: &Pool, i: usize) {
         let job_ptr: *mut (dyn FnMut() + Send) =
