@@ -1413,21 +1413,28 @@ impl DispatchPass<'_, '_, '_> {
                 (ap, Some(ap.abs_diff(period_ns)))
             });
 
-        // lateness vs the nominal grid anchored on exec start (REQ_0106).
-        // TODO(Task 8): refine grid origin if lateness test needs it.
-        // SAFETY: exec_start_ptr derefs the Executor owning this dispatch_loop.
-        let exec_start = *unsafe { &*self.exec_start_ptr }.get_or_init(Instant::now);
-        let lateness = if period_ns > 0 {
+        // SAFETY: cycle_stats is index-aligned with tasks; single-writer.
+        let stats = unsafe { &mut (&mut *self.cycle_stats_ptr)[task_idx] };
+
+        // Deadline lateness (REQ_0106): signed offset of the actual start
+        // (`pre`) from the nominal grid point this cycle was due — grid point
+        // n = exec_start + n*period, where n is the index this cycle receives.
+        // Positive => started late; negative => early. Captures steady drift
+        // (jitter is blind to a constant offset; lateness is not).
+        let lateness = if period_ns > 0 && !faulted {
+            // SAFETY: exec_start_ptr derefs the Executor owning this dispatch_loop.
+            let exec_start = *unsafe { &*self.exec_start_ptr }.get_or_init(Instant::now);
+            let idx = stats.cycles_recorded(); // index this cycle will get
             let elapsed_ns =
                 i64::try_from(pre.duration_since(exec_start).as_nanos()).unwrap_or(i64::MAX);
-            Some(elapsed_ns % i64::try_from(period_ns).unwrap_or(i64::MAX))
+            let expected_ns =
+                i64::try_from(u128::from(idx) * u128::from(period_ns)).unwrap_or(i64::MAX);
+            Some(elapsed_ns.saturating_sub(expected_ns))
         } else {
             None
         };
 
-        // SAFETY: cycle_stats is index-aligned with tasks; single-writer.
-        let stats = unsafe { &mut (&mut *self.cycle_stats_ptr)[task_idx] };
-        let cycle_index = stats.record_cycle(took, jitter, lateness.filter(|_| !faulted));
+        let cycle_index = stats.record_cycle(took, jitter, lateness);
 
         let obs = CycleObservation {
             cycle_index,
