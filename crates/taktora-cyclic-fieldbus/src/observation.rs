@@ -18,7 +18,9 @@ pub enum CycleOutcome {
 /// nanoseconds and `None` on a cycle that produced no valid value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CycleObservation {
-    /// Monotonic cycle counter; equals the executor scan count (`REQ_0107`).
+    /// Monotonic cycle counter (zero-indexed, increments on every exchange
+    /// attempt including faults). See `REQ_0107` for the cross-layer
+    /// equality invariant with the executor scan count.
     pub cycle_index: u64,
     /// Wire-round duration (ns); `None` on a hard fault.
     pub wire_round_ns: Option<u32>,
@@ -87,6 +89,19 @@ mod tests {
             all_devices_fresh: false,
             wc_ok: true,
             stale_device_count: 1,
+        };
+        assert_eq!(obs.outcome(), CycleOutcome::Degraded);
+    }
+
+    #[test]
+    fn degraded_classified_when_round_present_but_wc_mismatch() {
+        let obs = CycleObservation {
+            cycle_index: 2,
+            wire_round_ns: Some(1000),
+            phase_wait_ns: Some(500),
+            all_devices_fresh: true,
+            wc_ok: false,
+            stale_device_count: 0,
         };
         assert_eq!(obs.outcome(), CycleOutcome::Degraded);
     }

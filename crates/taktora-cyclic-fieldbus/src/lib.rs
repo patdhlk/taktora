@@ -3,7 +3,7 @@
 //! Cyclic process-data fieldbus seam for taktora motion: the `CyclicFieldbus`
 //! trait plus the per-cycle `Validity` and `CycleQuality` reported each
 //! exchange. Implemented by cyclic connectors (`EtherCAT`, later `CANopen`);
-//! consumed by the NC task. `no_std`, no dependencies.
+//! consumed by the NC task. `no_std`.
 
 mod observation;
 
