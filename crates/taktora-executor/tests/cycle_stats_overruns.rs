@@ -18,7 +18,13 @@ use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item
 #[test]
 #[allow(clippy::too_many_lines)] // multi-phase test: phase A/B/C must share state
 fn snapshot_overrun_count_agrees_with_api_and_increments_only_on_breach() {
-    // Shared flag: 0 = fast (~1ms body), 1 = slow (~15ms body, exceeds 5ms budget).
+    // Shared flag: 0 = fast (no-op body, far under budget), 1 = slow (150ms
+    // body, well over the 100ms budget). The margins are deliberately huge:
+    // overrun is computed from the *measured* execute duration, so a tight
+    // budget would false-positive when a shared/loaded CI runner preempts an
+    // otherwise-fast body past the budget (observed on macOS CI). A no-op body
+    // vs a 100ms budget cannot breach without ~100ms of continuous preemption;
+    // a 150ms sleep always breaches (sleep is a floor).
     let slow = Arc::new(AtomicU64::new(0));
     let slow_for_item = Arc::clone(&slow);
 
@@ -28,27 +34,27 @@ fn snapshot_overrun_count_agrees_with_api_and_increments_only_on_breach() {
         .build()
         .expect("build executor");
 
-    // Budget = 5 ms.  A ~1 ms body is within budget; a ~15 ms body exceeds it.
+    // Budget = 100 ms. A no-op body is far within budget; a 150 ms body exceeds it.
     let task_id = exec
         .add(item_with_triggers(
             |d| -> Result<(), ExecutorError> {
                 d.interval(Duration::from_millis(5));
-                d.budget(Duration::from_millis(5));
+                d.budget(Duration::from_millis(100));
                 Ok(())
             },
             move |_ctx| -> ExecuteResult {
-                if slow_for_item.load(Ordering::Relaxed) == 0 {
-                    std::thread::sleep(Duration::from_millis(1));
-                } else {
-                    std::thread::sleep(Duration::from_millis(15));
+                if slow_for_item.load(Ordering::Relaxed) != 0 {
+                    // Breach: 150 ms > 100 ms budget (guaranteed by the sleep floor).
+                    std::thread::sleep(Duration::from_millis(150));
                 }
+                // Fast path: no sleep — execute returns in ~µs, far under budget.
                 Ok(ControlFlow::Continue)
             },
         ))
         .expect("add task");
 
     // --- Phase A: within-budget cycles; overrun_count must stay 0 ---
-    // run_n(8): 8 cycles × ~1ms body on a 5ms interval — well within budget.
+    // run_n(8): 8 no-op-body cycles on a 5ms interval — far within the 100ms budget.
     slow.store(0, Ordering::SeqCst);
     exec.run_n(8).expect("phase A run_n");
 
@@ -70,7 +76,7 @@ fn snapshot_overrun_count_agrees_with_api_and_increments_only_on_breach() {
 
     // --- Phase B: breach #1 ---
     // Flip to slow body; run_n(1) to land exactly one breach.
-    // The first cycle with a ~15ms body exceeds the 5ms budget → overrun_count
+    // The first cycle with a 150ms body exceeds the 100ms budget → overrun_count
     // becomes 1 AND the task enters Faulted. Subsequent wakeups in the same
     // run_n call would be fault-routed (skipped), so run_n(1) is safe.
     slow.store(1, Ordering::SeqCst);
