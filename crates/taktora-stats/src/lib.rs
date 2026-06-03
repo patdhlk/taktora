@@ -24,10 +24,12 @@
 
 mod connector;
 mod cyclestats;
+mod execcycle;
 mod histogram;
 mod minmax;
 
 pub use connector::{ConnectorCycleSnapshot, ConnectorCycleStats};
 pub use cyclestats::CycleStatsCore;
+pub use execcycle::{ExecutorCycleSnapshot, ExecutorCycleStats};
 pub use histogram::{BUCKETS, RollingHistogram, bucket_index, bucket_lower};
 pub use minmax::MinMaxDeque;
