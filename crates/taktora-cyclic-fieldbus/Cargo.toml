@@ -13,6 +13,7 @@ categories   = { workspace = true }
 description  = "Cyclic process-data fieldbus seam (CyclicFieldbus trait) for taktora motion."
 
 [dependencies]
+taktora-stats = { workspace = true }
 
 [lints.rust]
 unsafe_code  = "deny"

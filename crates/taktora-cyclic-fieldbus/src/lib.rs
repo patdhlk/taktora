@@ -5,6 +5,10 @@
 //! exchange. Implemented by cyclic connectors (`EtherCAT`, later `CANopen`);
 //! consumed by the NC task. `no_std`, no dependencies.
 
+mod observation;
+
+pub use observation::{CycleObservation, CycleOutcome};
+
 /// Per-device freshness of an input slice this cycle (`REQ_0853`).
 ///
 /// Keyed per device (`EtherCAT` `SubDevice` / `CANopen` node) — the analogue
