@@ -22,10 +22,12 @@
 //! integration plans).
 #![cfg_attr(not(test), no_std)]
 
+mod connector;
 mod cyclestats;
 mod histogram;
 mod minmax;
 
+pub use connector::{ConnectorCycleSnapshot, ConnectorCycleStats};
 pub use cyclestats::CycleStatsCore;
 pub use histogram::{BUCKETS, RollingHistogram, bucket_index, bucket_lower};
 pub use minmax::MinMaxDeque;
