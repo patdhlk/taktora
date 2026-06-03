@@ -490,10 +490,18 @@ per-sample update path), and per-task aggregate slots allocated at
      ``StatsSnapshot``.
    * ``cycle.rs`` — ``CycleStats`` struct (wrapping the shared
      histogram + min/max deque + atomics) plus the
-     ``CycleObservation { task_id, period_ns, actual_period_ns,
-     jitter_ns, lateness_ns, took_ns }`` value type carried by
-     ``on_cycle_stats``. ``lateness_ns: i64`` is the signed deadline
-     lateness of :need:`REQ_0106`.
+     ``CycleObservation { cycle_index, task_id, period_ns,
+     actual_period_ns, jitter_ns, lateness_ns, took_ns }`` value type
+     carried by ``on_cycle_stats``. ``lateness_ns: i64`` is the signed
+     deadline lateness of :need:`REQ_0106`; ``cycle_index`` is the
+     monotonic per-task scan count and FEAT_0038 join key of
+     :need:`REQ_0107`.
+
+   The per-task aggregator (``ExecutorCycleStats``) lives in the
+   ``no_std`` ``taktora-stats`` crate, mirroring ``ConnectorCycleStats``
+   per :need:`ADR_0062`; the executor's ``stats`` module carries only the
+   std-side push/pull value types (``CycleObservation``,
+   ``StatsSnapshot``, ``TaskStatsEntry``).
 
    **In ``crates/taktora-executor/src/observer.rs``**
 
