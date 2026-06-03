@@ -6,6 +6,7 @@
 #![allow(clippy::redundant_pub_crate)]
 
 use crate::Channel;
+use crate::clock::{MonotonicClock, SystemClock};
 use crate::context::Stoppable;
 use crate::error::ExecutorError;
 use crate::fatal::{FatalDispatch, FatalHandler, FatalSite, guard_or_fatal, panic_payload_message};
@@ -50,8 +51,9 @@ pub(crate) type TaskCycleStats = ExecutorCycleStats<8, 256>;
 /// always the one captured at the same wakeup (`REQ_0107`).
 #[derive(Clone, Copy)]
 pub(crate) struct CyclePending {
-    /// Pre-dispatch instant for this wakeup (the cycle's `pre`).
-    pub(crate) pre: Instant,
+    /// Pre-dispatch timestamp for this wakeup (the cycle's `pre`), in
+    /// telemetry-clock nanoseconds (see [`MonotonicClock`]).
+    pub(crate) pre: u64,
     /// `true` when this wakeup's scan was fault-routed/skipped, so the
     /// post-barrier fold records it with `faulted=true`.
     pub(crate) faulted: bool,
@@ -111,7 +113,16 @@ pub(crate) struct TaskEntry {
     /// WaitSet-thread-only timestamp of this task's previous dispatch, for
     /// computing `actual_period` (`REQ_0101`). Not shared (no atomic) — only the
     /// single dispatch thread touches it. `None` before the first dispatch.
-    pub(crate) last_dispatch: Option<Instant>,
+    /// Telemetry-clock nanoseconds (see [`MonotonicClock`]).
+    pub(crate) last_dispatch: Option<u64>,
+
+    /// WaitSet-thread-only running grid-slot index for deadline lateness
+    /// (`REQ_0106`). Counts nominal periods elapsed since the grid epoch,
+    /// advancing one slot per cycle under steady drift and several at once
+    /// across a coalesced/missed wakeup — decoupled from `cycle_index` so a
+    /// transient hiccup re-anchors the grid instead of biasing it forever.
+    /// Starts at `0` (the first cycle is on its own grid point by definition).
+    pub(crate) grid_slot: u64,
 
     /// WaitSet-thread-only stash of the *current* wakeup's pending cycle —
     /// the pre-dispatch timestamp plus its `faulted` flag — carried across
@@ -179,6 +190,20 @@ pub struct Executor {
     /// executor-thread run-loop boundary; the pool holds a separate
     /// `Arc::clone` for its own worker / inline-submit boundaries.
     pub(crate) fatal_dispatch: Arc<FatalDispatch>,
+
+    /// Telemetry time source (`REQ_0101`/`REQ_0105`/`REQ_0106`). Read on the
+    /// worker (for `took`) and the `WaitSet` thread (for `pre`); defaults to
+    /// [`SystemClock`]. A test can substitute a [`MockClock`] via
+    /// [`ExecutorBuilder::clock`] for deterministic timing assertions. Affects
+    /// only telemetry — never scheduling or fault behaviour.
+    pub(crate) clock: Arc<dyn MonotonicClock>,
+
+    /// Lateness grid epoch in telemetry-clock nanoseconds (`REQ_0106`): the
+    /// `pre` of this executor's first recorded cyclic dispatch. Grid point `n`
+    /// is `grid_epoch + n * period`. Set once (lazily) on the `WaitSet` thread;
+    /// shared as an `Arc` so the dispatch loop and `record_cycle_for` see the
+    /// same `OnceLock`.
+    pub(crate) grid_epoch: Arc<OnceLock<u64>>,
 }
 
 // SAFETY: `IxListener<ipc::Service>` is `!Send` for the same Rc-based
@@ -314,6 +339,7 @@ impl Executor {
             item_ptr,
             fault_ctx,
             Arc::clone(&last_took_ns),
+            Arc::clone(&self.clock),
         );
 
         self.tasks.push(TaskEntry {
@@ -328,6 +354,7 @@ impl Executor {
             scan_period,
             last_took_ns: Arc::clone(&last_took_ns),
             last_dispatch: None,
+            grid_slot: 0,
             pending_cycle: None,
         });
         self.cycle_stats
@@ -639,6 +666,7 @@ impl Executor {
             scan_period,
             last_took_ns: Arc::clone(&last_took_ns),
             last_dispatch: None,
+            grid_slot: 0,
             pending_cycle: None,
         });
         self.cycle_stats
@@ -684,6 +712,7 @@ impl Executor {
             chain_ptr,
             fault_ctx,
             Arc::clone(&last_took_ns),
+            Arc::clone(&self.clock),
         );
         self.tasks[task_idx].job = Some(job);
         Ok(id)
@@ -728,6 +757,10 @@ pub struct ExecutorBuilder {
     /// Sliding-window size (samples) for cycle-stats aggregation
     /// (`REQ_0100`). `None` → resolved to `1024` in `build()`.
     stats_window: Option<u32>,
+    /// Telemetry time source. `None` → resolved to [`SystemClock`] in
+    /// `build()`. Override with a [`MockClock`](crate::MockClock) for
+    /// deterministic timing tests.
+    clock: Option<Arc<dyn MonotonicClock>>,
 }
 
 impl Default for ExecutorBuilder {
@@ -740,6 +773,7 @@ impl Default for ExecutorBuilder {
             iteration_budget: None,
             fatal_handler: None,
             stats_window: None,
+            clock: None,
         }
     }
 }
@@ -781,6 +815,19 @@ impl ExecutorBuilder {
     #[must_use]
     pub const fn stats_window(mut self, samples: u32) -> Self {
         self.stats_window = Some(samples);
+        self
+    }
+
+    /// Substitute the telemetry time source. Defaults to [`SystemClock`].
+    ///
+    /// Pass a [`MockClock`](crate::MockClock) clone to drive `took` / jitter /
+    /// lateness from scripted instants, making timing assertions exact and
+    /// independent of the host scheduler. The clock affects telemetry only —
+    /// scheduling, run-mode deadlines and fault detection always use the real
+    /// monotonic clock.
+    #[must_use]
+    pub fn clock(mut self, clock: Arc<dyn MonotonicClock>) -> Self {
+        self.clock = Some(clock);
         self
     }
 
@@ -893,6 +940,9 @@ impl ExecutorBuilder {
         let monitor: Arc<dyn ExecutionMonitor> =
             self.monitor.unwrap_or_else(|| Arc::new(NoopMonitor));
 
+        let clock: Arc<dyn MonotonicClock> =
+            self.clock.unwrap_or_else(|| Arc::new(SystemClock::new()));
+
         let exec = Executor {
             node,
             pool,
@@ -912,6 +962,8 @@ impl ExecutorBuilder {
             exec_fault_budget_ms: Arc::new(AtomicU32::new(0)),
             start_time: Arc::new(OnceLock::new()),
             fatal_dispatch,
+            clock,
+            grid_epoch: Arc::new(OnceLock::new()),
         };
 
         Ok(exec)
@@ -1126,6 +1178,11 @@ impl Executor {
             // cascade below to compute `since_ms` on task transitions
             // triggered by an executor-wide fault.
             let exec_start_ptr = &*self.start_time as *const OnceLock<Instant>;
+            // Telemetry clock + lateness grid epoch. Same lifetime/aliasing
+            // discipline as the pointers above: the Executor outlives the
+            // dispatch loop and the WaitSet callback is the sole reader.
+            let clock = &self.clock;
+            let grid_epoch_ptr = &*self.grid_epoch as *const OnceLock<u64>;
 
             // Wrap the per-iteration dispatch body in the framework panic
             // boundary. A panic escaping here is *infrastructure* (the WaitSet
@@ -1149,6 +1206,8 @@ impl Executor {
                         observer,
                         exec_fault_ptr,
                         exec_start_ptr,
+                        clock,
+                        grid_epoch_ptr,
                         stop_listener_ptr,
                         pool,
                         iter_err: &iter_err_inner,
@@ -1313,6 +1372,10 @@ struct DispatchPass<'a, 'g, 'w> {
     exec_fault_ptr: *const ExecutorFaultAtomic,
     /// Raw pointer to `Executor::start_time`.
     exec_start_ptr: *const OnceLock<Instant>,
+    /// Borrow of the executor's telemetry clock, read for each cycle's `pre`.
+    clock: &'a Arc<dyn MonotonicClock>,
+    /// Raw pointer to `Executor::grid_epoch` (lateness grid anchor, `REQ_0106`).
+    grid_epoch_ptr: *const OnceLock<u64>,
     /// Raw pointer to the internal stop listener.
     stop_listener_ptr: *const IxListener<ipc::Service>,
     /// Borrow of the executor thread pool.
@@ -1364,7 +1427,7 @@ impl DispatchPass<'_, '_, '_> {
                 // no heap.
                 if task.scan_period.is_some() {
                     task.pending_cycle = Some(CyclePending {
-                        pre: Instant::now(),
+                        pre: self.clock.now_nanos(),
                         faulted: true,
                     });
                 }
@@ -1379,7 +1442,7 @@ impl DispatchPass<'_, '_, '_> {
             // last wakeup and recovered this one records the normal path (the
             // whole CyclePending is overwritten, so the flag can't be stale).
             task.pending_cycle = Some(CyclePending {
-                pre: Instant::now(),
+                pre: self.clock.now_nanos(),
                 faulted: false,
             });
 
@@ -1422,7 +1485,7 @@ impl DispatchPass<'_, '_, '_> {
     /// unmeasured. Event-driven tasks (no `scan_period`) are skipped entirely
     /// (`REQ_0106`).
     #[allow(unsafe_code)]
-    fn record_cycle_for(&mut self, task_idx: usize, faulted: bool, pre: Instant) {
+    fn record_cycle_for(&mut self, task_idx: usize, faulted: bool, pre_ns: u64) {
         // SAFETY: single-writer WaitSet thread; same discipline as tasks_ptr.
         let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
         let Some(period) = task.scan_period else {
@@ -1441,33 +1504,51 @@ impl DispatchPass<'_, '_, '_> {
 
         // actual_period + jitter vs the previous dispatch (REQ_0101). Always
         // advance `last_dispatch` (even on a faulted attempt) so the next
-        // cycle's period is measured from this wakeup. On a faulted scan the
-        // jitter sample is suppressed (poison-safe: REQ_0107) — we don't fold a
-        // jitter measurement for a skipped scan — but `actual_period_ns` still
-        // reports the observed wakeup spacing.
-        let (actual_period_ns, jitter_raw) =
-            task.last_dispatch.replace(pre).map_or((0, None), |prev| {
-                let ap = u64::try_from(pre.duration_since(prev).as_nanos()).unwrap_or(u64::MAX);
-                (ap, Some(ap.abs_diff(period_ns)))
-            });
-        let jitter = if faulted { None } else { jitter_raw };
+        // cycle's period is measured from this wakeup. `actual_period` is
+        // `None` on the very first cycle (no previous timestamp); jitter is
+        // additionally suppressed on a faulted scan (poison-safe: REQ_0107).
+        let actual_period = task
+            .last_dispatch
+            .replace(pre_ns)
+            .map(|prev| pre_ns.saturating_sub(prev));
+        let jitter = if faulted {
+            None
+        } else {
+            actual_period.map(|ap| ap.abs_diff(period_ns))
+        };
+
+        // Advance the lateness grid slot (REQ_0106). The slot counts nominal
+        // periods elapsed and is decoupled from `cycle_index`: a steady
+        // sub-period slip rounds to exactly one slot per cycle, so drift
+        // accumulates; a coalesced/missed wakeup (the WaitSet was starved past
+        // one or more whole periods) advances several slots at once,
+        // re-anchoring the grid so a transient hiccup does not permanently bias
+        // every later cycle's lateness. First cycle (`actual_period == None`):
+        // the slot stays at its initial 0.
+        if let Some(ap) = actual_period {
+            // round(ap / period) = (ap + period/2) / period, via checked_div so
+            // a degenerate period_ns == 0 simply contributes no slot advance.
+            if let Some(slots) = ap.saturating_add(period_ns / 2).checked_div(period_ns) {
+                task.grid_slot = task.grid_slot.saturating_add(slots.max(1));
+            }
+        }
+        let grid_slot = task.grid_slot;
 
         // SAFETY: cycle_stats is index-aligned with tasks; single-writer.
         let stats = unsafe { &mut (&mut *self.cycle_stats_ptr)[task_idx] };
 
         // Deadline lateness (REQ_0106): signed offset of the actual start
-        // (`pre`) from the nominal grid point this cycle was due — grid point
-        // n = exec_start + n*period, where n is the index this cycle receives.
-        // Positive => started late; negative => early. Captures steady drift
-        // (jitter is blind to a constant offset; lateness is not).
+        // (`pre_ns`) from its nominal grid point `grid_epoch + grid_slot*period`,
+        // where `grid_epoch` is this task set's first recorded `pre`. Positive
+        // => started late; negative => early. Captures steady drift (jitter is
+        // blind to a constant offset; lateness is not) while self-healing across
+        // discrete missed wakeups via the grid-slot re-anchoring above.
         let lateness = if period_ns > 0 && !faulted {
-            // SAFETY: exec_start_ptr derefs the Executor owning this dispatch_loop.
-            let exec_start = *unsafe { &*self.exec_start_ptr }.get_or_init(Instant::now);
-            let idx = stats.cycles_recorded(); // index this cycle will get
-            let elapsed_ns =
-                i64::try_from(pre.duration_since(exec_start).as_nanos()).unwrap_or(i64::MAX);
+            // SAFETY: grid_epoch_ptr derefs the Executor owning this dispatch_loop.
+            let grid_epoch = *unsafe { &*self.grid_epoch_ptr }.get_or_init(|| pre_ns);
+            let elapsed_ns = i64::try_from(pre_ns.saturating_sub(grid_epoch)).unwrap_or(i64::MAX);
             let expected_ns =
-                i64::try_from(u128::from(idx) * u128::from(period_ns)).unwrap_or(i64::MAX);
+                i64::try_from(u128::from(grid_slot) * u128::from(period_ns)).unwrap_or(i64::MAX);
             Some(elapsed_ns.saturating_sub(expected_ns))
         } else {
             None
@@ -1478,11 +1559,12 @@ impl DispatchPass<'_, '_, '_> {
         let obs = CycleObservation {
             cycle_index,
             task_id: task.id.clone(),
+            faulted,
             period_ns,
-            actual_period_ns,
-            jitter_ns: jitter.unwrap_or(0),
-            lateness_ns: lateness.unwrap_or(0),
-            took_ns: took.unwrap_or(0),
+            actual_period_ns: actual_period,
+            jitter_ns: jitter,
+            lateness_ns: lateness,
+            took_ns: took,
         };
         self.observer.on_cycle_stats(&obs);
     }
@@ -1729,6 +1811,7 @@ fn build_single_job(
     item_ptr: SendItemPtr,
     fault_ctx: FaultDispatchCtx,
     last_took_ns: Arc<AtomicU64>,
+    clock: Arc<dyn MonotonicClock>,
 ) -> Box<dyn FnMut() + Send + 'static> {
     Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
@@ -1737,6 +1820,10 @@ fn build_single_job(
         }
         let raw = item_ptr.get();
         let started = std::time::Instant::now();
+        // Telemetry `took` is measured on the injected clock (REQ_0105) so a
+        // MockClock can make it exact; the real `started`/`took` below stay on
+        // the system clock for the monitor and fault-budget paths.
+        let tele_t0 = clock.now_nanos();
         mon.pre_execute(id.clone(), started);
         // SAFETY: barrier() pairs with this invocation; the WaitSet
         // thread does not touch the item between `submit_borrowed` and
@@ -1747,10 +1834,7 @@ fn build_single_job(
         // Release pairs with the WaitSet-thread Acquire (swap) in
         // `record_cycle_for` (M2). `pool.barrier()` also fences, but the
         // explicit pairing documents intent and is robust on weak-memory archs.
-        last_took_ns.store(
-            u64::try_from(took.as_nanos()).unwrap_or(u64::MAX),
-            Ordering::Release,
-        );
+        last_took_ns.store(clock.now_nanos().saturating_sub(tele_t0), Ordering::Release);
         mon.post_execute(id.clone(), started, took, res.is_ok());
         if let Err(ref e) = res {
             obs.on_app_error(id.clone(), e.as_ref());
@@ -1826,13 +1910,16 @@ fn build_chain_job(
     chain_ptr: SendChainPtr,
     fault_ctx: FaultDispatchCtx,
     last_took_ns: Arc<AtomicU64>,
+    clock: Arc<dyn MonotonicClock>,
 ) -> Box<dyn FnMut() + Send + 'static> {
     Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
-        // Overall chain scan timer — the chain's `took` is the wall time
-        // from the first item's pre-execute to the last item's completion
-        // (or early break), mirroring the single-item `took` notion.
-        let chain_started = std::time::Instant::now();
+        // Overall chain scan timer — the chain's `took` is the elapsed
+        // telemetry-clock time from the first item's pre-execute to the last
+        // item's completion (or early break), mirroring the single-item `took`
+        // notion (REQ_0105). Per-item monitor timing uses each item's own
+        // real-clock `started` below.
+        let chain_tele_t0 = clock.now_nanos();
         // SAFETY: barrier() pairs with this invocation; the chain Vec
         // and the items it owns are not touched by the WaitSet thread
         // until barrier() returns. See SendChainPtr safety doc.
@@ -1871,11 +1958,10 @@ fn build_chain_job(
                 }
             }
         }
-        let chain_took = chain_started.elapsed();
         // Release pairs with the WaitSet-thread Acquire (swap) in
         // `record_cycle_for` (M2). See the Single-job store for the rationale.
         last_took_ns.store(
-            u64::try_from(chain_took.as_nanos()).unwrap_or(u64::MAX),
+            clock.now_nanos().saturating_sub(chain_tele_t0),
             Ordering::Release,
         );
     })
@@ -2104,6 +2190,7 @@ impl ExecutorGraphBuilder<'_> {
             // completeness; nothing reads it yet (Task 6).
             last_took_ns: Arc::new(AtomicU64::new(u64::MAX)),
             last_dispatch: None,
+            grid_slot: 0,
             pending_cycle: None,
         });
         self.executor

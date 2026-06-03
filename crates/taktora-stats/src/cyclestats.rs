@@ -75,7 +75,7 @@ impl<const S: usize, const W: usize> CycleStatsCore<S, W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bucket_lower;
+    use crate::bucket_midpoint;
 
     #[test]
     fn records_into_both_histogram_and_exact_minmax() {
@@ -86,7 +86,7 @@ mod tests {
         }
         // Percentiles are octave-bucket lower edges (quantised).
         // 1000 -> bucket 9 (lower edge 512); the median sample is 1000.
-        assert_eq!(c.p50(), bucket_lower(9));
+        assert_eq!(c.p50(), bucket_midpoint(9));
         // Exact min/max retain the actual extreme samples, not bucket edges.
         assert_eq!(c.min(), Some(256));
         assert_eq!(c.max(), Some(4000));

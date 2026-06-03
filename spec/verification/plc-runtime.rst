@@ -139,24 +139,37 @@ Test cases verifying the scan-cycle observability sub-feature
    :status: implemented
    :verifies: REQ_0101
 
-   **Goal.** A synthetic period violation produces the correct
-   max-jitter readout.
+   **Goal.** A period violation produces the exact max-jitter readout.
 
-   **Fixture.** Executor with one cyclic task at 10 ms scan period.
-   The task body sleeps for a configurable extra delay on selected
-   cycles to induce period jitter.
+   **Fixture.** Executor with one cyclic task whose telemetry clock is an
+   injected ``MockClock`` (``ExecutorBuilder::clock``). The task body
+   advances the mock clock to *simulate* each cycle's spacing, so the
+   measured period — and therefore jitter — is independent of the host
+   scheduler. The real interval only paces wakeups; no wall-clock timing
+   enters the assertion.
 
    **Steps.**
 
-   1. Build executor, register cyclic task with 10 ms period.
-   2. Run 100 cycles where the task adds a 3 ms delay on every
-      10th cycle.
+   1. Build executor with a ``MockClock``; register a cyclic task whose
+      nominal period equals the body's baseline advance (jitter 0).
+   2. Run 60 cycles where every 5th cycle advances the mock clock by an
+      extra ``DELTA`` (5 ms), inducing an exact period overshoot.
    3. Query ``Executor::stats_snapshot``; read
       ``per_task[0].max_jitter_ns``.
-   4. Assert ``max_jitter_ns ≥ 3 ms - timer-resolution-margin`` and
-      ``max_jitter_ns ≤ 3 ms + timer-resolution-margin``.
+   4. Assert ``max_jitter_ns == DELTA`` exactly (equality, no tolerance
+      band).
 
-   **Expected outcome.** Max jitter falls within the expected band.
+   **Expected outcome.** Max jitter equals the injected overshoot to the
+   nanosecond.
+
+   **Rationale for the mock clock.** Deriving jitter from a real
+   ``Instant`` made the figure scheduler-dependent (a loaded CI runner
+   inflated it to ~69 ms), forcing loose bounds that tested the runner
+   rather than :need:`REQ_0101`. Scripting the telemetry clock removes the
+   scheduler from the measurement and turns the band into an equality.
+   The default ``SystemClock`` path is covered separately by the
+   real-clock smoke test in
+   ``crates/taktora-executor/tests/cycle_stats_real_clock_smoke.rs``.
 
    Lives under
    ``crates/taktora-executor/tests/cycle_stats_max_jitter.rs``.
@@ -254,23 +267,29 @@ Test cases verifying the scan-cycle observability sub-feature
    **Goal.** The ``stats_snapshot`` ``min_ns``/``max_ns`` retain the
    exact observed execute-duration extremes, not bucket centroids.
 
-   **Fixture.** Executor (``worker_threads(0)``) with one cyclic task at
-   3 ms scan period. The task body sleeps for ~1 ms normally and ~20 ms
-   on exactly one cycle.
+   **Fixture.** Executor (``worker_threads(0)``) with one cyclic task
+   whose telemetry clock is an injected ``MockClock``. Each cycle's
+   ``took`` is the mock-clock delta across the body, so a body that
+   advances the clock by a fixed amount yields a ``took`` of exactly that
+   amount. The body advances by ``BASE`` (1 ms) normally and ``SPIKE``
+   (20 ms) on exactly one cycle.
 
    **Steps.**
 
-   1. Build executor; register the cyclic task with a 3 ms period.
-   2. Run 20 cycles, injecting the single ~20 ms spike on one cycle.
+   1. Build executor with a ``MockClock``; register the cyclic task.
+   2. Run 20 cycles, injecting the single ``SPIKE`` advance on one cycle.
    3. Read ``stats_snapshot().per_task[0]``.
-   4. Assert ``max_ns`` ∈ [18 ms, 30 ms] — the exact 20 ms spike, well
-      above the ~16.77 ms octave-bucket lower edge reported by
-      ``p99_ns``, proving exact retention rather than bucket
-      quantisation.
-   5. Assert ``min_ns`` is small (< 5 ms) and ``min_ns < max_ns``.
+   4. Assert ``max_ns == SPIKE`` and ``min_ns == BASE`` exactly. Equality
+      at nanosecond precision can only arise from retaining the raw
+      sample — an octave-bucket centroid (cf. ``p99_ns``) would land
+      materially below ``SPIKE`` at this scale.
+   5. Assert ``min_ns < max_ns`` (distinct extremes).
 
-   **Expected outcome.** The exact extremes are retained, distinct from
-   the bucket-quantised percentiles.
+   **Expected outcome.** The exact extremes are retained to the
+   nanosecond, distinct from the bucket-quantised percentiles. The earlier
+   real-sleep version could only bound ``max_ns`` ∈ [18 ms, 30 ms]
+   because a shared CI runner stretched the 20 ms sleep to ~87 ms; the
+   mock clock makes the assertion an equality.
 
    Lives under
    ``crates/taktora-executor/tests/cycle_stats_minmax.rs``.
@@ -280,26 +299,40 @@ Test cases verifying the scan-cycle observability sub-feature
    :status: implemented
    :verifies: REQ_0106
 
-   **Goal.** ``max_lateness_ns`` reflects the accumulating signed offset
-   from the nominal grid, exceeding one period — the grid-anchored model
-   of :need:`REQ_0106`, not a phase-within-period readout.
+   **Goal.** The grid-anchored lateness model of :need:`REQ_0106` exhibits
+   both required properties: (1) it **accumulates** a steady signed offset
+   past one period (not a phase-within-period readout), and (2) it
+   **self-heals** across a coalesced/missed wakeup instead of leaving a
+   permanent per-cycle bias.
 
-   **Fixture.** Executor (``worker_threads(0)``) with one cyclic task at
-   5 ms scan period. The task body sleeps ~7 ms every cycle (steady
-   drift).
+   **Fixture.** Executor (``worker_threads(0)``) with one cyclic task whose
+   telemetry clock is an injected ``MockClock``, driven from the task body.
 
-   **Steps.**
+   **Steps — accumulation.**
 
-   1. Build executor; register the cyclic task with a 5 ms period.
-   2. Run 40 cycles.
+   1. Every body advances the clock by ``PERIOD + DRIFT`` where
+      ``DRIFT < PERIOD/2`` (10 ms period, 2 ms slip), so each cycle rounds
+      to one grid slot and starts ``n * DRIFT`` past its grid point.
+   2. Run ``N`` = 40 cycles.
    3. Assert
-      ``stats_snapshot().per_task[0].max_lateness_ns >= 10 ms`` — far
-      exceeding the 5 ms period, which is impossible under a
-      phase-within-period model.
+      ``stats_snapshot().per_task[0].max_lateness_ns == (N - 1) * DRIFT``
+      exactly — far exceeding one period, impossible under a
+      phase-within-period model, pinned to the nanosecond.
 
-   **Expected outcome.** The accumulating deadline lateness is reported.
+   **Steps — self-healing.**
 
-   Lives under
+   1. Every body advances by exactly ``PERIOD`` except one cycle that
+      advances by ``2 * PERIOD`` (a coalesced/missed wakeup).
+   2. Run 25 cycles.
+   3. Assert ``max_lateness_ns == 0`` exactly — the grid-slot advance of
+      ``round(2 * PERIOD / PERIOD) = 2`` absorbs the skip, so every cycle
+      reads back on-grid. The pre-fix dispatch-count model would instead
+      leave a permanent ``PERIOD`` offset on every subsequent cycle.
+
+   **Expected outcome.** Steady drift accumulates exactly; a discrete
+   missed wakeup re-anchors the grid and leaves no residual lateness.
+
+   Both tests live under
    ``crates/taktora-executor/tests/cycle_stats_lateness.rs``.
 
 .. test:: Cycle index is monotonic across faulted scans

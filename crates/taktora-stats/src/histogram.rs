@@ -20,8 +20,8 @@ pub fn bucket_index(value_ns: u64) -> usize {
 
 /// Lower edge (inclusive) of bucket `i`, in nanoseconds: `2^i`.
 ///
-/// Bucket `0` covers `[0, 2)` and is reported as `1`. Used as the
-/// bucket-quantised percentile estimate.
+/// Bucket `0` covers `[0, 2)` and is reported as `1`. Used for range
+/// queries on the bucket boundary.
 ///
 /// # Panics
 ///
@@ -31,6 +31,34 @@ pub fn bucket_index(value_ns: u64) -> usize {
 #[must_use]
 pub const fn bucket_lower(i: usize) -> u64 {
     1u64 << i
+}
+
+/// Representative value of bucket `i` for percentile estimates: the
+/// **geometric** midpoint of the octave `[2^i, 2^(i+1))`, i.e. `2^i · √2`.
+///
+/// Geometric (not arithmetic) centring is what minimises the *relative*
+/// error across a logarithmic bucket. The estimate is within a factor of
+/// `√2` of any value the bucket can hold — at most `+41%` / `−29%`, i.e.
+/// [`PERCENTILE_MAX_REL_ERR_PCT`](crate::PERCENTILE_MAX_REL_ERR_PCT). The
+/// old lower-edge estimate (`2^i`) was instead biased *systematically low*
+/// by up to a full octave (a value just under `2^(i+1)` read back as
+/// `2^i`, `−50%`), which silently understated every reported percentile.
+///
+/// Exact extremes (`min`/`max`) are unaffected — they come from
+/// [`MinMaxDeque`](crate::MinMaxDeque), not the histogram, and remain the
+/// values to trust for any threshold/SLA decision.
+#[must_use]
+#[allow(clippy::cast_possible_truncation)] // explicit saturating guard below
+pub const fn bucket_midpoint(i: usize) -> u64 {
+    // 2^i · √2 ≈ (2^i · 92682) >> 16, since 92682 / 65536 = 1.41421…
+    // A u128 intermediate avoids overflow for large `i`; the `> u64::MAX`
+    // guard makes the `as u64` cast lossless (mid ≤ u64::MAX in that arm).
+    let mid = ((1u128 << i) * 92_682) >> 16;
+    if mid > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        mid as u64
+    }
 }
 
 /// Sliding-window percentile histogram over octave buckets.
@@ -106,11 +134,16 @@ impl<const B: usize, const S: usize> RollingHistogram<B, S> {
         total
     }
 
-    /// Percentile estimate, in nanoseconds, as the lower edge of the bucket
-    /// containing the requested rank. `permille` is the percentile times 10
-    /// (e.g. `500` = p50, `950` = p95, `990` = p99) and must be in
-    /// `1..=1000`; `0` degenerates to `bucket_lower(0)` regardless of the
-    /// data. Returns `0` if empty.
+    /// Percentile estimate, in nanoseconds, as the geometric midpoint
+    /// ([`bucket_midpoint`]) of the bucket containing the requested rank.
+    /// `permille` is the percentile times 10 (e.g. `500` = p50, `950` =
+    /// p95, `990` = p99) and must be in `1..=1000`; `0` degenerates to
+    /// `bucket_midpoint(0)` regardless of the data. Returns `0` if empty.
+    ///
+    /// The estimate carries up to
+    /// [`PERCENTILE_MAX_REL_ERR_PCT`](crate::PERCENTILE_MAX_REL_ERR_PCT)
+    /// relative error (octave bucketing); use exact `min`/`max` for any
+    /// threshold decision.
     #[must_use]
     pub fn percentile(&self, permille: u16) -> u64 {
         let total = self.count();
@@ -124,10 +157,10 @@ impl<const B: usize, const S: usize> RollingHistogram<B, S> {
                 cum += u64::from(self.seg[s][b]);
             }
             if cum >= target {
-                return bucket_lower(b);
+                return bucket_midpoint(b);
             }
         }
-        bucket_lower(B - 1)
+        bucket_midpoint(B - 1)
     }
 }
 
@@ -171,8 +204,8 @@ mod tests {
             h.record(1024);
         }
         assert_eq!(h.count(), 1000);
-        assert_eq!(h.percentile(500), bucket_lower(10)); // p50
-        assert_eq!(h.percentile(990), bucket_lower(10)); // p99
+        assert_eq!(h.percentile(500), bucket_midpoint(10)); // p50
+        assert_eq!(h.percentile(990), bucket_midpoint(10)); // p99
     }
 
     #[test]

@@ -19,6 +19,7 @@
 
 mod chain;
 mod channel;
+mod clock;
 mod condition;
 mod context;
 mod control_flow;
@@ -43,6 +44,7 @@ mod thread_attrs;
 mod trigger;
 
 pub use channel::{Channel, EVENT_SUFFIX, NotifyOutcome, Publisher, Subscriber};
+pub use clock::{MockClock, MonotonicClock, SystemClock};
 pub use condition::{Conditional, wrap_with_condition};
 pub use context::{Context, Stoppable};
 pub use control_flow::{ControlFlow, ExecuteResult};

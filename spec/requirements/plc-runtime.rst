@@ -517,6 +517,15 @@ Scan-cycle observability
    implemented; this requirement remains ``draft`` pending that precision
    refinement.
 
+   Update (2026-06-04): the percentile estimate now reports the **geometric
+   midpoint** of the containing octave (``2^i · √2``) rather than the bucket
+   lower edge. This removes the systematic downward bias (a value just under
+   ``2^(i+1)`` previously read back as ``2^i``, −50%) and bounds the relative
+   error symmetrically at ``taktora_stats::PERCENTILE_MAX_REL_ERR_PCT`` (≈
+   42%). The exact extremes of :need:`REQ_0105` (``min``/``max``) remain the
+   values to use for any threshold decision until the sub-octave refinement
+   lands.
+
 .. req:: Per-task maximum jitter
    :id: REQ_0101
    :status: implemented
@@ -553,12 +562,22 @@ Scan-cycle observability
      ``on_cycle_stats(&CycleObservation)`` callback (provided as a no-op
      default for backward compatibility) that fires once per scan cycle
      (including a faulted scan, see :need:`REQ_0107`) with the raw
-     per-cycle observation (``cycle_index``, ``task_id``, ``period_ns``,
-     ``actual_period_ns``, ``jitter_ns``, ``took_ns``). The
-     ``cycle_index`` is the monotonic scan count of :need:`REQ_0107`,
-     the join key by which a cyclic connector's telemetry (:need:`REQ_0265`)
-     composes with the executor's. The push path delivers raw samples,
-     not aggregates.
+     per-cycle observation (``cycle_index``, ``task_id``, ``faulted``,
+     ``period_ns``, ``actual_period_ns``, ``jitter_ns``, ``lateness_ns``,
+     ``took_ns``). The ``cycle_index`` is the monotonic scan count of
+     :need:`REQ_0107`, the join key by which a cyclic connector's telemetry
+     (:need:`REQ_0265`) composes with the executor's. The push path
+     delivers raw samples, not aggregates.
+
+     A faulted scan shall be **distinguishable** from a healthy one, the
+     cross-layer twin of the connector's ``CycleOutcome`` (:need:`REQ_0267`):
+     the observation shall carry a ``faulted`` flag, and every measured
+     quantity (``actual_period_ns``, ``jitter_ns``, ``lateness_ns``,
+     ``took_ns``) shall encode "not measured this cycle" as *absent*
+     (``Option::None``), never as a measured ``0`` — so a consumer joining
+     the executor and connector push streams on ``cycle_index`` sees a
+     consistent absent-on-fault signal from both layers rather than an
+     ambiguous zero.
    * **Pull** — ``Executor::stats_snapshot()`` shall return a borrowed
      view of the current per-task aggregates (``p50``, ``p95``, ``p99``,
      ``max_jitter_ns``, ``overrun_count``), readable concurrently with
@@ -626,6 +645,20 @@ Scan-cycle observability
    per-cycle ``lateness_ns`` is delivered on the push path of
    :need:`REQ_0103`. Event-driven (non-cyclic) tasks have no declared
    period and therefore report no lateness.
+
+   **Grid anchoring.** The nominal grid point for a cycle is
+   ``grid_epoch + grid_slot × period``, where ``grid_epoch`` is the task's
+   first dispatch and ``grid_slot`` advances each cycle by the *rounded
+   number of nominal periods elapsed since the previous dispatch*
+   (``round(actual_period / period)``, at least one), not by the raw
+   dispatch count. A steady sub-half-period slip rounds to one slot per
+   cycle, so lateness accumulates as intended; a coalesced or missed
+   wakeup (the dispatch thread starved past one or more whole periods)
+   advances several slots at once, re-anchoring the grid so the transient
+   does not leave a permanent per-cycle bias on every subsequent cycle.
+   This keeps the lateness grid independent of the :need:`REQ_0107`
+   ``cycle_index`` (which still increments by exactly one per scan
+   attempt).
 
 .. req:: Per-task scan index and faulted-scan emission
    :id: REQ_0107
