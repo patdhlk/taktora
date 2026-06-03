@@ -5,6 +5,11 @@
 //! faulted cycle (`None` sample) contributes no measurement to the
 //! aggregates, but still advances `cycle_index` (`REQ_0107`). Single-writer,
 //! allocation-free, `no_std`.
+//!
+//! Building blocks covered:
+//! * `BB_0050` — per-cycle executor duration histogram.
+//! * `BB_0051` — per-cycle jitter/lateness tracking.
+//! * `REQ_0107` — monotonically advancing `cycle_index` through faults.
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -86,6 +91,10 @@ impl<const S: usize, const W: usize> ExecutorCycleStats<S, W> {
     /// (`REQ_0107`). Returns the `cycle_index` assigned to this cycle.
     ///
     /// * `took_ns`     — measured cycle duration in nanoseconds (`BB_0050`).
+    ///   `u64` (not `u32`): an executor scan-cycle can exceed `u32::MAX` ns
+    ///   (~4.3 s) under a long-running or faulted scan, so the wider type is
+    ///   required here. The connector's wire-round duration is bounded well
+    ///   below that limit and therefore uses `u32`.
     /// * `jitter_ns`   — unsigned jitter magnitude in nanoseconds (`BB_0051`).
     /// * `lateness_ns` — signed deviation from deadline; magnitude is stored.
     pub fn record_cycle(
@@ -187,9 +196,30 @@ mod tests {
         let s = Stats::new(1000);
         let snap = s.snapshot();
         assert_eq!(snap.p50_ns, 0);
+        assert_eq!(snap.p95_ns, 0);
+        assert_eq!(snap.p99_ns, 0);
         assert_eq!(snap.min_ns, 0);
         assert_eq!(snap.max_ns, 0);
         assert_eq!(snap.max_jitter_ns, 0);
         assert_eq!(snap.max_lateness_ns, 0);
+    }
+
+    #[test]
+    fn partial_fault_updates_present_arms_only() {
+        let mut s = Stats::new(1000);
+        // Seed a good cycle so the duration atomics hold known values.
+        s.record_cycle(Some(5000), Some(1), Some(1));
+        let before = s.snapshot();
+        // Partial fault: took missing, jitter+lateness present.
+        let idx = s.record_cycle(None, Some(99), Some(-250));
+        assert_eq!(idx, 1);
+        let after = s.snapshot();
+        // Duration atomics unchanged (took was None).
+        assert_eq!(after.p50_ns, before.p50_ns);
+        assert_eq!(after.min_ns, before.min_ns);
+        assert_eq!(after.max_ns, before.max_ns);
+        // Jitter + lateness updated (their Some arms ran).
+        assert_eq!(after.max_jitter_ns, 99);
+        assert_eq!(after.max_lateness_ns, 250);
     }
 }
