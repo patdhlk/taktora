@@ -66,9 +66,14 @@ impl CyclicFieldbus for RefBus {
             (Some(1000u32), Some(500u32))
         };
 
+        // Derive the observation's stale_device_count once; all_fresh reuses it.
         let stale_count = u16::try_from(self.stale.iter().filter(|s| **s).count())
             .expect("device count fits u16");
         let all_fresh = stale_count == 0;
+        // Fixture simplification: a real fieldbus checks the working counter
+        // (wire-level participation) and per-device freshness independently.
+        // Here a stale device is also treated as a WC mismatch to keep the
+        // reference bus minimal; ConnectorCycleStats tracks the two separately.
         let wc_ok = !faulted && all_fresh;
 
         let idx =
@@ -126,6 +131,7 @@ fn happy_path_folds_and_pushes_each_cycle() {
     assert_eq!(snap.wire_round_min, 1000);
     assert_eq!(snap.phase_wait_min, 500);
     assert_eq!(snap.wc_mismatch_count, 0);
+    assert_eq!(snap.not_all_fresh_count, 0);
 }
 
 #[test]
@@ -174,4 +180,6 @@ fn degraded_cycle_counts_staleness() {
     assert_eq!(snap.per_device_max_stale, [1, 0]);
     // A degraded cycle still has a valid wire round (not poison-skipped).
     assert_eq!(snap.wire_round_min, 1000);
+    // Per the fixture's wc_ok simplification, a stale device also trips WC.
+    assert_eq!(snap.wc_mismatch_count, 1);
 }
