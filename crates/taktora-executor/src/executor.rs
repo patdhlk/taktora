@@ -1529,21 +1529,28 @@ impl core::fmt::Display for PanickedTask {
 
 impl std::error::Error for PanickedTask {}
 
+/// Extract a human-readable message from a panic payload.
+///
+/// Returns `Some(msg)` when the payload is a `&str` or `String`, and `None`
+/// for any other payload type.  Callers may supply their own fallback for the
+/// `None` case, which makes the helper reusable across different catch-unwind
+/// boundaries that may want different default messages.
+pub(crate) fn panic_payload_message(payload: &(dyn core::any::Any + Send)) -> Option<String> {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+}
+
 /// Execute `item` inside `catch_unwind`, converting any panic into an `Err`.
-#[allow(clippy::option_if_let_else)]
 fn run_item_catch_unwind(
     item: &mut dyn ExecutableItem,
     ctx: &mut crate::context::Context<'_>,
 ) -> crate::ExecuteResult {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| item.execute(ctx))).unwrap_or_else(
         |payload| {
-            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
-                (*s).to_string()
-            } else if let Some(s) = payload.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "panicked task".to_string()
-            };
+            let msg =
+                panic_payload_message(&*payload).unwrap_or_else(|| "panicked task".to_string());
             Err::<crate::ControlFlow, crate::ItemError>(Box::new(PanickedTask(msg)))
         },
     )
@@ -1910,5 +1917,33 @@ mod tests {
     fn executor_fault_state_starts_running() {
         let exec = Executor::builder().worker_threads(0).build().unwrap();
         assert_eq!(exec.executor_fault_state(), ExecutorFaultState::Running);
+    }
+
+    // --- panic_payload_message unit tests ---
+
+    #[test]
+    fn panic_payload_message_str_payload() {
+        let payload = std::panic::catch_unwind(|| panic!("static str msg")).unwrap_err();
+        assert_eq!(
+            panic_payload_message(&*payload),
+            Some("static str msg".to_string())
+        );
+    }
+
+    #[test]
+    fn panic_payload_message_string_payload() {
+        let msg = "owned string msg".to_string();
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| panic!("{}", msg)))
+            .unwrap_err();
+        assert_eq!(
+            panic_payload_message(&*payload),
+            Some("owned string msg".to_string())
+        );
+    }
+
+    #[test]
+    fn panic_payload_message_non_string_payload() {
+        let payload = std::panic::catch_unwind(|| std::panic::panic_any(42_u32)).unwrap_err();
+        assert_eq!(panic_payload_message(&*payload), None);
     }
 }
