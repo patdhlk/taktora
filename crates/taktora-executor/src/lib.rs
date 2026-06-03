@@ -36,6 +36,7 @@ mod ready_ring;
 mod runner;
 mod service;
 pub mod signal_slot;
+mod stats;
 mod task_id;
 mod task_kind;
 mod thread_attrs;
@@ -58,6 +59,7 @@ pub use runner::{Runner, RunnerFlags};
 pub use service::{
     ActiveRequest, Client, PendingRequest, REQ_EVENT_SUFFIX, RESP_EVENT_SUFFIX, Server, Service,
 };
+pub use stats::{CycleObservation, StatsSnapshot, TaskStatsEntry};
 pub use task_id::TaskId;
 pub use thread_attrs::ThreadAttributes;
 pub use trigger::{RawListener, TriggerDeclarer};
