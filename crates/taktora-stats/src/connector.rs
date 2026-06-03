@@ -154,7 +154,7 @@ impl<const N: usize, const S: usize, const W: usize> ConnectorCycleStats<N, S, W
             .zip(self.pub_per_device_max_stale.iter())
         {
             if stale {
-                *run += 1;
+                *run = run.saturating_add(1);
                 if *run > maxa.load(Ordering::Relaxed) {
                     maxa.store(*run, Ordering::Relaxed);
                 }
