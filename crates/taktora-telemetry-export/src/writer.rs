@@ -20,6 +20,10 @@ pub struct DrainSummary {
 
 /// Handle to a running drain thread. Call [`finish`](Self::finish) to stop it,
 /// flush the sink, and collect the [`DrainSummary`].
+///
+/// Always stop the writer via [`finish`](Self::finish). Dropping an
+/// `NdjsonWriter` without calling it leaves the drain thread running until the
+/// process exits (the stop flag is never set), leaking the thread and its sink.
 pub struct NdjsonWriter {
     handle: JoinHandle<io::Result<DrainSummary>>,
     stop: Arc<AtomicBool>,
@@ -28,6 +32,12 @@ pub struct NdjsonWriter {
 impl NdjsonWriter {
     /// Signal the drain thread to finish (after one final drain pass), join it,
     /// flush the sink, and return the summary.
+    ///
+    /// # Preconditions
+    ///
+    /// Stop the producer (drop or quiesce it) before calling `finish`. The
+    /// drain thread exits on the first `Empty` it observes after the stop flag
+    /// is set, so records pushed concurrently with `finish` may be lost.
     ///
     /// # Panics
     ///
