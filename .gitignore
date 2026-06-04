@@ -17,3 +17,7 @@
 /spec/.pharaoh/plans/
 /spec/.pharaoh/session.json
 /spec/.pharaoh/cache/
+
+# Generated jitter plots
+*.png
+xtask/preempt-rt/plots/*.png

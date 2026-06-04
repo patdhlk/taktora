@@ -562,12 +562,21 @@ Scan-cycle observability
      ``on_cycle_stats(&CycleObservation)`` callback (provided as a no-op
      default for backward compatibility) that fires once per scan cycle
      (including a faulted scan, see :need:`REQ_0107`) with the raw
-     per-cycle observation (``cycle_index``, ``task_id``, ``faulted``,
-     ``period_ns``, ``actual_period_ns``, ``jitter_ns``, ``lateness_ns``,
-     ``took_ns``). The ``cycle_index`` is the monotonic scan count of
-     :need:`REQ_0107`, the join key by which a cyclic connector's telemetry
-     (:need:`REQ_0265`) composes with the executor's. The push path
-     delivers raw samples, not aggregates.
+     per-cycle observation (``cycle_index``, ``task_id``, ``task_index``,
+     ``faulted``, ``period_ns``, ``pre_ns``, ``actual_period_ns``,
+     ``jitter_ns``, ``lateness_ns``, ``took_ns``). The ``cycle_index`` is
+     the monotonic scan count of :need:`REQ_0107`, the join key by which a
+     cyclic connector's telemetry (:need:`REQ_0265`) composes with the
+     executor's. The push path delivers raw samples, not aggregates.
+
+     The observation shall additionally carry ``task_index`` — the task's
+     stable zero-based registration index — as a flat ``u32`` identity/join
+     key (so a consumer need not hash the ``Arc<str>`` ``task_id`` on the hot
+     path) and ``pre_ns`` — the telemetry-clock nanosecond instant of
+     task-logic start (the canonical reference point of :need:`REQ_0101`).
+     ``pre_ns`` is the single time source for an exported sample's time axis;
+     a consumer shall not read a second clock. Both fields are always present
+     (never absent), including on a faulted scan.
 
      A faulted scan shall be **distinguishable** from a healthy one, the
      cross-layer twin of the connector's ``CycleOutcome`` (:need:`REQ_0267`):
@@ -721,10 +730,16 @@ PREEMPT_RT validation
    ``taktora-executor`` dispatch path under a configured load profile and
    emits per-cycle latency observations as NDJSON to stdout.
 
-   Each NDJSON record shall conform to the schema
-   ``{ ts_ns: u64, task_id: u32, period_ns: u64, actual_period_ns: u64,
-   jitter_ns: i64, took_ns: u64 }`` and shall be emitted once per
-   completed scan cycle.
+   Each NDJSON record shall be emitted once per scan cycle (including a
+   faulted scan, see :need:`REQ_0107`) and shall conform to the schema
+   ``{ cycle_index: u64, task_id: u32, faulted: bool, ts_ns: u64,
+   period_ns: u64, actual_period_ns: u64|null, jitter_ns: u64|null,
+   lateness_ns: i64|null, took_ns: u64|null }``. Consistent with the
+   absent-vs-zero contract of :need:`REQ_0103`, a measurement not taken this
+   cycle (first cycle, or any faulted scan) shall be encoded as JSON
+   ``null``, never as a measured ``0``. ``ts_ns`` is the task-logic-start
+   instant carried as ``pre_ns`` in :need:`REQ_0103`; ``task_id`` is the
+   ``task_index`` of :need:`REQ_0103`.
 
    The harness shall offer at least three selectable load profiles:
 
@@ -733,6 +748,12 @@ PREEMPT_RT validation
      non-isolated cores.
    * ``cyclictest-coexist`` — runs alongside ``cyclictest`` so the two
      measurements can be cross-checked.
+
+   *Implementation status.* The ``idle`` profile and the NDJSON export path
+   (the off-RT-thread overwrite-oldest telemetry ring and its drain) are
+   implemented in ``taktora-telemetry-export`` and the ``xtask/preempt-rt``
+   harness. The ``cpu-stress`` and ``cyclictest-coexist`` profiles remain a
+   tracked follow-up; this requirement stays ``draft`` until all three ship.
 
 .. req:: Documented reproducer procedure
    :id: REQ_0112

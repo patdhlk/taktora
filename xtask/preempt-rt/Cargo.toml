@@ -1,0 +1,25 @@
+[package]
+name         = "xtask-preempt-rt"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "PREEMPT_RT jitter bench harness (idle profile) for taktora-executor (REQ_0111)."
+publish      = false
+
+[[bin]]
+name = "preempt-rt-bench"
+path = "src/main.rs"
+
+[dependencies]
+taktora-executor          = { workspace = true }
+taktora-telemetry-export  = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

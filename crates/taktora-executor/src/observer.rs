@@ -113,8 +113,10 @@ mod cycle_stats_hook_tests {
         CycleObservation {
             cycle_index: 0,
             task_id: TaskId::from("t"),
+            task_index: 0,
             faulted: false,
             period_ns: 0,
+            pre_ns: 0,
             actual_period_ns: None,
             jitter_ns: None,
             lateness_ns: None,

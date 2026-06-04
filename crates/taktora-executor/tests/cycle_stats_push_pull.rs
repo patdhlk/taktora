@@ -1,6 +1,6 @@
 //! `TEST_0193` — push and pull stat paths agree (`REQ_0103`), with exact `took`
 //! via an injected [`MockClock`].
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use taktora_executor::{
@@ -14,6 +14,10 @@ struct Recorder {
     count: AtomicU64,
     last_index: Mutex<Option<u64>>,
     last_took: AtomicU64,
+    last_pre_ns: AtomicU64,
+    last_task_index: AtomicU64,
+    pre_ns_monotonic: AtomicBool,
+    prev_pre_ns: AtomicU64,
 }
 impl Observer for Recorder {
     fn on_cycle_stats(&self, o: &CycleObservation) {
@@ -23,6 +27,13 @@ impl Observer for Recorder {
         // defensively (a None would fail the exact assertion below).
         self.last_took
             .store(o.took_ns.unwrap_or(u64::MAX), Ordering::Relaxed);
+        self.last_task_index
+            .store(u64::from(o.task_index), Ordering::Relaxed);
+        let prev = self.prev_pre_ns.swap(o.pre_ns, Ordering::Relaxed);
+        if o.pre_ns < prev {
+            self.pre_ns_monotonic.store(false, Ordering::Relaxed);
+        }
+        self.last_pre_ns.store(o.pre_ns, Ordering::Relaxed);
     }
 }
 
@@ -30,7 +41,10 @@ impl Observer for Recorder {
 fn push_count_matches_cycles_and_pull_reflects_samples() {
     let clock = MockClock::new();
     let body_clock = clock.clone();
-    let rec = Arc::new(Recorder::default());
+    let rec = Arc::new(Recorder {
+        pre_ns_monotonic: AtomicBool::new(true),
+        ..Recorder::default()
+    });
     let mut exec = Executor::builder()
         .worker_threads(0)
         .observer(rec.clone())
@@ -72,5 +86,21 @@ fn push_count_matches_cycles_and_pull_reflects_samples() {
     assert_eq!(
         snap.per_task[0].max_ns, TOOK_NS,
         "pull max_ns must agree with the pushed took exactly"
+    );
+
+    // New push fields (REQ_0103 amendment): single task => index 0;
+    // pre_ns is the task-logic-start instant and advances monotonically.
+    assert_eq!(
+        rec.last_task_index.load(Ordering::Relaxed),
+        0,
+        "single registered task has task_index 0"
+    );
+    assert!(
+        rec.pre_ns_monotonic.load(Ordering::Relaxed),
+        "pre_ns must be monotonically non-decreasing across cycles"
+    );
+    assert!(
+        rec.last_pre_ns.load(Ordering::Relaxed) > 0,
+        "pre_ns must be populated (non-zero) after 20 cycles"
     );
 }
