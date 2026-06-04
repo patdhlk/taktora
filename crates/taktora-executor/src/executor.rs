@@ -1348,31 +1348,33 @@ impl Executor {
                     cb_result,
                     Ok(WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest)
                 );
-            if !stopping
-                && dispatch_mode == crate::DispatchMode::Grid
-                && !cyclic_task_indices.is_empty()
-            {
-                grid.take_due(self.cyclic_clock.now_nanos(), &mut due_cyclic);
-                if !due_cyclic.is_empty() {
-                    let mut cpass = DispatchPass {
-                        guards: &guards,
-                        attachment_to_task: &attachment_to_task,
-                        tasks_ptr,
-                        cycle_stats_ptr,
-                        observer,
-                        exec_fault_ptr,
-                        exec_start_ptr,
-                        clock,
-                        grid_epoch_ptr,
-                        stop_listener_ptr,
-                        pool,
-                        iter_err: &iter_err_inner,
-                    };
-                    for slot in &due_cyclic {
-                        cpass.dispatch_task(cyclic_task_indices[*slot]);
-                    }
-                    cpass.barrier_and_record();
-                }
+            if !stopping && dispatch_mode == crate::DispatchMode::Grid {
+                // Rebuild a fresh `DispatchPass` mirroring the callback pass
+                // exactly — same borrows and raw pointers, same single-writer
+                // WaitSet-thread discipline. The callback above is now dropped,
+                // freeing its borrows. The grid pass helper owns the empty/due
+                // guards and the SEPARATE barrier phase (REQ_0268 / ADR_0100).
+                let cpass = DispatchPass {
+                    guards: &guards,
+                    attachment_to_task: &attachment_to_task,
+                    tasks_ptr,
+                    cycle_stats_ptr,
+                    observer,
+                    exec_fault_ptr,
+                    exec_start_ptr,
+                    clock,
+                    grid_epoch_ptr,
+                    stop_listener_ptr,
+                    pool,
+                    iter_err: &iter_err_inner,
+                };
+                run_grid_cyclic_pass(
+                    cpass,
+                    &mut grid,
+                    self.cyclic_clock.now_nanos(),
+                    &cyclic_task_indices,
+                    &mut due_cyclic,
+                );
             }
 
             // Funnel the post-callback decision (interrupt / item error /
@@ -1449,6 +1451,42 @@ enum IterOutcome {
     Done,
     /// Terminate the loop with the given error.
     Failed(ExecutorError),
+}
+
+/// Post-wait absolute-grid pass (Grid mode only, `REQ_0268` / `ADR_0100`).
+///
+/// The `WaitSet` callback handles event/fd tasks; cyclic tasks are timed here
+/// off the scheduling clock. `pass` mirrors the callback's `DispatchPass`
+/// exactly — same borrows and raw pointers, same single-writer WaitSet-thread
+/// discipline — and the callback is already dropped (its borrows freed) by the
+/// time this runs. We poll `grid` for due cyclic slots, dispatch each due task,
+/// and fold their telemetry through the SHARED [`DispatchPass::barrier_and_record`]
+/// helper. This is a SEPARATE barrier phase from the callback's: each phase
+/// barriers and folds only its own `pending_cycle` stashes, so cyclic tasks
+/// record exactly once, identically to event tasks. We do NOT call
+/// `record_cycle_for` directly here.
+///
+/// Returns early (no dispatch, no record) when there are no cyclic tasks or
+/// nothing is due this wakeup. The stop-wake suppression (`REQ_0268`) is gated
+/// by the caller before this is invoked.
+fn run_grid_cyclic_pass(
+    mut pass: DispatchPass<'_, '_, '_>,
+    grid: &mut crate::grid::GridTimer,
+    now_nanos: u64,
+    cyclic_task_indices: &[usize],
+    due_cyclic: &mut Vec<usize>,
+) {
+    if cyclic_task_indices.is_empty() {
+        return;
+    }
+    grid.take_due(now_nanos, due_cyclic);
+    if due_cyclic.is_empty() {
+        return;
+    }
+    for slot in due_cyclic.iter() {
+        pass.dispatch_task(cyclic_task_indices[*slot]);
+    }
+    pass.barrier_and_record();
 }
 
 /// Attaches a single [`TriggerDecl`] to `waitset`, returning the resulting
