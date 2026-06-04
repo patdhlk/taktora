@@ -204,6 +204,18 @@ pub struct Executor {
     /// shared as an `Arc` so the dispatch loop and `record_cycle_for` see the
     /// same `OnceLock`.
     pub(crate) grid_epoch: Arc<OnceLock<u64>>,
+
+    /// Cyclic dispatch timing strategy (`REQ_0268` / `ADR_0100`). Read once at
+    /// `dispatch_loop` entry and hoisted to a local, so steady-state cost is a
+    /// single `Copy`-enum compare per cycle. Defaults to
+    /// [`DispatchMode::Grid`](crate::DispatchMode).
+    pub(crate) dispatch_mode: crate::DispatchMode,
+
+    /// Scheduling time source for the absolute grid (`REQ_0268`). Distinct from
+    /// [`Executor::clock`] (telemetry): a telemetry mock can never alter
+    /// dispatch timing. Defaults to
+    /// [`MonotonicCyclicClock`](crate::MonotonicCyclicClock).
+    pub(crate) cyclic_clock: std::sync::Arc<dyn crate::CyclicClock>,
 }
 
 // SAFETY: `IxListener<ipc::Service>` is `!Send` for the same Rc-based
@@ -761,6 +773,12 @@ pub struct ExecutorBuilder {
     /// `build()`. Override with a [`MockClock`](crate::MockClock) for
     /// deterministic timing tests.
     clock: Option<Arc<dyn MonotonicClock>>,
+    /// Cyclic dispatch timing strategy (`REQ_0268`). Default
+    /// [`DispatchMode::Grid`](crate::DispatchMode).
+    dispatch_mode: crate::DispatchMode,
+    /// Scheduling clock for the absolute grid. `None` → resolved to
+    /// [`MonotonicCyclicClock`](crate::MonotonicCyclicClock) in `build()`.
+    cyclic_clock: Option<std::sync::Arc<dyn crate::CyclicClock>>,
 }
 
 impl Default for ExecutorBuilder {
@@ -774,6 +792,8 @@ impl Default for ExecutorBuilder {
             fatal_handler: None,
             stats_window: None,
             clock: None,
+            dispatch_mode: crate::DispatchMode::default(),
+            cyclic_clock: None,
         }
     }
 }
@@ -828,6 +848,22 @@ impl ExecutorBuilder {
     #[must_use]
     pub fn clock(mut self, clock: Arc<dyn MonotonicClock>) -> Self {
         self.clock = Some(clock);
+        self
+    }
+
+    /// Select cyclic dispatch timing (default `DispatchMode::Grid`). `Legacy` is
+    /// the pre-REQ_0268 `attach_interval` path, retained only until the Pi A/B.
+    #[must_use]
+    pub const fn dispatch_mode(mut self, mode: crate::DispatchMode) -> Self {
+        self.dispatch_mode = mode;
+        self
+    }
+
+    /// Override the scheduling clock (default `MonotonicCyclicClock`). Distinct
+    /// from `clock` (telemetry) — see `CyclicClock`.
+    #[must_use]
+    pub fn cyclic_clock(mut self, clock: std::sync::Arc<dyn crate::CyclicClock>) -> Self {
+        self.cyclic_clock = Some(clock);
         self
     }
 
@@ -943,6 +979,10 @@ impl ExecutorBuilder {
         let clock: Arc<dyn MonotonicClock> =
             self.clock.unwrap_or_else(|| Arc::new(SystemClock::new()));
 
+        let cyclic_clock: std::sync::Arc<dyn crate::CyclicClock> = self
+            .cyclic_clock
+            .unwrap_or_else(|| std::sync::Arc::new(crate::MonotonicCyclicClock::new()));
+
         let exec = Executor {
             node,
             pool,
@@ -964,6 +1004,8 @@ impl ExecutorBuilder {
             fatal_dispatch,
             clock,
             grid_epoch: Arc::new(OnceLock::new()),
+            dispatch_mode: self.dispatch_mode,
+            cyclic_clock,
         };
 
         Ok(exec)
@@ -1098,13 +1140,38 @@ impl Executor {
         // Maps guard index → task index.
         let mut attachment_to_task: Vec<usize> = Vec::new();
 
+        // Cyclic dispatch timing read ONCE here (REQ_0268). Hoisted to a local
+        // so the per-cycle cost is a single `Copy`-enum compare — never a field
+        // re-read. Named `dispatch_mode` to avoid shadowing the `mode:
+        // &mut RunMode` parameter.
+        let dispatch_mode = self.dispatch_mode;
+
+        // In Grid mode, `TriggerDecl::Interval` cyclic tasks are NOT attached to
+        // the WaitSet — the executor owns their timing via `GridTimer` and
+        // dispatches them in the post-wait pass below. These two parallel Vecs
+        // hold the cyclic task index and its period (ns), index-aligned.
+        let mut cyclic_task_indices: Vec<usize> = Vec::new();
+        let mut cyclic_periods: Vec<u64> = Vec::new();
         for (task_idx, task) in self.tasks.iter().enumerate() {
             for decl in &task.decls {
+                if dispatch_mode == crate::DispatchMode::Grid {
+                    if let TriggerDecl::Interval(d) = decl {
+                        cyclic_task_indices.push(task_idx);
+                        cyclic_periods.push(u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
+                        continue;
+                    }
+                }
                 let guard = attach_trigger_decl(&waitset, &mut listener_storage, decl)?;
                 guards.push(guard);
                 attachment_to_task.push(task_idx);
             }
         }
+        // Absolute grid over the scheduling clock (REQ_0268). Epoch sampled once
+        // here. Empty when no cyclic tasks (or Legacy mode) → `next_timeout`
+        // returns `Duration::MAX`, so an event-only executor blocks on fds
+        // exactly as before and the post-wait pass is skipped.
+        let mut grid = crate::grid::GridTimer::new(self.cyclic_clock.now_nanos(), cyclic_periods);
+        let mut due_cyclic: Vec<usize> = Vec::new();
 
         // Attach the internal stop listener so the WaitSet wakes when
         // stop() is called. We hold `self.stop_listener` (Arc) in the Executor
@@ -1213,10 +1280,22 @@ impl Executor {
                         iter_err: &iter_err_inner,
                     };
 
-                    waitset.wait_and_process_once(
+                    // Compute the wait timeout from the local `dispatch_mode`
+                    // (never re-reading the field). Grid mode bounds the wait by
+                    // the earliest pending grid target so the post-wait pass can
+                    // dispatch due cyclic tasks; Legacy blocks indefinitely on
+                    // fds, identical to the old `attach_interval` path.
+                    let timeout = match dispatch_mode {
+                        crate::DispatchMode::Grid => {
+                            grid.next_timeout(self.cyclic_clock.now_nanos())
+                        }
+                        crate::DispatchMode::Legacy => std::time::Duration::MAX,
+                    };
+                    waitset.wait_and_process_once_with_timeout(
                         |attachment_id: WaitSetAttachmentId<ipc::Service>| {
                             pass.process_attachment(&attachment_id)
                         },
+                        timeout,
                     )
                 })
             else {
@@ -1231,6 +1310,42 @@ impl Executor {
                 // here is immaterial to production behavior.
                 break Ok(());
             };
+
+            // Post-wait absolute-grid pass (Grid mode only, REQ_0268 /
+            // ADR_0100). The WaitSet callback above (now dropped, freeing its
+            // borrows) handles event/fd tasks; cyclic tasks are timed here off
+            // the scheduling clock. We rebuild a fresh `DispatchPass` mirroring
+            // the callback pass exactly — same borrows and raw pointers, same
+            // single-writer WaitSet-thread discipline — then dispatch the due
+            // cyclic tasks and fold their telemetry through the SHARED
+            // `barrier_and_record` helper. This is a SEPARATE barrier phase from
+            // the callback's: each phase barriers and folds only its own
+            // `pending_cycle` stashes, so cyclic tasks record exactly once,
+            // identically to event tasks. We do NOT call `record_cycle_for`
+            // directly here.
+            if dispatch_mode == crate::DispatchMode::Grid && !cyclic_task_indices.is_empty() {
+                grid.take_due(self.cyclic_clock.now_nanos(), &mut due_cyclic);
+                if !due_cyclic.is_empty() {
+                    let mut cpass = DispatchPass {
+                        guards: &guards,
+                        attachment_to_task: &attachment_to_task,
+                        tasks_ptr,
+                        cycle_stats_ptr,
+                        observer,
+                        exec_fault_ptr,
+                        exec_start_ptr,
+                        clock,
+                        grid_epoch_ptr,
+                        stop_listener_ptr,
+                        pool,
+                        iter_err: &iter_err_inner,
+                    };
+                    for slot in &due_cyclic {
+                        cpass.dispatch_task(cyclic_task_indices[*slot]);
+                    }
+                    cpass.barrier_and_record();
+                }
+            }
 
             // Funnel the post-callback decision (interrupt / item error /
             // stop request / run-mode termination) through one helper that
@@ -2241,6 +2356,66 @@ mod tests {
         let a = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
         let b = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn grid_mode_dispatches_cyclic_task_each_cycle() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let hits = Arc::new(AtomicU64::new(0));
+        let h = Arc::clone(&hits);
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .dispatch_mode(crate::DispatchMode::Grid)
+            .build()
+            .expect("build");
+        exec.add(crate::item::item_with_triggers(
+            move |d| {
+                d.interval(std::time::Duration::from_millis(1));
+                Ok(())
+            },
+            move |_ctx| {
+                h.fetch_add(1, Ordering::Relaxed);
+                Ok(ControlFlow::Continue)
+            },
+        ))
+        .expect("add");
+        exec.run_n(10).expect("run");
+        assert!(
+            hits.load(Ordering::Relaxed) >= 8,
+            "grid mode under-dispatched: {}",
+            hits.load(Ordering::Relaxed)
+        );
+    }
+
+    #[test]
+    fn legacy_mode_dispatches_cyclic_task_each_cycle() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let hits = Arc::new(AtomicU64::new(0));
+        let h = Arc::clone(&hits);
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .dispatch_mode(crate::DispatchMode::Legacy)
+            .build()
+            .expect("build");
+        exec.add(crate::item::item_with_triggers(
+            move |d| {
+                d.interval(std::time::Duration::from_millis(1));
+                Ok(())
+            },
+            move |_ctx| {
+                h.fetch_add(1, Ordering::Relaxed);
+                Ok(ControlFlow::Continue)
+            },
+        ))
+        .expect("add");
+        exec.run_n(10).expect("run");
+        assert!(
+            hits.load(Ordering::Relaxed) >= 8,
+            "legacy mode under-dispatched: {}",
+            hits.load(Ordering::Relaxed)
+        );
     }
 
     #[test]

@@ -66,12 +66,10 @@ pub enum DispatchMode {
 /// No clock and no I/O: callers pass `now` (read from a [`CyclicClock`]) in, so
 /// the whole state machine is deterministic and unit-testable.
 //
-// `redundant_pub_crate` is allowed: `GridTimer` is not yet wired into the
-// executor (a later task does that), so a `pub(crate)` type in this private
-// module reads as redundant until then. No struct-level `dead_code` allow is
-// needed: every field is read — `epoch` is now consumed by `take_due`
-// (skip-realign), `period_ns`/`next` by the dispatch loop. Method dead-code is
-// allowed on the `impl` block below.
+// `redundant_pub_crate` is allowed: `GridTimer` lives in this private module
+// and is driven from `dispatch_loop`, so a `pub(crate)` type here reads as
+// redundant under clippy. Every field is read — `epoch` by `take_due`
+// (skip-realign), `period_ns`/`next` by the dispatch loop.
 #[allow(clippy::redundant_pub_crate)]
 #[derive(Debug)]
 pub(crate) struct GridTimer {
@@ -84,7 +82,6 @@ pub(crate) struct GridTimer {
     next: Vec<u64>,
 }
 
-#[allow(dead_code)] // not yet wired into the executor (later task)
 impl GridTimer {
     /// `epoch` = scheduling `now_nanos()` at dispatch entry; one `period` per
     /// cyclic task. First target for task *k* is `epoch + period_k`.
@@ -100,7 +97,14 @@ impl GridTimer {
     /// Time to sleep until the earliest pending grid target (zero if already
     /// due — a zero `epoll` timeout polls and catches up).
     pub(crate) fn next_timeout(&self, now: u64) -> Duration {
-        let earliest = self.next.iter().copied().min().unwrap_or(u64::MAX);
+        // No cyclic targets → no grid-driven wakeup. Return `Duration::MAX`
+        // exactly (not `u64::MAX` nanos): the WaitSet treats `Duration::MAX`
+        // as "block indefinitely on fds" and dispatches a near-MAX `timed_wait`
+        // that overflows to `WaitSetRunError::InternalError`. This keeps an
+        // event-only executor blocking on its fds identically to Legacy.
+        let Some(earliest) = self.next.iter().copied().min() else {
+            return Duration::MAX;
+        };
         Duration::from_nanos(earliest.saturating_sub(now))
     }
 
@@ -220,6 +224,16 @@ mod tests {
         assert_eq!(t.next_timeout(250), Duration::from_nanos(750));
         // Already past the target -> zero (catch up immediately).
         assert_eq!(t.next_timeout(1500), Duration::from_nanos(0));
+    }
+
+    #[test]
+    fn empty_grid_next_timeout_is_duration_max() {
+        // No cyclic tasks: the timer must yield `Duration::MAX` exactly so the
+        // WaitSet blocks on fds (event-only executor) instead of issuing a
+        // near-MAX timed wait that overflows to an InternalError.
+        let t = GridTimer::new(0, vec![]);
+        assert_eq!(t.next_timeout(0), Duration::MAX);
+        assert_eq!(t.next_timeout(12_345), Duration::MAX);
     }
 
     #[test]
