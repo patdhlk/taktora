@@ -303,6 +303,11 @@ impl Executor {
         let budget = declarer.budget;
         let decls = declarer.into_decls();
 
+        // REQ_0268: reject ill-defined trigger shapes (cyclic+event, zero
+        // period) before the task joins the table — the natural validation
+        // point, where the decls are first available, for every DispatchMode.
+        validate_decls(&id, &decls)?;
+
         let mut item_box: Box<dyn ExecutableItem> = Box::new(item);
         let app_id = item_box.app_id();
         let app_inst = item_box.app_instance_id();
@@ -617,6 +622,10 @@ impl Executor {
         let mut head_declarer = TriggerDeclarer::new_internal();
         items[0].declare_triggers(&mut head_declarer)?;
         let decls = head_declarer.into_decls();
+
+        // REQ_0268: same trigger-shape validation as the single-item path,
+        // applied to the head item's decls (which gate the whole chain).
+        validate_decls(&id, &decls)?;
 
         // Warn if non-head items declared triggers (those will be ignored).
         for (i, body) in items.iter_mut().enumerate().skip(1) {
@@ -1323,7 +1332,26 @@ impl Executor {
             // `pending_cycle` stashes, so cyclic tasks record exactly once,
             // identically to event tasks. We do NOT call `record_cycle_for`
             // directly here.
-            if dispatch_mode == crate::DispatchMode::Grid && !cyclic_task_indices.is_empty() {
+            //
+            // REQ_0268: skip the cyclic dispatch+record when this wake is a
+            // stop wake. Legacy dispatches no cyclic work on a stop wake; the
+            // grid path must match, or a `stop()` would emit one spurious cycle
+            // observation (a near-zero-interval jitter sample, and a stray
+            // `cycle_index` increment that desyncs the FEAT_0038 join key). We
+            // gate on the same signals `after_callback` uses to terminate: the
+            // shared stop flag and the cheaply-available interrupt/termination
+            // result already captured from the wait. Termination itself is still
+            // decided by `after_callback` below — this guard only suppresses the
+            // cyclic phase's side effects.
+            let stopping = stop_flag.is_stopped()
+                || matches!(
+                    cb_result,
+                    Ok(WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest)
+                );
+            if !stopping
+                && dispatch_mode == crate::DispatchMode::Grid
+                && !cyclic_task_indices.is_empty()
+            {
                 grid.take_due(self.cyclic_clock.now_nanos(), &mut due_cyclic);
                 if !due_cyclic.is_empty() {
                     let mut cpass = DispatchPass {
@@ -1926,6 +1954,57 @@ struct FaultDispatchCtx {
     observer: Arc<dyn Observer>,
 }
 
+/// Validate a task's collected trigger declarations before it joins the task
+/// table (`REQ_0268`). Applied at every add path — single, chain head, and
+/// fault-handler main — at the point the `TriggerDecl`s are first available,
+/// regardless of [`DispatchMode`] (the rejected shapes are ill-defined in any
+/// mode; Legacy is temporary).
+///
+/// Rejects two shapes:
+///
+/// 1. **Cyclic AND event-driven** — a task carrying both an `Interval` decl and
+///    any listener-backed decl (`Subscriber` / `Deadline` / `RawListener`). Per
+///    `REQ_0106` a task is cyclic XOR event-driven: cyclic tasks have a
+///    period/lateness, event-driven tasks do not. Allowing both would dispatch
+///    and record the task twice in one wake (phase-a event + phase-b grid),
+///    desyncing the `FEAT_0038` `cycle_index` join key (`REQ_0107`).
+/// 2. **Zero-period interval** — an `Interval(Duration::ZERO)` busy-spins the
+///    grid (`GridTimer::next_timeout` returns `0` every wake and `take_due`
+///    re-fires without advancing). A zero scan period is nonsensical.
+fn validate_decls(id: &TaskId, decls: &[crate::trigger::TriggerDecl]) -> Result<(), ExecutorError> {
+    use crate::trigger::TriggerDecl;
+
+    let has_interval = decls.iter().any(|d| matches!(d, TriggerDecl::Interval(_)));
+    let has_listener = decls.iter().any(|d| {
+        matches!(
+            d,
+            TriggerDecl::Subscriber { .. }
+                | TriggerDecl::Deadline { .. }
+                | TriggerDecl::RawListener(_)
+        )
+    });
+
+    if has_interval && has_listener {
+        return Err(ExecutorError::DeclareTriggers(format!(
+            "task `{id}` declares both an interval (cyclic) and a listener \
+             (event-driven) trigger; a task may be cyclic (interval) or \
+             event-driven (listener) but not both — split it into two tasks"
+        )));
+    }
+
+    if decls
+        .iter()
+        .any(|d| matches!(d, TriggerDecl::Interval(dur) if dur.is_zero()))
+    {
+        return Err(ExecutorError::DeclareTriggers(format!(
+            "task `{id}` declares a zero-duration interval; a cyclic scan \
+             period must be strictly positive"
+        )));
+    }
+
+    Ok(())
+}
+
 /// Extract the declared scan period (first `Interval` trigger) from a task's
 /// trigger declarations, or `None` for event-driven tasks.
 fn scan_period_from_decls(decls: &[crate::trigger::TriggerDecl]) -> Option<Duration> {
@@ -2349,6 +2428,13 @@ impl ExecutorGraphBuilder<'_> {
 mod tests {
     use super::*;
     use crate::{ControlFlow, item};
+    use iceoryx2::prelude::ZeroCopySend;
+
+    /// Minimal zero-copy payload for tests that need a real subscriber to
+    /// produce a listener-backed trigger decl.
+    #[derive(Debug, Default, Clone, Copy, ZeroCopySend)]
+    #[repr(C)]
+    struct Msg(u32);
 
     #[test]
     fn add_returns_unique_ids() {
@@ -2415,6 +2501,243 @@ mod tests {
             hits.load(Ordering::Relaxed) >= 8,
             "legacy mode under-dispatched: {}",
             hits.load(Ordering::Relaxed)
+        );
+    }
+
+    // --- REQ_0268 trigger-combination validation (Fix 1 / Fix 3) ---
+
+    #[test]
+    fn add_rejects_cyclic_plus_subscriber_combination() {
+        use core::time::Duration;
+        // A task declaring BOTH an Interval and a listener-backed trigger is
+        // ill-defined (cyclic XOR event-driven, REQ_0106) and must be rejected
+        // at add time. We use a real subscriber so the listener decl is genuine.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let ch = exec.channel::<Msg>("taktora.test.req0268.combo").unwrap();
+        let sub = ch.subscriber().unwrap();
+        let err = exec
+            .add(crate::item::item_with_triggers(
+                move |d| {
+                    d.interval(Duration::from_millis(1));
+                    d.subscriber(&sub);
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .expect_err("interval + subscriber must be rejected");
+        match err {
+            ExecutorError::DeclareTriggers(msg) => {
+                assert!(
+                    msg.contains("cyclic") && msg.contains("event-driven"),
+                    "message must explain cyclic vs event-driven: {msg}"
+                );
+                assert!(
+                    msg.contains("split"),
+                    "message must suggest splitting into two tasks: {msg}"
+                );
+            }
+            other => panic!("expected DeclareTriggers, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_rejects_cyclic_plus_listener_regardless_of_mode() {
+        use core::time::Duration;
+        // The combination is ill-defined irrespective of DispatchMode (Legacy
+        // is temporary), so Legacy must reject it too.
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .dispatch_mode(crate::DispatchMode::Legacy)
+            .build()
+            .unwrap();
+        let ch = exec
+            .channel::<Msg>("taktora.test.req0268.combo.legacy")
+            .unwrap();
+        let sub = ch.subscriber().unwrap();
+        let err = exec
+            .add(crate::item::item_with_triggers(
+                move |d| {
+                    d.interval(Duration::from_millis(1));
+                    d.subscriber(&sub);
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .expect_err("interval + subscriber must be rejected in Legacy too");
+        assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn add_accepts_multiple_intervals_and_single_kinds() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        // Multiple Interval decls: still cyclic-only, accepted.
+        exec.add(crate::item::item_with_triggers(
+            |d| {
+                d.interval(Duration::from_millis(1));
+                d.interval(Duration::from_millis(2));
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ))
+        .expect("multiple intervals accepted");
+        // Single interval: accepted.
+        exec.add(crate::item::item_with_triggers(
+            |d| {
+                d.interval(Duration::from_millis(1));
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ))
+        .expect("single interval accepted");
+        // Multiple listeners (no interval): accepted.
+        let ch = exec
+            .channel::<Msg>("taktora.test.req0268.multi.listener")
+            .unwrap();
+        let sub_a = ch.subscriber().unwrap();
+        let sub_b = ch.subscriber().unwrap();
+        exec.add(crate::item::item_with_triggers(
+            move |d| {
+                d.subscriber(&sub_a);
+                d.subscriber(&sub_b);
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ))
+        .expect("multiple listeners accepted");
+    }
+
+    #[test]
+    fn add_rejects_zero_period_interval() {
+        use core::time::Duration;
+        // A zero-period interval busy-spins the grid (next_timeout == 0 every
+        // wake), so it must be rejected at add time.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let err = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::ZERO);
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .expect_err("zero-period interval must be rejected");
+        match err {
+            ExecutorError::DeclareTriggers(msg) => {
+                assert!(
+                    msg.contains("zero"),
+                    "message must mention the zero period: {msg}"
+                );
+            }
+            other => panic!("expected DeclareTriggers, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_chain_rejects_cyclic_plus_listener() {
+        use core::time::Duration;
+        // The chain path collects the head item's decls; the same validation
+        // must apply there.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let ch = exec
+            .channel::<Msg>("taktora.test.req0268.chain.combo")
+            .unwrap();
+        let sub = ch.subscriber().unwrap();
+        let err = exec
+            .add_chain(vec![crate::item::item_with_triggers(
+                move |d| {
+                    d.interval(Duration::from_millis(1));
+                    d.subscriber(&sub);
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            )])
+            .expect_err("chain head interval + subscriber must be rejected");
+        assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn add_chain_rejects_zero_period_interval() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let err = exec
+            .add_chain(vec![crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::ZERO);
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            )])
+            .expect_err("chain head zero-period interval must be rejected");
+        assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn stopped_iteration_emits_no_cyclic_cycle_observation() {
+        use core::time::Duration;
+        use std::sync::atomic::AtomicU64;
+
+        // A CyclicClock that starts at 0 (epoch) then jumps far past the first
+        // grid target, so the post-wait `take_due` finds the cyclic task due on
+        // the very first (stopping) wake. Distinct from the telemetry clock
+        // (scheduling role).
+        struct JumpClock {
+            calls: AtomicU64,
+        }
+        impl crate::CyclicClock for JumpClock {
+            fn now_nanos(&self) -> u64 {
+                // First read (grid epoch at loop entry) = 0; every later read
+                // is well past the 1ms target.
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    0
+                } else {
+                    1_000_000_000
+                }
+            }
+        }
+
+        // Observer that counts on_cycle_stats calls.
+        struct Counter {
+            cycles: AtomicU64,
+        }
+        impl Observer for Counter {
+            fn on_cycle_stats(&self, _obs: &CycleObservation) {
+                self.cycles.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let counter = Arc::new(Counter {
+            cycles: AtomicU64::new(0),
+        });
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .dispatch_mode(crate::DispatchMode::Grid)
+            .cyclic_clock(Arc::new(JumpClock {
+                calls: AtomicU64::new(0),
+            }))
+            .observer(Arc::clone(&counter) as Arc<dyn Observer>)
+            .build()
+            .unwrap();
+        exec.add(crate::item::item_with_triggers(
+            |d| {
+                d.interval(Duration::from_millis(1));
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ))
+        .unwrap();
+
+        // Stop BEFORE running: the WaitSet wakes immediately on the stop
+        // listener; the grid target is already due (JumpClock). Without the
+        // stop guard the post-wait cyclic pass would dispatch + record one
+        // spurious cycle on this stopping iteration; with it, zero.
+        exec.stoppable().stop();
+        exec.run().expect("run returns cleanly after stop");
+
+        assert_eq!(
+            counter.cycles.load(Ordering::SeqCst),
+            0,
+            "no cyclic cycle observation may be emitted on a stop wake"
         );
     }
 
