@@ -1,7 +1,7 @@
 # Offline jitter plots
 
 These gnuplot scripts render the NDJSON produced by `preempt-rt-bench` into
-PNGs. They are **offline, dev-time tools** — the bench binary itself never
+PNG images. They are **offline, dev-time tools** — the bench binary itself never
 calls gnuplot, and neither gnuplot nor `jq` is a build/run dependency of the
 workspace.
 

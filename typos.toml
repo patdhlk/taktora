@@ -19,5 +19,3 @@ cachable = "cachable"  # Project prefers `cachable` over `cacheable`.
 
 # Prose vocabulary typos flags overzealously.
 mis      = "mis"       # Used as a prefix in hyphenated compounds like "mis-model".
-PNGs     = "PNGs"      # Plural of PNG (Portable Network Graphics); typos flags "PN" as "ON".
-PN       = "PN"        # Abbreviation stem in PNGs; typos flags it as "ON".
