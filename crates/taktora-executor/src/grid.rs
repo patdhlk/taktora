@@ -77,7 +77,8 @@ pub enum DispatchMode {
 pub(crate) struct GridTimer {
     /// Scheduling epoch (ns), sampled once at dispatch-loop entry.
     epoch: u64,
-    /// Per cyclic task period (ns); index-aligned with `next`.
+    /// Per cyclic task period (ns); index-aligned with `next`. All cadences
+    /// share `epoch`, so every period phase-aligns at the epoch (harmonic grid).
     period_ns: Vec<u64>,
     /// Per cyclic task next absolute grid target (ns); `epoch + slot·period`.
     next: Vec<u64>,
@@ -219,5 +220,30 @@ mod tests {
         assert_eq!(t.next_timeout(250), Duration::from_nanos(750));
         // Already past the target -> zero (catch up immediately).
         assert_eq!(t.next_timeout(1500), Duration::from_nanos(0));
+    }
+
+    #[test]
+    // ns form is deliberate: targets and periods read clearest in the same unit.
+    #[allow(clippy::duration_suboptimal_units)]
+    fn multi_period_picks_earliest_and_coalesces_coincident_slots() {
+        // Two cadences sharing one epoch: 1000ns and 2000ns (harmonic grid).
+        let mut t = GridTimer::new(0, vec![1000, 2000]);
+        let mut due = Vec::new();
+
+        // Earliest target is task0 at 1000.
+        assert_eq!(t.next_timeout(0), Duration::from_nanos(1000));
+
+        // At 1000: only the 1ms task is due.
+        t.take_due(1000, &mut due);
+        assert_eq!(due, vec![0]);
+
+        // Next earliest: both targets now at 2000.
+        assert_eq!(t.next_timeout(1000), Duration::from_nanos(1000));
+
+        // At 2000: both cadences coincide -> both due in one wake.
+        t.take_due(2000, &mut due);
+        assert_eq!(due, vec![0, 1]);
+        assert_eq!(t.next_target(0), 3000);
+        assert_eq!(t.next_target(1), 4000);
     }
 }
