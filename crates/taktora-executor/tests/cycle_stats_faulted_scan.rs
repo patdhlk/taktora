@@ -7,11 +7,14 @@ use taktora_executor::{ControlFlow, CycleObservation, Executor, Observer, item_w
 
 #[derive(Default)]
 struct IdxRec {
-    obs: Mutex<Vec<(u64, u64)>>,
-} // (cycle_index, took_ns)
+    obs: Mutex<Vec<(u64, Option<u64>, bool)>>,
+} // (cycle_index, took_ns, faulted)
 impl Observer for IdxRec {
     fn on_cycle_stats(&self, o: &CycleObservation) {
-        self.obs.lock().unwrap().push((o.cycle_index, o.took_ns));
+        self.obs
+            .lock()
+            .unwrap()
+            .push((o.cycle_index, o.took_ns, o.faulted));
     }
 }
 
@@ -51,16 +54,27 @@ fn cycle_index_contiguous_including_faulted_scans() {
         obs.len()
     );
     // THE KEY ASSERTION: gap-free monotonic cycle_index 0,1,2,3,4,5.
-    for (pos, &(idx, _)) in obs.iter().enumerate() {
+    for (pos, &(idx, _, _)) in obs.iter().enumerate() {
         assert_eq!(
             idx, pos as u64,
             "cycle_index desynced at position {pos}: {obs:?}"
         );
     }
-    // Cycle 0 ran (took>0); faulted cycles report took_ns==0 (poison-safe None).
-    assert!(obs[0].1 > 0, "cycle 0 should have a real took");
+    // Cycle 0 ran the body (not faulted, real took); the post-execute budget
+    // breach faults the task, so every later wakeup is fault-routed: REQ_0107
+    // says it still emits, and the REQ_0103/REQ_0267 contract says a faulted
+    // scan is *distinguishable* — `faulted == true` and `took_ns == None`, not
+    // an ambiguous zero.
+    assert!(!obs[0].2, "cycle 0 ran the body, not faulted");
     assert!(
-        obs[1..].iter().all(|&(_, took)| took == 0),
-        "faulted scans report took 0"
+        matches!(obs[0].1, Some(t) if t > 0),
+        "cycle 0 should carry a real took, got {:?}",
+        obs[0].1
+    );
+    assert!(
+        obs[1..]
+            .iter()
+            .all(|&(_, took, faulted)| faulted && took.is_none()),
+        "faulted scans must be flagged faulted with took_ns == None: {obs:?}"
     );
 }

@@ -22,6 +22,19 @@
 //! integration plans).
 #![cfg_attr(not(test), no_std)]
 
+/// Worst-case relative error of a histogram percentile estimate, as a
+/// whole-number percent.
+///
+/// The percentile path ([`RollingHistogram::percentile`]) reports the
+/// geometric midpoint of an octave bucket ([`bucket_midpoint`]), so any
+/// estimate is within a factor of `√2` of the true value — `√2 − 1 ≈ 41%`
+/// high or `1 − 1/√2 ≈ 29%` low, bounded here by the larger figure rounded
+/// up. Consumers that need exact figures (SLA thresholds, regression gates)
+/// must use the exact `min`/`max` extremes, not the percentiles. Closing
+/// this to `≤ 1%` (the `REQ_0100` target) requires sub-octave buckets and
+/// is tracked separately.
+pub const PERCENTILE_MAX_REL_ERR_PCT: u8 = 42;
+
 mod connector;
 mod cyclestats;
 mod execcycle;
@@ -31,5 +44,5 @@ mod minmax;
 pub use connector::{ConnectorCycleSnapshot, ConnectorCycleStats};
 pub use cyclestats::CycleStatsCore;
 pub use execcycle::{ExecutorCycleSnapshot, ExecutorCycleStats};
-pub use histogram::{BUCKETS, RollingHistogram, bucket_index, bucket_lower};
+pub use histogram::{BUCKETS, RollingHistogram, bucket_index, bucket_lower, bucket_midpoint};
 pub use minmax::MinMaxDeque;

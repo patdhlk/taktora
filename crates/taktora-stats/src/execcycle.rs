@@ -150,7 +150,7 @@ impl<const S: usize, const W: usize> ExecutorCycleStats<S, W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bucket_lower;
+    use crate::bucket_midpoint;
 
     // S=8 segments, W=256 exact window.
     type Stats = ExecutorCycleStats<8, 256>;
@@ -161,7 +161,7 @@ mod tests {
         let idx = s.record_cycle(Some(1000), Some(50), Some(120));
         assert_eq!(idx, 0);
         let snap = s.snapshot();
-        assert_eq!(snap.p50_ns, bucket_lower(crate::bucket_index(1000)));
+        assert_eq!(snap.p50_ns, bucket_midpoint(crate::bucket_index(1000)));
         assert_eq!(snap.min_ns, 1000); // exact
         assert_eq!(snap.max_ns, 1000);
         assert_eq!(snap.max_jitter_ns, 50);
