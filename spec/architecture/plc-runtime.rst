@@ -1064,3 +1064,76 @@ Absolute-grid cyclic dispatch
    loop for zero per-cycle cost, and removed in a follow-up once the Pi A/B
    passes. A deadline-miss watchdog (faulting after *K* skipped slots) stays
    telemetry-only for now and is deferred.
+
+.. building-block:: Absolute-grid timer and cyclic scheduling clock
+   :id: BB_0095
+   :status: implemented
+   :implements: REQ_0268
+   :refines: ADR_0100
+
+   The structural surface that realises :need:`ADR_0100`, in
+   ``crates/taktora-executor/src/grid.rs``.
+
+   * **``GridTimer`` — pure state machine** (no clock, no syscalls). Holds a
+     scheduling ``epoch`` sampled once at ``dispatch_loop`` entry and a
+     per-task slot counter, so the nominal wakeup for scan *k* of a cyclic
+     task is ``next_k = epoch + slot_k × period_k`` — an *absolute* grid, not
+     a ``now + period`` re-derivation. ``next_timeout(now)`` returns
+     ``min_k(next_k) − now`` (saturating to zero), i.e. the distance to the
+     earliest pending slot, or ``Duration::MAX`` when no cyclic task is
+     registered (empty grid → no grid-driven wakeup). ``take_due(now)``
+     collects the tasks whose slot is due and **skip-realigns**: a slot
+     starved past one or more whole periods snaps closed-form to the next
+     future grid point and dispatches exactly once — it never replays a
+     burst of stale cycles, so a transient stall costs bounded slots rather
+     than a permanent phase offset. Harmonic multi-period grids share the one
+     ``epoch``; coincident slots coalesce in a single ``take_due`` pass.
+   * **``CyclicClock`` trait** — the scheduling time source, read as
+     ``now_nanos()``. ``MonotonicCyclicClock`` is the ``CLOCK_MONOTONIC``
+     implementation. This is **distinct by construction** from the telemetry
+     ``MonotonicClock`` that produces the lateness of :need:`REQ_0106`: a
+     separate trait, so substituting a test clock for telemetry can never
+     alter dispatch timing.
+   * **``DispatchMode`` toggle** — ``Grid`` (default) | ``Legacy``, selecting
+     the absolute-grid path or the retained ``attach_interval`` path of
+     :need:`ADR_0100`.
+
+   Wiring: the ``GridTimer`` drives the wait — ``next_timeout`` feeds the
+   ``timeout`` argument of ``WaitSet::wait_and_process_once_with_timeout``
+   from ``dispatch_loop`` — and cyclic tasks dispatch in a **post-wait pass**
+   that calls ``take_due`` and routes each due task through
+   ``DispatchPass::dispatch_task``. Event/fd-driven tasks remain on the
+   per-attachment callback path; one ``pool.barrier()`` per iteration covers
+   both passes.
+
+.. impl:: Grid dispatch wiring and Legacy toggle — executor.rs
+   :id: IMPL_0087
+   :status: implemented
+   :implements: REQ_0268
+   :refines: BB_0095
+
+   Concrete changes in ``crates/taktora-executor/src/executor.rs`` that wire
+   :need:`BB_0095` into the dispatch loop.
+
+   * **Builder setters** — ``ExecutorBuilder::dispatch_mode`` selects
+     ``DispatchMode`` (default ``Grid``); ``ExecutorBuilder::cyclic_clock``
+     installs a ``CyclicClock`` (defaulting to ``MonotonicCyclicClock`` at
+     ``build``).
+   * **Grid path owns cyclic timing** — in ``Grid`` mode the loop skips
+     ``WaitSet::attach_interval`` for cyclic declarations and instead owns
+     them via ``GridTimer``: the epoch is sampled from the ``CyclicClock`` at
+     ``dispatch_loop`` entry, ``next_timeout`` computes each iteration's
+     ``wait_and_process_once_with_timeout`` timeout, and a post-wait pass
+     dispatches the ``take_due`` set through ``DispatchPass::dispatch_task``.
+     In ``Legacy`` mode the timeout is ``Duration::MAX`` and the old
+     ``attach_interval`` heartbeat path is used unchanged.
+   * **Mode branch hoisted** — ``dispatch_mode`` is read once at
+     ``dispatch_loop`` entry into a local, so the per-iteration branch costs
+     nothing in the hot loop.
+   * **Rejected configurations** — ``validate_decls`` rejects, at add/build
+     time, a task declaring both an interval (cyclic) and a listener
+     (event-driven) trigger, and a zero-duration interval; a cyclic scan
+     period must be strictly positive.
+   * **Legacy retention** — the ``attach_interval`` path is retained behind
+     the ``DispatchMode`` toggle until the Pi5 A/B of :need:`ADR_0100`
+     resolves, then removed in a follow-up.

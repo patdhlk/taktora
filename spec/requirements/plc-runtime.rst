@@ -87,8 +87,9 @@ Cyclic scan execution
 
 .. req:: Absolute-grid cyclic dispatch (bounded long-run lateness)
    :id: REQ_0268
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0011
+   :links: BB_0095, IMPL_0087, TEST_0852
 
    The runtime shall phase-lock cyclic dispatch to an **absolute** monotonic
    grid: the nominal wakeup for scan *k* of a cyclic item is
