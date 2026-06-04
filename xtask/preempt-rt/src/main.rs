@@ -93,6 +93,11 @@ fn run() -> Result<(), String> {
 
     exec.run_n(args.cycles).map_err(|e| format!("run: {e}"))?;
 
+    // Drop the executor — and with it the only `Arc` holding the ring
+    // producer — so the producer is quiesced before `finish`, satisfying its
+    // precondition that no push can race the drain thread's final pass.
+    drop(exec);
+
     let summary = writer.finish().map_err(|e| format!("drain: {e}"))?;
     eprintln!(
         "preempt-rt-bench: wrote {} records, {} lapped (ring capacity {})",
