@@ -66,11 +66,13 @@ pub enum DispatchMode {
 /// No clock and no I/O: callers pass `now` (read from a [`CyclicClock`]) in, so
 /// the whole state machine is deterministic and unit-testable.
 //
-// `dead_code` / `redundant_pub_crate` are allowed: this is a private module and
-// `GridTimer` is not yet wired into the executor (a later task does that). The
-// `epoch` field in particular is read only by `new` so far — skip-realign (next
-// task) consumes it — so keep it; it is structurally required.
-#[allow(dead_code, clippy::redundant_pub_crate)]
+// `redundant_pub_crate` is allowed: `GridTimer` is not yet wired into the
+// executor (a later task does that), so a `pub(crate)` type in this private
+// module reads as redundant until then. No struct-level `dead_code` allow is
+// needed: every field is read — `epoch` is now consumed by `take_due`
+// (skip-realign), `period_ns`/`next` by the dispatch loop. Method dead-code is
+// allowed on the `impl` block below.
+#[allow(clippy::redundant_pub_crate)]
 #[derive(Debug)]
 pub(crate) struct GridTimer {
     /// Scheduling epoch (ns), sampled once at dispatch-loop entry.
@@ -107,18 +109,31 @@ impl GridTimer {
         self.next[i]
     }
 
-    /// Collect cyclic tasks due at `now` into `due` (cleared first), advancing
-    /// each due task's target by exactly one period. Skip-realign after a stall
-    /// is added in a later task.
+    /// Collect cyclic tasks due at `now` into `due` (cleared first). A due task
+    /// is dispatched exactly once; its target then advances by one period in the
+    /// normal case, or — if the wake was late by ≥1 whole slot — snaps closed-form
+    /// to the next *future* grid point (skip-realign, `ADR_0100`). Never replays a
+    /// burst of stale cycles, which is wrong for cyclic control.
     pub(crate) fn take_due(&mut self, now: u64, due: &mut Vec<usize>) {
         due.clear();
         for (i, next) in self.next.iter_mut().enumerate() {
             if now >= *next {
                 due.push(i);
                 let period = self.period_ns[i];
-                if period != 0 {
-                    *next = next.saturating_add(period);
+                if period == 0 {
+                    continue;
                 }
+                let stepped = next.saturating_add(period);
+                *next = if stepped > now {
+                    // Normal case: one period ahead is already in the future.
+                    stepped
+                } else {
+                    // Missed >= 1 whole slot: closed-form snap to the next
+                    // future grid point. Dispatch once (above); never burst.
+                    let slots_passed = now.saturating_sub(self.epoch) / period;
+                    self.epoch
+                        .saturating_add(slots_passed.saturating_add(1).saturating_mul(period))
+                };
             }
         }
     }
@@ -165,6 +180,33 @@ mod tests {
         t.take_due(2999, &mut due);
         assert_eq!(due, Vec::<usize>::new());
         assert_eq!(t.next_target(0), 3000);
+    }
+
+    #[test]
+    fn stall_skips_whole_slots_and_dispatches_once() {
+        // period 1000, epoch 0. We were starved until 3500 (slots 1,2,3 missed).
+        let mut t = GridTimer::new(0, vec![1000]);
+        let mut due = Vec::new();
+
+        t.take_due(3500, &mut due);
+        // Dispatched exactly once — no burst replay of the 3 missed cycles.
+        assert_eq!(due, vec![0]);
+        // Re-aligned to the next *future* slot: floor(3500/1000)+1 = 4 -> 4000.
+        assert_eq!(t.next_target(0), 4000);
+        assert!(
+            t.next_target(0) > 3500,
+            "target must be strictly in the future"
+        );
+    }
+
+    #[test]
+    fn stall_realign_is_exact_on_a_slot_boundary() {
+        let mut t = GridTimer::new(0, vec![1000]);
+        let mut due = Vec::new();
+        // Exactly on slot 3's boundary.
+        t.take_due(3000, &mut due);
+        assert_eq!(due, vec![0]);
+        assert_eq!(t.next_target(0), 4000);
     }
 
     #[test]
