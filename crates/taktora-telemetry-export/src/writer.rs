@@ -24,6 +24,7 @@ pub struct DrainSummary {
 /// Always stop the writer via [`finish`](Self::finish). Dropping an
 /// `NdjsonWriter` without calling it leaves the drain thread running until the
 /// process exits (the stop flag is never set), leaking the thread and its sink.
+#[must_use = "call finish() to stop the drain thread and flush the sink; dropping it leaks the thread"]
 pub struct NdjsonWriter {
     handle: JoinHandle<io::Result<DrainSummary>>,
     stop: Arc<AtomicBool>,
