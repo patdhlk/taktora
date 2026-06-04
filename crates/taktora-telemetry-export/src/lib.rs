@@ -26,6 +26,12 @@
 //! read is inherent to the seqlock pattern; a fully MIRI-clean per-word-atomic
 //! variant is deferred to a future production exporter.
 //!
+//! The single-producer invariant is a **user contract, not type-enforced**:
+//! `Producer` is `Sync` only so that [`NdjsonRingObserver`] can satisfy the
+//! executor's `Observer: Send + Sync` bound. Calling [`Producer::push`] from
+//! more than one thread concurrently is a data race on the slot payload —
+//! drive the observer from a single executor (the documented use).
+//!
 //! [obs]: taktora_executor::CycleObservation
 //! [cb]: taktora_executor::Observer::on_cycle_stats
 

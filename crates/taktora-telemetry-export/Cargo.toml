@@ -6,6 +6,10 @@ rust-version = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
 description  = "Off-RT-thread telemetry export: seqlock overwrite-oldest ring + NDJSON drain for taktora-executor cycle observations."
 publish      = false
 

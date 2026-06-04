@@ -93,6 +93,12 @@ fn concurrent_producer_is_tear_free_and_lossless_in_total() {
             RecvOutcome::Lapped { skipped } => lapped += skipped,
             RecvOutcome::Empty => {
                 if done.load(Ordering::Acquire) {
+                    // The producer's `done` store is Release and this load is
+                    // Acquire, so observing `done == true` after an `Empty`
+                    // means all N pushes already happened-before this point and
+                    // `head` is final. One extra `try_recv` therefore either
+                    // drains the last item or confirms `next >= head` (Empty);
+                    // a single follow-up call is enough to terminate cleanly.
                     match consumer.try_recv() {
                         RecvOutcome::Empty => break,
                         RecvOutcome::Record(r) => {

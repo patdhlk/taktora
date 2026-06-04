@@ -110,6 +110,13 @@ impl Producer {
         // Mark the slot "writing" so a concurrent reader bails or detects the
         // change, then perform the non-atomic payload write, then publish.
         slot.seq.store(w | WRITING, Ordering::Release);
+        // This release fence orders the `WRITING` marker store *before* the
+        // non-atomic payload write below: a `Release` store only bars earlier
+        // ops from sinking past it, not later ops from being hoisted above it.
+        // Without the fence, a weakly-ordered target (e.g. AArch64) could make
+        // the payload mutation visible while the slot's `seq` still shows the
+        // previous occupant, letting a consumer reading that stale occupant
+        // pass its `s1 == s2` tear check on spliced bytes. Not redundant.
         fence(Ordering::Release);
         // SAFETY: single producer; the `WRITING` marker is visible to the
         // consumer (Release/Acquire on `seq`), which discards any read that

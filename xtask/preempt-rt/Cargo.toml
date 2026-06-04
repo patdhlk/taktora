@@ -6,6 +6,10 @@ rust-version = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
 description  = "PREEMPT_RT jitter bench harness (idle profile) for taktora-executor (REQ_0111)."
 publish      = false
 
