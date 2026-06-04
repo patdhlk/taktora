@@ -1464,6 +1464,19 @@ impl DispatchPass<'_, '_, '_> {
             self.dispatch_task(task_idx);
         }
 
+        self.barrier_and_record();
+
+        CallbackProgression::Continue
+    }
+
+    /// Barrier all submitted pool jobs for this dispatch phase, then fold each
+    /// task's stashed `pending_cycle` into recorded cycle telemetry. Shared by
+    /// the `WaitSet` callback (event/fd tasks) and the post-wait grid pass
+    /// (cyclic tasks, `REQ_0268`). Keyed on `pending_cycle` so it records
+    /// exactly the tasks dispatched this phase, exactly once.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    #[allow(unsafe_code)]
+    fn barrier_and_record(&mut self) {
         // Wait for all submitted jobs to finish before leaving the callback
         // scope (validates item_ptr safety contract). The barrier also makes
         // every worker's `last_took_ns` Release-store visible to the record
@@ -1490,8 +1503,6 @@ impl DispatchPass<'_, '_, '_> {
                 self.record_cycle_for(task_idx, faulted, pre);
             }
         }
-
-        CallbackProgression::Continue
     }
 
     /// Fold one scan cycle's telemetry and push it to the observer. Called
