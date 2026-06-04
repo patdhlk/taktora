@@ -27,6 +27,11 @@ jobs:
       - name: Build
         run: cargo build --workspace ${{ matrix.features }}
       - name: Test
+        # --test-threads=1 isolates per-test iceoryx2 resources (each Executor
+        # builds a node + shared-memory segments; many in parallel can exhaust
+        # /dev/shm on constrained shared runners). It is NOT for timing
+        # stability — cycle-telemetry timing tests are deterministic via the
+        # injected MockClock (ExecutorBuilder::clock), not wall-clock sleeps.
         run: cargo test --workspace ${{ matrix.features }} -- --test-threads=1
 
   clippy:
