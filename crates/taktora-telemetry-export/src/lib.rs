@@ -1,7 +1,7 @@
 //! Off-RT-thread telemetry export for `taktora-executor`.
 //!
 //! The executor pushes one [`CycleObservation`][obs] per task per cycle via
-//! [`Observer::on_cycle_stats`][cb] — **synchronously on the RT WaitSet
+//! [`Observer::on_cycle_stats`][cb] — **synchronously on the RT `WaitSet`
 //! thread**. This crate moves those samples off that thread without blocking
 //! it, for offline analysis (the executor jitter envelope, `REQ_0110` /
 //! `REQ_0111`):

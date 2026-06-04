@@ -38,7 +38,7 @@ pub struct PodRecord {
     pub lateness_ns: i64,
     /// Execute duration (ns); valid iff `F_TOOK` set.
     pub took_ns: u64,
-    /// Stable task registration index (REQ_0111 `task_id` column).
+    /// Stable task registration index (`REQ_0111` `task_id` column).
     pub task_index: u32,
     /// Faulted flag + per-field presence bits.
     pub flags: u32,
@@ -48,7 +48,7 @@ impl PodRecord {
     /// Build from an executor push observation. Reads `pre_ns` for the time
     /// axis and `task_index` for identity (both added in `REQ_0103`).
     #[must_use]
-    pub fn from_observation(obs: &CycleObservation) -> Self {
+    pub const fn from_observation(obs: &CycleObservation) -> Self {
         let mut flags = 0;
         if obs.faulted {
             flags |= F_FAULTED;
@@ -89,7 +89,7 @@ impl PodRecord {
     /// Test/constructor helper: a fully-measured (healthy) record.
     #[must_use]
     #[allow(clippy::too_many_arguments)]
-    pub fn new_healthy(
+    pub const fn new_healthy(
         cycle_index: u64,
         task_index: u32,
         ts_ns: u64,
@@ -114,7 +114,12 @@ impl PodRecord {
 
     /// Test/constructor helper: a faulted record (nothing measured).
     #[must_use]
-    pub fn new_faulted(cycle_index: u64, task_index: u32, ts_ns: u64, period_ns: u64) -> Self {
+    pub const fn new_faulted(
+        cycle_index: u64,
+        task_index: u32,
+        ts_ns: u64,
+        period_ns: u64,
+    ) -> Self {
         Self {
             cycle_index,
             ts_ns,

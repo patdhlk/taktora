@@ -9,8 +9,17 @@ use taktora_telemetry_export::{CycleRing, PodRecord, RecvOutcome};
 // A record whose fields encode an invariant a torn read would violate:
 // period_ns == cycle_index * 7 + 3 and took_ns == cycle_index. A consumer
 // that reads two writes spliced together fails this check.
-fn marked(cycle_index: u64) -> PodRecord {
-    PodRecord::new_healthy(cycle_index, 0, cycle_index, cycle_index * 7 + 3, 0, 0, 0, cycle_index)
+const fn marked(cycle_index: u64) -> PodRecord {
+    PodRecord::new_healthy(
+        cycle_index,
+        0,
+        cycle_index,
+        cycle_index * 7 + 3,
+        0,
+        0,
+        0,
+        cycle_index,
+    )
 }
 
 fn drain_all(consumer: &mut taktora_telemetry_export::Consumer) -> (Vec<u64>, u64) {
@@ -97,5 +106,9 @@ fn concurrent_producer_is_tear_free_and_lossless_in_total() {
         }
     }
     prod.join().unwrap();
-    assert_eq!(received + lapped, N, "every record is either seen or counted as lapped");
+    assert_eq!(
+        received + lapped,
+        N,
+        "every record is either seen or counted as lapped"
+    );
 }
