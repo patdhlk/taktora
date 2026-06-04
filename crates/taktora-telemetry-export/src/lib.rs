@@ -12,7 +12,7 @@
 //!   ring with per-slot sequence numbers (a seqlock). The producer never
 //!   blocks; a lagging consumer is *lapped* and the loss is counted, never
 //!   silently swallowed.
-//! * [`spawn`](writer::spawn) — the consumer side: a drain thread that pops
+//! * [`spawn`] — the consumer side: a drain thread that pops
 //!   records and writes NDJSON to a sink, reporting a [`DrainSummary`].
 //!
 //! # Seqlock soundness

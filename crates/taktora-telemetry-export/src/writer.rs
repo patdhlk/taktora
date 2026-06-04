@@ -1,5 +1,5 @@
-//! Drain thread: pops [`PodRecord`]s off the ring and writes NDJSON to a sink,
-//! off the RT thread.
+//! Drain thread: pops [`PodRecord`](crate::PodRecord)s off the ring and writes
+//! NDJSON to a sink, off the RT thread.
 
 use std::io::{self, Write};
 use std::sync::Arc;
