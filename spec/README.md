@@ -40,6 +40,25 @@ uvx --with sphinx-needs==8.0.0 \
 extensions Sphinx needs to load. The pyproject.toml-based path (`uv sync` +
 `uv run sphinx-build`) is faster after the first invocation.
 
+## Diagram validation (mermaid)
+
+`scripts/validate-mermaid.mjs` parses every `.. mermaid::` block through the
+real mermaid renderer to catch syntax errors before deploy. It runs in CI and
+as the `mermaid-validate` pre-commit hook. Its npm dependencies (`mermaid`,
+`jsdom`) live in the gitignored `scripts/node_modules/`, so install them once
+per checkout:
+
+```bash
+cd spec/scripts
+npm ci                       # installs mermaid + jsdom from package-lock.json
+npm run validate-mermaid     # optional; CI and the pre-commit hook run this for you
+```
+
+Without this install the hook fails with `Cannot find module 'jsdom'` and blocks
+spec commits — a missing-dependency symptom, not a tool bug. For a
+**diagram-free** spec commit you may bypass it with
+`SKIP=mermaid-validate git commit …`, but running `npm ci` is the proper fix.
+
 ## Layout
 
 ```
@@ -52,6 +71,7 @@ spec/
 ├── requirements/           # System requirements (req directives)
 ├── architecture/           # Detailed design (spec directives)
 ├── verification/           # Test cases (test directives)
+├── scripts/                # Node tooling — mermaid validator (npm ci to install deps)
 └── _static/                # Theme overrides / custom assets
 ```
 
