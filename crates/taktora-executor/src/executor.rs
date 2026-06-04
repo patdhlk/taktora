@@ -1559,8 +1559,10 @@ impl DispatchPass<'_, '_, '_> {
         let obs = CycleObservation {
             cycle_index,
             task_id: task.id.clone(),
+            task_index: u32::try_from(task_idx).unwrap_or(u32::MAX),
             faulted,
             period_ns,
+            pre_ns,
             actual_period_ns: actual_period,
             jitter_ns: jitter,
             lateness_ns: lateness,

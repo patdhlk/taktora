@@ -35,6 +35,13 @@ pub struct CycleObservation {
     /// Identifier of the task this observation belongs to.
     pub task_id: TaskId,
 
+    /// Stable zero-based registration index of the task, assigned at
+    /// `Executor::add` time and constant for the executor's lifetime
+    /// (`REQ_0103`). The flat `u32` join/identity key for telemetry export
+    /// (`REQ_0111`'s `task_id` column) — frees consumers from hashing the
+    /// `Arc<str>` [`task_id`](Self::task_id) on the hot path.
+    pub task_index: u32,
+
     /// `true` when this scan was fault-routed / skipped: the task body was
     /// not entered, so every measured field below is `None` (`REQ_0107`).
     /// The cross-layer twin of the connector's `CycleOutcome::Fault`
@@ -43,6 +50,13 @@ pub struct CycleObservation {
 
     /// Declared (nominal) scan period in nanoseconds. Always known.
     pub period_ns: u64,
+
+    /// Telemetry-clock nanosecond instant of **task-logic start** — the
+    /// canonical reference point (`pre_execute`), the same instant the
+    /// period/jitter/lateness folds are sampled against (`REQ_0103`,
+    /// `REQ_0101`). The single time source for an exported sample's time
+    /// axis; never a second clock read. Always populated.
+    pub pre_ns: u64,
 
     /// Measured period since the previous dispatch of this task in
     /// nanoseconds. `None` on the first cycle (no previous timestamp).
@@ -128,8 +142,10 @@ mod tests {
         let obs = CycleObservation {
             cycle_index: 3,
             task_id: TaskId::from("t0"),
+            task_index: 0,
             faulted: false,
             period_ns: 10_000_000,
+            pre_ns: 0,
             actual_period_ns: Some(10_050_000),
             jitter_ns: Some(50_000),
             lateness_ns: Some(-120),
