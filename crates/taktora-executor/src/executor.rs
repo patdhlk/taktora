@@ -1385,6 +1385,57 @@ struct DispatchPass<'a, 'g, 'w> {
 }
 
 impl DispatchPass<'_, '_, '_> {
+    /// Dispatches a single task by index for one wakeup: takes the `&mut`
+    /// borrow into the task table, applies the pre-dispatch fault gate, stashes
+    /// this cycle's `pending_cycle` timestamp for the post-barrier telemetry
+    /// fold, and submits the task's work to the pool.
+    ///
+    /// Shared by the `WaitSet` callback (`process_attachment`) and — per
+    /// `REQ_0268` / `ADR_0100` — the forthcoming post-wait absolute-grid
+    /// dispatch pass, so the per-task barrier/telemetry contract is identical
+    /// across both call paths.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    #[allow(unsafe_code)]
+    fn dispatch_task(&mut self, task_idx: usize) {
+        // SAFETY: we are the only thread that may touch the task table
+        // during the callback. wait_and_process_once is single-threaded
+        // and dispatch_loop holds &mut self. The pointer is valid for the
+        // duration of this call.
+        let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
+
+        // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072). When it
+        // routes to a (possible) handler, normal dispatch is skipped.
+        if self.handle_fault_routing(task) {
+            // REQ_0107: a faulted/fault-routed scan STILL advances
+            // cycle_index and emits on_cycle_stats, or the executor's count
+            // desyncs from the connector's join key (FEAT_0038). took/jitter
+            // are None (poison-safe); the index always moves. Allocation-free:
+            // a CyclePending { Instant, bool } written onto the TaskEntry,
+            // no heap.
+            if task.scan_period.is_some() {
+                task.pending_cycle = Some(CyclePending {
+                    pre: self.clock.now_nanos(),
+                    faulted: true,
+                });
+            }
+            return;
+        }
+
+        // Stash the pre-dispatch instant so the post-barrier record pass
+        // can fold this cycle's telemetry. Allocation-free: the timestamp
+        // lives on the TaskEntry, not in a per-wakeup Vec. `take`n in the
+        // post-barrier loop below — guarantees exactly-once even if two
+        // guards map to the same task. `faulted: false`: a task that faulted
+        // last wakeup and recovered this one records the normal path (the
+        // whole CyclePending is overwritten, so the flag can't be stale).
+        task.pending_cycle = Some(CyclePending {
+            pre: self.clock.now_nanos(),
+            faulted: false,
+        });
+
+        self.submit_task_job(task);
+    }
+
     /// Handles a single `WaitSet` wakeup: drains stop notifications, then
     /// dispatches every task whose attachment fired. Always returns
     /// [`CallbackProgression::Continue`]; termination is decided by the
@@ -1402,51 +1453,15 @@ impl DispatchPass<'_, '_, '_> {
         let stop_l = unsafe { &*self.stop_listener_ptr };
         while let Ok(Some(_)) = stop_l.try_wait_one() {}
 
-        for (i, guard) in self.guards.iter().enumerate() {
+        for i in 0..self.guards.len() {
+            let guard = &self.guards[i];
             let fired =
                 attachment_id.has_event_from(guard) || attachment_id.has_missed_deadline(guard);
             if !fired {
                 continue;
             }
             let task_idx = self.attachment_to_task[i];
-
-            // SAFETY: we are the only thread that may touch the task table
-            // during the callback. wait_and_process_once is single-threaded
-            // and dispatch_loop holds &mut self. The pointer is valid for the
-            // duration of this call.
-            let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
-
-            // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072). When it
-            // routes to a (possible) handler, normal dispatch is skipped.
-            if self.handle_fault_routing(task) {
-                // REQ_0107: a faulted/fault-routed scan STILL advances
-                // cycle_index and emits on_cycle_stats, or the executor's count
-                // desyncs from the connector's join key (FEAT_0038). took/jitter
-                // are None (poison-safe); the index always moves. Allocation-free:
-                // a CyclePending { Instant, bool } written onto the TaskEntry,
-                // no heap.
-                if task.scan_period.is_some() {
-                    task.pending_cycle = Some(CyclePending {
-                        pre: self.clock.now_nanos(),
-                        faulted: true,
-                    });
-                }
-                continue;
-            }
-
-            // Stash the pre-dispatch instant so the post-barrier record pass
-            // can fold this cycle's telemetry. Allocation-free: the timestamp
-            // lives on the TaskEntry, not in a per-wakeup Vec. `take`n in the
-            // post-barrier loop below — guarantees exactly-once even if two
-            // guards map to the same task. `faulted: false`: a task that faulted
-            // last wakeup and recovered this one records the normal path (the
-            // whole CyclePending is overwritten, so the flag can't be stale).
-            task.pending_cycle = Some(CyclePending {
-                pre: self.clock.now_nanos(),
-                faulted: false,
-            });
-
-            self.dispatch_task(task);
+            self.dispatch_task(task_idx);
         }
 
         // Wait for all submitted jobs to finish before leaving the callback
@@ -1641,7 +1656,7 @@ impl DispatchPass<'_, '_, '_> {
     /// per-iteration error slot.
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
-    fn dispatch_task(&self, task: &mut TaskEntry) {
+    fn submit_task_job(&self, task: &mut TaskEntry) {
         match &mut task.kind {
             TaskKind::Single(_) | TaskKind::Chain(_) => {
                 // The dispatch closure was pre-allocated at task-add time and
