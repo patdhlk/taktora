@@ -42,6 +42,7 @@ members = [
     "crates/taktora-replay",
     "crates/taktora-stats",
     "crates/taktora-telemetry-export",
+    "xtask/preempt-rt",
 ]
 
 [workspace.package]
