@@ -7,7 +7,7 @@
 //!
 //! Usage:
 //! ```text
-//! preempt-rt-bench [--cycles N] [--period-us U] [--ring-capacity C] [--out PATH|-]
+//! preempt-rt-bench [--cycles N] [--period-us U] [--ring-capacity C] [--dispatch-mode grid|legacy] [--out PATH|-]
 //! ```
 //! Defaults: cycles=5000, period-us=1000, ring-capacity=65536, out=- (stdout).
 
@@ -24,6 +24,7 @@ struct Args {
     cycles: usize,
     period_us: u64,
     ring_capacity: usize,
+    dispatch_mode: taktora_executor::DispatchMode,
     out: String,
 }
 
@@ -33,6 +34,7 @@ impl Args {
             cycles: 5000,
             period_us: 1000,
             ring_capacity: 65536,
+            dispatch_mode: taktora_executor::DispatchMode::Grid,
             out: "-".to_string(),
         };
         let mut it = std::env::args().skip(1);
@@ -47,6 +49,17 @@ impl Args {
                     a.ring_capacity = next()?
                         .parse()
                         .map_err(|e| format!("--ring-capacity: {e}"))?;
+                }
+                "--dispatch-mode" => {
+                    a.dispatch_mode = match next()?.as_str() {
+                        "grid" => taktora_executor::DispatchMode::Grid,
+                        "legacy" => taktora_executor::DispatchMode::Legacy,
+                        other => {
+                            return Err(format!(
+                                "--dispatch-mode: expected grid|legacy, got {other}"
+                            ));
+                        }
+                    };
                 }
                 "--out" => a.out = next()?,
                 "-h" | "--help" => return Err("help".to_string()),
@@ -77,6 +90,7 @@ fn run() -> Result<(), String> {
         .worker_threads(0)
         .observer(observer)
         .stats_window(1024)
+        .dispatch_mode(args.dispatch_mode)
         .build()
         .map_err(|e| format!("build executor: {e}"))?;
 
@@ -118,7 +132,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(msg) if msg == "help" => {
             eprintln!(
-                "usage: preempt-rt-bench [--cycles N] [--period-us U] [--ring-capacity C] [--out PATH|-]"
+                "usage: preempt-rt-bench [--cycles N] [--period-us U] [--ring-capacity C] [--dispatch-mode grid|legacy] [--out PATH|-]"
             );
             ExitCode::SUCCESS
         }
