@@ -2378,6 +2378,13 @@ impl ExecutorGraphBuilder<'_> {
             .or(self.custom_id)
             .unwrap_or_else(auto_id);
         let decls = g.decls.clone();
+        // The graph root's decls become a grid-registered TaskEntry, so the same
+        // cyclic-XOR-event-driven / non-zero-period validation that guards the
+        // single-item, fault-handler, and chain add paths must guard this one too
+        // (REQ_0268). Non-root vertex triggers never reach a TaskEntry — they are
+        // discarded in `GraphBuilder::collect_root_decls` — so validating the root
+        // decls is sufficient.
+        validate_decls(&id, &decls)?;
         let scan_period = scan_period_from_decls(&decls);
 
         // Box the graph for address stability — per-vertex dispatch
@@ -2669,6 +2676,54 @@ mod tests {
                 |_| Ok(crate::ControlFlow::Continue),
             )])
             .expect_err("chain head zero-period interval must be rejected");
+        assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn add_graph_rejects_cyclic_plus_listener() {
+        use core::time::Duration;
+        // The graph path collects the root vertex's decls into a grid-registered
+        // TaskEntry; the same cyclic-XOR-event-driven validation must apply there
+        // (REQ_0268). We use a real subscriber so the listener decl is genuine.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let ch = exec
+            .channel::<Msg>("taktora.test.req0268.graph.combo")
+            .unwrap();
+        let sub = ch.subscriber().unwrap();
+        let mut g = exec.add_graph();
+        let r = g.vertex(crate::item::item_with_triggers(
+            move |d| {
+                d.interval(Duration::from_millis(1));
+                d.subscriber(&sub);
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ));
+        g.root(r);
+        let err = g
+            .build()
+            .expect_err("graph root interval + subscriber must be rejected");
+        assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn add_graph_rejects_zero_period_interval() {
+        use core::time::Duration;
+        // A zero-period interval on the graph root busy-spins the grid, so the
+        // graph path must reject it just like the single-item/chain paths.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let mut g = exec.add_graph();
+        let r = g.vertex(crate::item::item_with_triggers(
+            |d| {
+                d.interval(Duration::ZERO);
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ));
+        g.root(r);
+        let err = g
+            .build()
+            .expect_err("graph root zero-period interval must be rejected");
         assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
     }
 
