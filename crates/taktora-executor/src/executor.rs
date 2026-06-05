@@ -215,6 +215,9 @@ pub struct Executor {
     /// [`Executor::clock`] (telemetry): a telemetry mock can never alter
     /// dispatch timing. Defaults to
     /// [`MonotonicCyclicClock`](crate::MonotonicCyclicClock).
+    // Read only on non-Linux (the self-computed-timeout grid path); on Linux
+    // the kernel `timerfd` owns cyclic timing, so this is set but unread there.
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     pub(crate) cyclic_clock: std::sync::Arc<dyn crate::CyclicClock>,
 }
 
@@ -1144,6 +1147,13 @@ impl Executor {
         // Keep Arc<RawListener> alive for at least as long as the WaitSet
         // guards — the guard borrows the listener via 'attachment lifetime.
         let mut listener_storage: Vec<Arc<crate::trigger::RawListener>> = Vec::new();
+        // Storage for Linux cyclic timerfds (REQ_0268). Declared BEFORE `guards`
+        // so it drops AFTER them: guards must detach their fd from the WaitSet's
+        // epoll set before the owning `TimerFd` closes the fd, else iceoryx2's
+        // `EPOLL_CTL_DEL` hits a closed fd (EBADF) on shutdown. Same outlives-
+        // the-guards discipline as `listener_storage`.
+        #[cfg(target_os = "linux")]
+        let mut timerfd_storage: Vec<Box<crate::timerfd::TimerFd>> = Vec::new();
         // Guards must outlive the run loop.
         let mut guards: Vec<WaitSetGuard<'_, '_, ipc::Service>> = Vec::new();
         // Maps guard index → task index.
@@ -1155,31 +1165,47 @@ impl Executor {
         // &mut RunMode` parameter.
         let dispatch_mode = self.dispatch_mode;
 
-        // In Grid mode, `TriggerDecl::Interval` cyclic tasks are NOT attached to
-        // the WaitSet — the executor owns their timing via `GridTimer` and
-        // dispatches them in the post-wait pass below. These two parallel Vecs
-        // hold the cyclic task index and its period (ns), index-aligned.
+        // Grid cyclic dispatch (REQ_0268) is platform-split:
+        //
+        // * **Linux** — each `TriggerDecl::Interval` task is armed as a
+        //   `timerfd` (`TFD_TIMER_ABSTIME`) and attached to the WaitSet as a
+        //   notification, so it dispatches through the normal callback path the
+        //   moment its fd becomes readable on the absolute grid. This is the
+        //   real fix: `epoll` wakes on fd-readiness with ns precision, immune to
+        //   the ms-rounded `epoll` timeout that defeats a self-computed timeout
+        //   (ADR_0100, hardware-confirmed). The fds live in `timerfd_storage`
+        //   for the dispatch_loop lifetime (guards borrow them) and are drained
+        //   each wake to clear readiness.
+        // * **Non-Linux** — development hosts (no `timerfd`) keep the
+        //   self-computed-timeout path: cyclic tasks are NOT attached, the
+        //   executor owns their timing via `GridTimer`, and they dispatch in the
+        //   post-wait pass. (Not the real-time target; bound is not guaranteed.)
+        #[cfg(not(target_os = "linux"))]
         let mut cyclic_task_indices: Vec<usize> = Vec::new();
+        #[cfg(not(target_os = "linux"))]
         let mut cyclic_periods: Vec<u64> = Vec::new();
-        for (task_idx, task) in self.tasks.iter().enumerate() {
-            for decl in &task.decls {
-                if dispatch_mode == crate::DispatchMode::Grid {
-                    if let TriggerDecl::Interval(d) = decl {
-                        cyclic_task_indices.push(task_idx);
-                        cyclic_periods.push(u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
-                        continue;
-                    }
-                }
-                let guard = attach_trigger_decl(&waitset, &mut listener_storage, decl)?;
-                guards.push(guard);
-                attachment_to_task.push(task_idx);
-            }
-        }
-        // Absolute grid over the scheduling clock (REQ_0268). Epoch sampled once
-        // here. Empty when no cyclic tasks (or Legacy mode) → `next_timeout`
-        // returns `Duration::MAX`, so an event-only executor blocks on fds
-        // exactly as before and the post-wait pass is skipped.
+
+        build_attachments(
+            &waitset,
+            &self.tasks,
+            dispatch_mode,
+            &mut listener_storage,
+            &mut guards,
+            &mut attachment_to_task,
+            #[cfg(target_os = "linux")]
+            &mut timerfd_storage,
+            #[cfg(not(target_os = "linux"))]
+            &mut cyclic_task_indices,
+            #[cfg(not(target_os = "linux"))]
+            &mut cyclic_periods,
+        )?;
+        // Non-Linux: absolute grid over the scheduling clock (REQ_0268). Empty
+        // when no cyclic tasks (or Legacy) → `next_timeout` is `Duration::MAX`,
+        // so an event-only executor blocks on fds and the post-wait pass is
+        // skipped. On Linux the kernel timerfd owns the grid, so this is absent.
+        #[cfg(not(target_os = "linux"))]
         let mut grid = crate::grid::GridTimer::new(self.cyclic_clock.now_nanos(), cyclic_periods);
+        #[cfg(not(target_os = "linux"))]
         let mut due_cyclic: Vec<usize> = Vec::new();
 
         // Attach the internal stop listener so the WaitSet wakes when
@@ -1296,7 +1322,19 @@ impl Executor {
                     // fds, identical to the old `attach_interval` path.
                     let timeout = match dispatch_mode {
                         crate::DispatchMode::Grid => {
-                            grid.next_timeout(self.cyclic_clock.now_nanos())
+                            // Linux: block on fds — the timerfd wakes us on the
+                            // absolute grid (no self-computed timeout, so the
+                            // ms-rounding can't quantize a correction away).
+                            #[cfg(target_os = "linux")]
+                            {
+                                std::time::Duration::MAX
+                            }
+                            // Non-Linux: bound the wait by the earliest pending
+                            // grid target so the post-wait pass can dispatch.
+                            #[cfg(not(target_os = "linux"))]
+                            {
+                                grid.next_timeout(self.cyclic_clock.now_nanos())
+                            }
                         }
                         crate::DispatchMode::Legacy => std::time::Duration::MAX,
                     };
@@ -1320,61 +1358,61 @@ impl Executor {
                 break Ok(());
             };
 
-            // Post-wait absolute-grid pass (Grid mode only, REQ_0268 /
+            // Linux: drain every armed timerfd to clear its `epoll` readiness so
+            // the next wait does not spin. The fired cyclic task already
+            // dispatched through the callback above (the timerfd is an attached
+            // notification, exactly like a subscriber); non-fired fds read
+            // `EAGAIN` (a harmless no-op). REQ_0268 / ADR_0100. There is no
+            // separate stop guard here: on a stop wake a fired timerfd dispatches
+            // in the callback just as `attach_interval`/subscribers always have,
+            // and `after_callback` terminates the loop on the same iteration.
+            #[cfg(target_os = "linux")]
+            for tf in &timerfd_storage {
+                let _overruns = tf.drain();
+            }
+
+            // Non-Linux: post-wait absolute-grid pass (Grid mode only, REQ_0268 /
             // ADR_0100). The WaitSet callback above (now dropped, freeing its
             // borrows) handles event/fd tasks; cyclic tasks are timed here off
-            // the scheduling clock. We rebuild a fresh `DispatchPass` mirroring
-            // the callback pass exactly — same borrows and raw pointers, same
-            // single-writer WaitSet-thread discipline — then dispatch the due
-            // cyclic tasks and fold their telemetry through the SHARED
-            // `barrier_and_record` helper. This is a SEPARATE barrier phase from
-            // the callback's: each phase barriers and folds only its own
-            // `pending_cycle` stashes, so cyclic tasks record exactly once,
-            // identically to event tasks. We do NOT call `record_cycle_for`
-            // directly here.
-            //
-            // REQ_0268: skip the cyclic dispatch+record when this wake is a
-            // stop wake. Legacy dispatches no cyclic work on a stop wake; the
-            // grid path must match, or a `stop()` would emit one spurious cycle
-            // observation (a near-zero-interval jitter sample, and a stray
-            // `cycle_index` increment that desyncs the FEAT_0038 join key). We
-            // gate on the same signals `after_callback` uses to terminate: the
-            // shared stop flag and the cheaply-available interrupt/termination
-            // result already captured from the wait. Termination itself is still
-            // decided by `after_callback` below — this guard only suppresses the
-            // cyclic phase's side effects.
-            let stopping = stop_flag.is_stopped()
-                || matches!(
-                    cb_result,
-                    Ok(WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest)
-                );
-            if !stopping && dispatch_mode == crate::DispatchMode::Grid {
-                // Rebuild a fresh `DispatchPass` mirroring the callback pass
-                // exactly — same borrows and raw pointers, same single-writer
-                // WaitSet-thread discipline. The callback above is now dropped,
-                // freeing its borrows. The grid pass helper owns the empty/due
-                // guards and the SEPARATE barrier phase (REQ_0268 / ADR_0100).
-                let cpass = DispatchPass {
-                    guards: &guards,
-                    attachment_to_task: &attachment_to_task,
-                    tasks_ptr,
-                    cycle_stats_ptr,
-                    observer,
-                    exec_fault_ptr,
-                    exec_start_ptr,
-                    clock,
-                    grid_epoch_ptr,
-                    stop_listener_ptr,
-                    pool,
-                    iter_err: &iter_err_inner,
-                };
-                run_grid_cyclic_pass(
-                    cpass,
-                    &mut grid,
-                    self.cyclic_clock.now_nanos(),
-                    &cyclic_task_indices,
-                    &mut due_cyclic,
-                );
+            // the scheduling clock through a fresh `DispatchPass` mirroring the
+            // callback pass exactly, then folded through the SHARED
+            // `barrier_and_record` helper (a SEPARATE barrier phase keyed on
+            // `pending_cycle`, so cyclic tasks record exactly once). The cyclic
+            // dispatch+record is skipped on a stop wake — Legacy dispatches no
+            // cyclic work on a stop wake, so the grid path must match or a
+            // `stop()` would emit one spurious cycle observation and desync the
+            // FEAT_0038 `cycle_index` join key. Termination is still decided by
+            // `after_callback`; this guard only suppresses the cyclic side effects.
+            #[cfg(not(target_os = "linux"))]
+            {
+                let stopping = stop_flag.is_stopped()
+                    || matches!(
+                        cb_result,
+                        Ok(WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest)
+                    );
+                if !stopping && dispatch_mode == crate::DispatchMode::Grid {
+                    let cpass = DispatchPass {
+                        guards: &guards,
+                        attachment_to_task: &attachment_to_task,
+                        tasks_ptr,
+                        cycle_stats_ptr,
+                        observer,
+                        exec_fault_ptr,
+                        exec_start_ptr,
+                        clock,
+                        grid_epoch_ptr,
+                        stop_listener_ptr,
+                        pool,
+                        iter_err: &iter_err_inner,
+                    };
+                    run_grid_cyclic_pass(
+                        cpass,
+                        &mut grid,
+                        self.cyclic_clock.now_nanos(),
+                        &cyclic_task_indices,
+                        &mut due_cyclic,
+                    );
+                }
             }
 
             // Funnel the post-callback decision (interrupt / item error /
@@ -1469,6 +1507,7 @@ enum IterOutcome {
 /// Returns early (no dispatch, no record) when there are no cyclic tasks or
 /// nothing is due this wakeup. The stop-wake suppression (`REQ_0268`) is gated
 /// by the caller before this is invoked.
+#[cfg(not(target_os = "linux"))]
 fn run_grid_cyclic_pass(
     mut pass: DispatchPass<'_, '_, '_>,
     grid: &mut crate::grid::GridTimer,
@@ -1487,6 +1526,75 @@ fn run_grid_cyclic_pass(
         pass.dispatch_task(cyclic_task_indices[*slot]);
     }
     pass.barrier_and_record();
+}
+
+/// Build every WaitSet attachment for the task table (REQ_0268). In `Grid`
+/// mode, `TriggerDecl::Interval` cyclic tasks are handled per-platform: on Linux
+/// each is armed as a `timerfd` and attached as a notification (so it dispatches
+/// through the callback on the absolute grid); on non-Linux its task index and
+/// period are recorded for the self-computed-timeout path and it is not attached.
+/// Every other decl (and every decl in `Legacy` mode, including `Interval` via
+/// `attach_interval`) is attached normally. Extracted from `dispatch_loop` to
+/// keep that function within the cyclomatic-complexity budget.
+//
+// `vec_box`: the `Box` is load-bearing, not redundant — the WaitSet guard holds
+// a lifetime-erased raw pointer into each `TimerFd`, so the storage must be
+// pointer-stable across `Vec` growth; `Vec<TimerFd>` would move elements on
+// realloc and dangle those guards.
+#[allow(clippy::too_many_arguments, clippy::vec_box, clippy::doc_markdown)]
+fn build_attachments<'w>(
+    waitset: &'w WaitSet<ipc::Service>,
+    tasks: &[TaskEntry],
+    dispatch_mode: crate::DispatchMode,
+    listener_storage: &mut Vec<Arc<crate::trigger::RawListener>>,
+    guards: &mut Vec<WaitSetGuard<'w, 'w, ipc::Service>>,
+    attachment_to_task: &mut Vec<usize>,
+    #[cfg(target_os = "linux")] timerfd_storage: &mut Vec<Box<crate::timerfd::TimerFd>>,
+    #[cfg(not(target_os = "linux"))] cyclic_task_indices: &mut Vec<usize>,
+    #[cfg(not(target_os = "linux"))] cyclic_periods: &mut Vec<u64>,
+) -> Result<(), ExecutorError> {
+    for (task_idx, task) in tasks.iter().enumerate() {
+        for decl in &task.decls {
+            if dispatch_mode == crate::DispatchMode::Grid {
+                if let TriggerDecl::Interval(d) = decl {
+                    #[cfg(target_os = "linux")]
+                    {
+                        // Arm a timerfd on the absolute grid and attach it as a
+                        // notification. SAFETY: `timerfd_storage` holds the
+                        // `TimerFd` behind a `Box` (pointer-stable across Vec
+                        // growth) and outlives the guards; the raw-pointer cast
+                        // erases the borrow lifetime to the attachment lifetime —
+                        // sound because the box is dropped after the guards (same
+                        // discipline as `attach_trigger_decl` / `listener_storage`).
+                        let tf = crate::timerfd::TimerFd::new(*d).map_err(|e| {
+                            ExecutorError::DeclareTriggers(format!(
+                                "failed to arm timerfd for cyclic task: {e}"
+                            ))
+                        })?;
+                        timerfd_storage.push(Box::new(tf));
+                        #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
+                        let tf_ref: &crate::timerfd::TimerFd =
+                            unsafe { &*(timerfd_storage.last().unwrap().as_ref() as *const _) };
+                        let guard = waitset
+                            .attach_notification(tf_ref)
+                            .map_err(ExecutorError::iceoryx2)?;
+                        guards.push(guard);
+                        attachment_to_task.push(task_idx);
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        cyclic_task_indices.push(task_idx);
+                        cyclic_periods.push(u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
+                    }
+                    continue;
+                }
+            }
+            let guard = attach_trigger_decl(waitset, listener_storage, decl)?;
+            guards.push(guard);
+            attachment_to_task.push(task_idx);
+        }
+    }
+    Ok(())
 }
 
 /// Attaches a single [`TriggerDecl`] to `waitset`, returning the resulting

@@ -982,7 +982,7 @@ Framework internal-fault model (FEAT_0024)
 Absolute-grid cyclic dispatch
 -----------------------------
 
-.. arch-decision:: Self-computed absolute grid for cyclic dispatch; iceoryx2 interval timer is relative
+.. arch-decision:: Absolute-grid cyclic dispatch via Linux timerfd; self-computed epoll timeout fails on ms-rounding
    :id: ADR_0100
    :status: accepted
    :refines: FEAT_0011
@@ -1012,58 +1012,63 @@ Absolute-grid cyclic dispatch
    iceoryx2 0.9.0/0.9.1: the only WaitSet change is "allow ``dyn``
    attachments"; the relative-timeout behaviour is unchanged.)
 
-   **Decision.** Stop using ``attach_interval`` for the grid. The executor
-   owns the timer: a pure ``GridTimer`` state machine holds a scheduling
-   ``epoch`` sampled once at ``dispatch_loop`` entry plus a per-task
-   ``next_k = epoch + slot_k × period_k``; each iteration passes
-   ``min_k(next_k) − now`` to ``wait_and_process_once_with_timeout``. Any
-   oversleep in cycle *k* shortens cycle *k+1*'s timeout, so lateness stays
-   bounded (jitter, not drift). On wake the per-attachment callback handles
-   only event/fd-driven tasks; cyclic tasks dispatch in a **post-wait pass**
-   that advances ``next_k`` and, after a stall, snaps closed-form to the next
-   future slot (skip missed slots, dispatch once — never burst). One
-   ``pool.barrier()`` per iteration covers both passes.
+   **Decision.** Stop using ``attach_interval`` for the grid. Cyclic dispatch
+   is phase-locked to an absolute ``CLOCK_MONOTONIC`` grid using a **Linux
+   ``timerfd``** (``TFD_TIMER_ABSTIME``) — one per cyclic task — attached to the
+   WaitSet as a notification (``attach_notification`` via an
+   ``iceoryx2-bb-posix`` ``FileDescriptor`` wrapper). The kernel arms an
+   ``hrtimer`` that makes the fd readable at the exact grid point and
+   auto-rearms every ``period`` (counting overruns); the task dispatches through
+   the normal callback the instant its fd fires. The WaitSet blocks
+   (``Duration::MAX``) on **fd-readiness** — interrupt-driven, and therefore
+   immune to the ``epoll`` timeout's millisecond rounding. The loop drains each
+   timerfd (8-byte read) per wake to clear readiness. The lateness path of
+   :need:`REQ_0106` is left untouched.
 
-   The scheduling time is read through a new ``CyclicClock`` trait
-   (``CLOCK_MONOTONIC`` implementation), **distinct** from the telemetry
-   ``MonotonicClock`` of :need:`REQ_0106` — a type-level guarantee that
-   substituting a test clock for telemetry cannot alter dispatch. The
-   lateness path of :need:`REQ_0106` is left untouched and is the independent
-   witness for :need:`REQ_0268`.
+   This **supersedes** the original self-computed-timeout decision (a
+   ``GridTimer`` driving ``wait_and_process_once_with_timeout`` with
+   ``min_k(next_k) − now``), which a Pi5 A/B proved cannot bound
+   sub-millisecond drift — see Alternatives. On **non-Linux** development hosts
+   (no ``timerfd``) ``Grid`` mode keeps that ``GridTimer`` path; those are not
+   the real-time target, so its residual drift is immaterial and it preserves
+   cross-platform build/test.
 
    **Alternatives weighed.**
 
+   * *Self-computed absolute timeout* (``GridTimer`` →
+     ``wait_and_process_once_with_timeout``). The original decision, **rejected
+     on hardware.** iceoryx2's ``epoll`` ``timed_wait`` rounds the timeout **up
+     to whole milliseconds** (``iceoryx2-bb-linux`` ``epoll.rs``:
+     ``as_nanos().div_ceil(1_000_000)``), so a sub-ms correction (e.g. wake 7 µs
+     early to claw back drift) becomes a full 1 ms — quantized away every cycle,
+     and ``δ`` accumulates exactly like the relative timer. Pi5 A/B: the grid
+     drifted **+3.3 µs/cycle, identical to** ``attach_interval``. No
+     self-computed timeout can beat ms-granularity rounding; retained only as
+     the non-Linux dev fallback.
    * *Keep* ``attach_interval`` *and add a corrective timeout.* Rejected: the
      ``DeadlineQueue`` anchor is reset only for triggered file descriptors,
-     never for pure interval ticks, so it cannot be re-phased to our grid. A
-     shorter corrective timeout returns ``Ok(0)`` with no elapsed deadline —
-     ``handle_deadlines`` fires nothing, so we wake but do not dispatch; early
-     wakes become wasted spins and dispatch stays welded to the drifting
-     anchor.
-   * ``timerfd`` *with* ``TFD_TIMER_ABSTIME`` *(most robust).* The kernel
-     re-arms on the absolute grid and reports overruns via the 8-byte read;
-     the fd multiplexes into the WaitSet via ``attach_notification``.
-     **Deferred**, not chosen now: it is Linux-only, delivers the tick through
-     the callback path (a different control flow), and is the natural home of
-     the deferred DC-synced bus-cycle work — its arming mechanism is the part
-     still under-specified. It will replace the *arming glue* while reusing
-     this grid math and the ``CyclicClock`` seam. A future DC clock is simply
-     another ``CyclicClock`` implementation.
+     never for pure interval ticks, so a shorter corrective timeout returns
+     ``Ok(0)`` with no elapsed deadline — ``handle_deadlines`` fires nothing, so
+     we wake but do not dispatch; dispatch stays welded to the drifting anchor.
 
-   **Consequences.** Long-run lateness is bounded (:need:`REQ_0268`), proven
-   in CI by a deterministic ``GridTimer`` unit test (absolute-grid advance,
-   skip-realign, multi-period ``min``) and validated on hardware by a Pi5 A/B
-   (10 min / 600 000 cycles, ``SCHED_FIFO``, ``taskset -c 3``): legacy
-   reproduces the linear drift; the grid path holds ``|final lateness|``
-   below 2× its 60 000-cycle value and under 1 ms, with jitter within ~1 µs of
-   legacy. The recurring ~997 µs (≈ one period) ~1 Hz spike is FIFO-immune
-   kernel/IRQ housekeeping, out of scope here (needs PREEMPT_RT + IRQ
-   isolation) and excluded from the slope metric. The old ``attach_interval``
-   grid path is retained behind a temporary runtime ``dispatch_mode``
-   (``Grid`` default | ``Legacy``), the mode branch hoisted out of the hot
-   loop for zero per-cycle cost, and removed in a follow-up once the Pi A/B
-   passes. A deadline-miss watchdog (faulting after *K* skipped slots) stays
-   telemetry-only for now and is deferred.
+   **Consequences.** Long-run lateness is bounded. Pi5 FIFO A/B
+   (``chrt -f 80 taskset -c 3``, 1 ms, ``cycle_index``-anchored grid):
+   timerfd-grid slope **≈ 0 ns/cycle**, ``|final lateness|`` **≈ 7 µs at
+   600 000 cycles** — versus legacy ``attach_interval`` **+3.1 µs/cycle /
+   1879 ms** (reproducing the bug). Grid jitter is also far tighter (p50
+   ~50 ns vs ~5.8 µs). A C-level ``timerfd``+``epoll`` probe independently
+   confirmed slope ≈ 0 even under ``SCHED_OTHER``. Linux gains ``libc`` +
+   ``iceoryx2-bb-posix`` dependencies. ``Legacy`` (``attach_interval``) is
+   retained behind the runtime ``dispatch_mode`` toggle and removed in a
+   follow-up; the non-Linux ``GridTimer`` path (and its unit test) likewise
+   stay for dev hosts, with retirement deferred. A deadline-miss watchdog
+   stays telemetry-only and deferred.
+
+   *Metric caveat.* :need:`REQ_0106`'s ``grid_slot`` reconstruction
+   (``round(actual_period / period).max(1)``) over-counts on coalesced
+   catch-up wakes, fabricating spurious *negative* lateness; the A/B above uses
+   a ``cycle_index``-anchored grid immune to it. Correcting the ``grid_slot``
+   metric is a separate telemetry follow-up, independent of this dispatch fix.
 
 .. building-block:: Absolute-grid timer and cyclic scheduling clock
    :id: BB_0095
