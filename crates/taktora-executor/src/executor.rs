@@ -1369,44 +1369,37 @@ impl Executor {
             #[cfg(not(target_os = "linux"))]
             let ticked = true;
 
-            // Post-wait master-grid pass (Grid mode). Dispatch EVERY due cyclic
-            // task atomically this tick (PLC semantics), then fold telemetry via
-            // the shared barrier_and_record. Skipped on a stop wake so a stop()
-            // emits no spurious cycle (matches Legacy). Termination is decided by
-            // after_callback below.
-            let stopping = stop_flag.is_stopped()
-                || matches!(
-                    cb_result,
-                    Ok(WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest)
-                );
-            if ticked
-                && !stopping
-                && dispatch_mode == crate::DispatchMode::Grid
-                // skip building cpass when there are no cyclic tasks
-                && !cyclic_task_indices.is_empty()
-            {
-                let cpass = DispatchPass {
-                    guards: &guards,
-                    attachment_to_task: &attachment_to_task,
-                    tasks_ptr,
-                    cycle_stats_ptr,
-                    observer,
-                    exec_fault_ptr,
-                    exec_start_ptr,
-                    clock,
-                    grid_epoch_ptr,
-                    stop_listener_ptr,
-                    pool,
-                    iter_err: &iter_err_inner,
-                };
-                run_grid_cyclic_pass(
-                    cpass,
-                    &mut grid,
-                    self.cyclic_clock.now_nanos(),
-                    &cyclic_task_indices,
-                    &mut due_cyclic,
-                );
-            }
+            // Post-wait master-grid pass (Grid mode). `run_grid_cyclic_pass`
+            // self-gates on `ticked` / stop-wake / mode / non-empty, then
+            // dispatches EVERY due cyclic task atomically this tick (PLC
+            // semantics). `cpass` is a side-effect-free bundle of borrows, so
+            // building it unconditionally is free; the gate lives in the helper
+            // to keep `dispatch_loop` within the complexity budget. REQ_0268.
+            let cpass = DispatchPass {
+                guards: &guards,
+                attachment_to_task: &attachment_to_task,
+                tasks_ptr,
+                cycle_stats_ptr,
+                observer,
+                exec_fault_ptr,
+                exec_start_ptr,
+                clock,
+                grid_epoch_ptr,
+                stop_listener_ptr,
+                pool,
+                iter_err: &iter_err_inner,
+            };
+            run_grid_cyclic_pass(
+                cpass,
+                ticked,
+                dispatch_mode,
+                &stop_flag,
+                cb_result,
+                &mut grid,
+                self.cyclic_clock.now_nanos(),
+                &cyclic_task_indices,
+                &mut due_cyclic,
+            );
 
             // Funnel the post-callback decision (interrupt / item error /
             // stop request / run-mode termination) through one helper that
@@ -1497,17 +1490,38 @@ enum IterOutcome {
 /// record exactly once, identically to event tasks. We do NOT call
 /// `record_cycle_for` directly here.
 ///
-/// Returns early (no dispatch, no record) when there are no cyclic tasks or
-/// nothing is due this wakeup. The stop-wake suppression (`REQ_0268`) is gated
-/// by the caller before this is invoked.
+/// Self-gates and returns early (no dispatch, no record) unless this wake should
+/// run the grid: the master timer ticked (`ticked`), we are in `Grid` mode, it is
+/// not a stop wake, and there is at least one cyclic task with something due.
+///
+/// **Stop-wake suppression (`REQ_0268`)**: a `stop()` (or a SIGINT/SIGTERM
+/// `cb_result`) must emit no spurious cyclic cycle — Legacy dispatches none on a
+/// stop wake, so the grid path matches, or a `stop()` would emit one extra cycle
+/// observation and desync the `FEAT_0038` `cycle_index` join key. Termination
+/// itself is still decided by `after_callback`; this only suppresses the side
+/// effects.
+#[allow(clippy::too_many_arguments)]
 fn run_grid_cyclic_pass(
     mut pass: DispatchPass<'_, '_, '_>,
+    ticked: bool,
+    dispatch_mode: crate::DispatchMode,
+    stop_flag: &Stoppable,
+    cb_result: Result<WaitSetRunResult, iceoryx2::waitset::WaitSetRunError>,
     grid: &mut crate::grid::GridTimer,
     now_nanos: u64,
     cyclic_task_indices: &[usize],
     due_cyclic: &mut Vec<usize>,
 ) {
-    if cyclic_task_indices.is_empty() {
+    let stopping = stop_flag.is_stopped()
+        || matches!(
+            cb_result,
+            Ok(WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest)
+        );
+    if !ticked
+        || stopping
+        || dispatch_mode != crate::DispatchMode::Grid
+        || cyclic_task_indices.is_empty()
+    {
         return;
     }
     grid.take_due(now_nanos, due_cyclic);
