@@ -94,17 +94,28 @@ pub(crate) struct GridTimer {
     period_ns: Vec<u64>,
     /// Per cyclic task next absolute grid target (ns); `epoch + slot·period`.
     next: Vec<u64>,
+    /// Per-task skipped-slot carry (`REQ_0840`): slots the realign of the
+    /// *previous* dispatch passed over unserved, reported on the task's next
+    /// dispatch (backward-looking). `0` in steady state; consumed exactly once.
+    carry: Vec<u64>,
+    /// Per-task "dispatched at least once". A realign on the very first
+    /// dispatch sets no carry: the task's lateness grid anchors at that
+    /// dispatch, so earlier slots do not exist on its own grid (`REQ_0840`).
+    served: Vec<bool>,
 }
 
 impl GridTimer {
     /// `epoch` = scheduling `now_nanos()` at dispatch entry; one `period` per
     /// cyclic task. First target for task *k* is `epoch + period_k`.
     pub(crate) fn new(epoch: u64, periods: Vec<u64>) -> Self {
+        let len = periods.len();
         let next = periods.iter().map(|p| epoch.saturating_add(*p)).collect();
         Self {
             epoch,
             period_ns: periods,
             next,
+            carry: vec![0; len],
+            served: vec![false; len],
         }
     }
 
@@ -133,18 +144,23 @@ impl GridTimer {
         self.next[i]
     }
 
-    /// Collect cyclic tasks due at `now` into `due` (cleared first). A due task
-    /// is dispatched exactly once; its target then advances by one period in the
-    /// normal case, or — if the wake was late by ≥1 whole slot — snaps closed-form
-    /// to the next *future* grid point (skip-realign, `ADR_0100`). Never replays a
-    /// burst of stale cycles, which is wrong for cyclic control.
-    pub(crate) fn take_due(&mut self, now: u64, due: &mut Vec<usize>) {
+    /// Collect cyclic tasks due at `now` into `due` (cleared first), each
+    /// paired with its consumed skipped-slot carry (`REQ_0840`). A due task is
+    /// dispatched exactly once; its target then advances by one period in the
+    /// normal case, or — if the wake was late by ≥1 whole slot — snaps
+    /// closed-form to the next *future* grid point (skip-realign, `ADR_0100`),
+    /// recording the abandoned slot count as carry for the task's NEXT
+    /// dispatch. Never replays a burst of stale cycles, which is wrong for
+    /// cyclic control.
+    pub(crate) fn take_due(&mut self, now: u64, due: &mut Vec<(usize, u64)>) {
         due.clear();
         for (i, next) in self.next.iter_mut().enumerate() {
             if now >= *next {
-                due.push(i);
+                due.push((i, std::mem::take(&mut self.carry[i])));
                 let period = self.period_ns[i];
                 if period == 0 {
+                    // Unreachable post-registration (rejected per REQ_0268);
+                    // continue skips served/carry bookkeeping intentionally.
                     continue;
                 }
                 let stepped = next.saturating_add(period);
@@ -155,9 +171,17 @@ impl GridTimer {
                     // Missed >= 1 whole slot: closed-form snap to the next
                     // future grid point. Dispatch once (above); never burst.
                     let slots_passed = now.saturating_sub(self.epoch) / period;
-                    self.epoch
-                        .saturating_add(slots_passed.saturating_add(1).saturating_mul(period))
+                    let snapped = self
+                        .epoch
+                        .saturating_add(slots_passed.saturating_add(1).saturating_mul(period));
+                    if self.served[i] {
+                        // Abandoned slots strictly after the one served by this
+                        // dispatch, up to (exclusive) the realigned target (REQ_0840).
+                        self.carry[i] = snapped.saturating_sub(stepped) / period;
+                    }
+                    snapped
                 };
+                self.served[i] = true;
             }
         }
     }
@@ -218,17 +242,17 @@ mod tests {
 
         // Cycle 1: woke at 1005 (5ns late). Due once; next target -> 2000, not 2005.
         t.take_due(1005, &mut due);
-        assert_eq!(due, vec![0]);
+        assert_eq!(due, vec![(0, 0)]);
         assert_eq!(t.next_target(0), 2000);
 
         // Cycle 2: woke at 2012 (12ns late). Due once; next target -> 3000.
         t.take_due(2012, &mut due);
-        assert_eq!(due, vec![0]);
+        assert_eq!(due, vec![(0, 0)]);
         assert_eq!(t.next_target(0), 3000);
 
         // Not yet due at 2999.
         t.take_due(2999, &mut due);
-        assert_eq!(due, Vec::<usize>::new());
+        assert_eq!(due, Vec::<(usize, u64)>::new());
         assert_eq!(t.next_target(0), 3000);
     }
 
@@ -240,7 +264,7 @@ mod tests {
 
         t.take_due(3500, &mut due);
         // Dispatched exactly once — no burst replay of the 3 missed cycles.
-        assert_eq!(due, vec![0]);
+        assert_eq!(due, vec![(0, 0)]);
         // Re-aligned to the next *future* slot: floor(3500/1000)+1 = 4 -> 4000.
         assert_eq!(t.next_target(0), 4000);
         assert!(
@@ -255,7 +279,7 @@ mod tests {
         let mut due = Vec::new();
         // Exactly on slot 3's boundary.
         t.take_due(3000, &mut due);
-        assert_eq!(due, vec![0]);
+        assert_eq!(due, vec![(0, 0)]);
         assert_eq!(t.next_target(0), 4000);
     }
 
@@ -304,15 +328,116 @@ mod tests {
 
         // At 1000: only the 1ms task is due.
         t.take_due(1000, &mut due);
-        assert_eq!(due, vec![0]);
+        assert_eq!(due, vec![(0, 0)]);
 
         // Next earliest: both targets now at 2000.
         assert_eq!(t.next_timeout(1000), Duration::from_nanos(1000));
 
         // At 2000: both cadences coincide -> both due in one wake.
         t.take_due(2000, &mut due);
-        assert_eq!(due, vec![0, 1]);
+        assert_eq!(due, vec![(0, 0), (1, 0)]);
         assert_eq!(t.next_target(0), 3000);
         assert_eq!(t.next_target(1), 4000);
+    }
+
+    #[test]
+    fn due_entries_carry_zero_skips_in_steady_state() {
+        let mut t = GridTimer::new(0, vec![1000]);
+        let mut due = Vec::new();
+        t.take_due(1002, &mut due);
+        assert_eq!(due, vec![(0, 0)]);
+        t.take_due(2005, &mut due);
+        assert_eq!(due, vec![(0, 0)]);
+    }
+
+    #[test]
+    fn realign_carries_abandoned_slots_to_the_next_dispatch_exactly_once() {
+        // period 1000, epoch 0. Dispatch on-grid once, then starve.
+        let mut t = GridTimer::new(0, vec![1000]);
+        let mut due = Vec::new();
+        t.take_due(1002, &mut due); // serves slot 1; next -> 2000
+        assert_eq!(due, vec![(0, 0)]);
+
+        // Starved until 3500: serves the overdue slot-2 target, realigns to 4000.
+        // Slot 3 (t=3000) is abandoned: carry = (4000 - 3000) / 1000 = 1.
+        // The starved dispatch itself reports 0 — backward-looking semantics:
+        // nothing was passed over between slot 1 (previous) and slot 2 (this).
+        t.take_due(3500, &mut due);
+        assert_eq!(due, vec![(0, 0)]);
+        assert_eq!(t.next_target(0), 4000);
+
+        // The NEXT dispatch consumes the carry (slot 2 -> slot 4 skipped slot 3).
+        t.take_due(4000, &mut due);
+        assert_eq!(due, vec![(0, 1)]);
+
+        // Consumed exactly once: back to 0 afterwards.
+        t.take_due(5000, &mut due);
+        assert_eq!(due, vec![(0, 0)]);
+    }
+
+    #[test]
+    fn realign_on_a_tasks_first_dispatch_sets_no_carry() {
+        // Starved before the task ever dispatched: slots before the first
+        // dispatch do not exist on the task's own lateness grid (REQ_0840).
+        let mut t = GridTimer::new(0, vec![1000]);
+        let mut due = Vec::new();
+        t.take_due(3500, &mut due); // first dispatch, realigns 2000 -> 4000
+        assert_eq!(due, vec![(0, 0)]);
+        assert_eq!(t.next_target(0), 4000);
+        t.take_due(4000, &mut due); // no carry from the first-dispatch realign
+        assert_eq!(due, vec![(0, 0)]);
+    }
+
+    #[test]
+    fn multi_slot_starvation_carries_the_full_abandoned_count() {
+        let mut t = GridTimer::new(0, vec![1000]);
+        let mut due = Vec::new();
+        t.take_due(1000, &mut due); // first dispatch on-grid; next -> 2000
+        // Starved until 5500: serves slot-2 target, realign to 6000.
+        // Abandoned: slots at 3000, 4000, 5000 -> carry = (6000 - 3000)/1000 = 3.
+        t.take_due(5500, &mut due);
+        assert_eq!(due, vec![(0, 0)]);
+        assert_eq!(t.next_target(0), 6000);
+        t.take_due(6000, &mut due);
+        assert_eq!(due, vec![(0, 3)]);
+    }
+
+    #[test]
+    fn back_to_back_realigns_hand_over_carry_without_loss_or_doubling() {
+        // Pins the mem::take-then-reassign ordering across two consecutive
+        // starvations: the first realign's carry must be consumed by the second
+        // starvation's due entry (not stale/doubled), and the second realign's
+        // fresh carry must be delivered on the very next on-grid wake.
+        // epoch 0, period 1000.
+        let mut t = GridTimer::new(0, vec![1000]);
+        let mut due = Vec::new();
+
+        // Dispatch on-grid: serves slot 1 (target 1000); next -> 2000.
+        t.take_due(1000, &mut due);
+        assert_eq!(due, vec![(0, 0)]);
+
+        // First starvation: now=4500 >= next=2000.
+        //   stepped = 2000 + 1000 = 3000; 3000 <= 4500 -> realign.
+        //   slots_passed = 4500/1000 = 4; snapped = (4+1)*1000 = 5000.
+        //   carry = (5000 - 3000) / 1000 = 2.  Abandoned: slots 3000, 4000.
+        //   Due entry reports 0 (backward-looking; nothing before slot-2 skipped).
+        t.take_due(4500, &mut due);
+        assert_eq!(due, vec![(0, 0)]);
+        assert_eq!(t.next_target(0), 5000);
+
+        // Second starvation BEFORE on-grid wake: now=7500 >= next=5000.
+        //   mem::take delivers the first realign's carry (2) in this due entry.
+        //   stepped = 5000 + 1000 = 6000; 6000 <= 7500 -> realign.
+        //   slots_passed = 7500/1000 = 7; snapped = (7+1)*1000 = 8000.
+        //   carry = (8000 - 6000) / 1000 = 2.  (Second realign's fresh carry.)
+        t.take_due(7500, &mut due);
+        assert_eq!(due, vec![(0, 2)]);
+        assert_eq!(t.next_target(0), 8000);
+
+        // On-grid wake: consumes the second realign's carry, then drains to 0.
+        t.take_due(8000, &mut due);
+        assert_eq!(due, vec![(0, 2)]);
+        t.take_due(9000, &mut due);
+        assert_eq!(due, vec![(0, 0)]);
     }
 }

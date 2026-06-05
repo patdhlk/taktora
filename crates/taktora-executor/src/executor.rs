@@ -1172,7 +1172,7 @@ impl Executor {
         // arm the single master timerfd; on non-Linux it is unused after this.
         let mut grid =
             crate::grid::GridTimer::new(self.cyclic_clock.now_nanos(), cyclic_periods.clone());
-        let mut due_cyclic: Vec<usize> = Vec::new();
+        let mut due_cyclic: Vec<(usize, u64)> = Vec::new();
 
         // Master cyclic timer (REQ_0268, Linux). ONE timerfd armed at the base
         // period (gcd of cyclic periods) drives the absolute grid; GridTimer
@@ -1510,7 +1510,7 @@ fn run_grid_cyclic_pass(
     grid: &mut crate::grid::GridTimer,
     now_nanos: u64,
     cyclic_task_indices: &[usize],
-    due_cyclic: &mut Vec<usize>,
+    due_cyclic: &mut Vec<(usize, u64)>,
 ) {
     let stopping = stop_flag.is_stopped()
         || matches!(
@@ -1528,7 +1528,7 @@ fn run_grid_cyclic_pass(
     if due_cyclic.is_empty() {
         return;
     }
-    for slot in due_cyclic.iter() {
+    for (slot, _skipped) in due_cyclic.iter() {
         pass.dispatch_task(cyclic_task_indices[*slot]);
     }
     pass.barrier_and_record();
