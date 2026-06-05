@@ -28,10 +28,6 @@ mod executor;
 mod fatal;
 mod fault;
 mod graph;
-// On Linux, cyclic dispatch uses `timerfd` (REQ_0268 "Option 2"), so the
-// `GridTimer` state machine is exercised only by its own unit tests there; its
-// `CyclicClock`/`DispatchMode` exports remain in use on every platform.
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod grid;
 mod item;
 mod monitor;
