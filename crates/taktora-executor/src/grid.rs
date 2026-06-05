@@ -144,6 +144,24 @@ impl GridTimer {
     }
 }
 
+/// The base tick for a PLC-style master timer: the GCD of all declared cyclic
+/// periods (ns), so every task's period is an integer number of base ticks and
+/// the single timer hits every task's grid point. Returns 0 when there are no
+/// cyclic tasks (caller arms no timer). Zero-valued periods are ignored (they
+/// are rejected at registration, `REQ_0268`).
+// `redundant_pub_crate`: this module is private, so `pub(crate)` looks redundant,
+// but the symbol is consumed by a sibling module in a later task.
+// `dead_code`: wired up by the dispatch-loop integration task; suppress until then.
+#[allow(clippy::redundant_pub_crate, dead_code)]
+pub(crate) fn base_period(periods: &[u64]) -> u64 {
+    periods.iter().copied().filter(|p| *p != 0).fold(0, gcd)
+}
+
+#[allow(dead_code)]
+const fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,6 +252,16 @@ mod tests {
         let t = GridTimer::new(0, vec![]);
         assert_eq!(t.next_timeout(0), Duration::MAX);
         assert_eq!(t.next_timeout(12_345), Duration::MAX);
+    }
+
+    #[test]
+    fn base_period_is_gcd_of_declared_periods() {
+        assert_eq!(base_period(&[1_000_000]), 1_000_000); // single task → its period
+        assert_eq!(base_period(&[2_000_000, 4_000_000]), 2_000_000); // harmonic → smaller
+        assert_eq!(base_period(&[2_000_000, 3_000_000]), 1_000_000); // coprime → gcd
+        assert_eq!(base_period(&[1_000_000, 1_000_000]), 1_000_000); // duplicates
+        assert_eq!(base_period(&[0, 2_000_000]), 2_000_000); // zero entry ignored
+        assert_eq!(base_period(&[]), 0); // no cyclic tasks
     }
 
     #[test]
