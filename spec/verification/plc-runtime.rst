@@ -310,7 +310,10 @@ Test cases verifying the scan-cycle observability sub-feature
 
    **Fixture.** Executor (``worker_threads(0)``) with cyclic task(s);
    telemetry ``MockClock`` advanced from the task body; per-cycle
-   lateness captured via the push ``Observer``.
+   lateness captured via the push ``Observer``. ``Legacy`` dispatch
+   mode is forced: the scripted-clock figures must not depend on
+   real-time dispatcher behavior (the ``Grid`` skip ferry is verified
+   by :need:`TEST_0853`).
 
    **Steps — accumulation.**
 
@@ -344,10 +347,14 @@ Test cases verifying the scan-cycle observability sub-feature
 
    1. Two cyclic tasks (10 ms and 20 ms) share the mock clock; only
       the 10 ms body advances it.
-   2. Assert every recorded lateness of **both** tasks is ``0`` — the
-      second task anchors at its own first dispatch (the pre-fix
-      executor-shared epoch reported its start phase as a permanent
-      offset).
+   2. Assert the first task's every sample is exactly ``0`` (it drives
+      the clock itself) and the second task's **first** sample is
+      exactly ``0`` — it anchors at its own first dispatch, where the
+      pre-fix executor-shared epoch reported the start phase (at least
+      one foreign period) from the first sample on. Later samples of
+      the second task ride the real-time interleave of the two relative
+      timers and are asserted **bounded** (no accumulation) rather than
+      exact.
 
    All four live in
    ``crates/taktora-executor/tests/cycle_stats_lateness.rs``.

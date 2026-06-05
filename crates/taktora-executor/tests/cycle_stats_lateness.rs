@@ -10,13 +10,14 @@
 //! 3. **Missed period without a dispatcher skip signal** — honestly reported
 //!    as a persistent offset (healing requires the explicit `REQ_0840`
 //!    signal; the mock-clock gap here is not a real dispatcher skip).
-//! 4. **Per-task grid epoch** — each task anchors at its own first dispatch;
-//!    a second task's start phase is not reported as permanent lateness.
+//! 4. **Per-task grid epoch** — each task anchors at its own first dispatch —
+//!    the first sample is exactly zero and later samples stay bounded under
+//!    real-time interleave.
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use taktora_executor::{
-    ControlFlow, CycleObservation, Executor, MockClock, Observer, item_with_triggers,
+    ControlFlow, CycleObservation, DispatchMode, Executor, MockClock, Observer, item_with_triggers,
 };
 
 const PERIOD_NS: u64 = 10_000_000; // 10 ms nominal — matches the declared interval
@@ -63,6 +64,12 @@ fn run_with_advances(
         .worker_threads(0)
         .stats_window(256)
         .clock(Arc::new(clock))
+        // Legacy dispatch is forced: these tests script the telemetry clock
+        // and assert exact per-cycle figures, so they must not depend on
+        // real-time dispatcher behavior. Legacy never injects a REQ_0840
+        // skip signal (Grid under a starved runner could), and the Grid
+        // ferry has its own dedicated test (cycle_stats_skip_signal.rs).
+        .dispatch_mode(DispatchMode::Legacy)
         .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
         .build()
         .expect("build executor");
@@ -167,6 +174,8 @@ fn each_task_anchors_lateness_on_its_own_first_dispatch() {
         .worker_threads(0)
         .stats_window(256)
         .clock(Arc::new(clock))
+        // Legacy dispatch forced — see run_with_advances for the full rationale.
+        .dispatch_mode(DispatchMode::Legacy)
         .observer(Arc::new(Splitter {
             a: Arc::clone(&rec_a),
             b: Arc::clone(&rec_b),
@@ -203,7 +212,23 @@ fn each_task_anchors_lateness_on_its_own_first_dispatch() {
     for (n, l) in a.iter().enumerate() {
         assert_eq!(*l, Some(0), "task A cycle {n} on its own grid");
     }
-    for (n, l) in b.iter().enumerate() {
-        assert_eq!(*l, Some(0), "task B cycle {n}: own epoch, no phase offset");
+    // Task B's FIRST sample is the regression target and is exact by
+    // construction: the per-task epoch anchors at B's own first dispatch
+    // (elapsed 0, slot 0 => lateness 0) regardless of how the two Legacy
+    // relative timers interleave. The pre-fix executor-shared epoch instead
+    // reported B's start phase — at least one A-advance, typically +2·10 ms —
+    // from the very first sample.
+    assert_eq!(b[0], Some(0), "task B first sample anchors its own epoch");
+    // Later B samples ride the real-time A/B interleave: each flip moves
+    // B's scripted `pre` by one A-advance (±10 ms), and a coalesced B wake
+    // can add one more. Lateness must stay bounded (no accumulation) — the
+    // grid-slot fold advancing wrongly would compound past this in a few
+    // cycles.
+    for (n, l) in b.iter().enumerate().skip(1) {
+        let v = l.expect("task B records lateness every cycle");
+        assert!(
+            v.abs() < 40_000_000,
+            "task B cycle {n}: lateness must stay bounded, got {v}"
+        );
     }
 }
