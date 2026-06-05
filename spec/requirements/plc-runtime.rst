@@ -85,6 +85,45 @@ Cyclic scan execution
    The runtime shall emit pre-execute and post-execute timestamps for
    every scan-cycle invocation through the ``ExecutionMonitor`` trait.
 
+.. req:: Absolute-grid cyclic dispatch (bounded long-run lateness)
+   :id: REQ_0268
+   :status: implemented
+   :satisfies: FEAT_0011
+   :links: BB_0095, IMPL_0087, TEST_0852
+
+   The runtime shall phase-lock cyclic dispatch to an **absolute** monotonic
+   grid: the nominal wakeup for scan *k* of a cyclic item is
+   ``epoch + k × period`` against a fixed scheduling epoch sampled once at
+   dispatch-loop entry — **not** a target re-derived as ``now + period``
+   after each wakeup. Consequently the per-task deadline lateness reported by
+   :need:`REQ_0106` shall remain **bounded** — it shall not accumulate
+   without bound — over arbitrarily long runs under nominal load.
+
+   This strengthens :need:`REQ_0002` ("exactly once per declared period"):
+   firing once per period is necessary but not sufficient, because a
+   *relative* interval timer satisfies it while still drifting — the
+   per-cycle wakeup→dispatch round-trip leaks into the next interval and the
+   grid slides. Firing once per period is required; the grid must also not
+   slide.
+
+   A wakeup starved past one or more whole periods shall **skip** the missed
+   slots — re-aligning to the next future grid point and dispatching exactly
+   once — and shall never replay a burst of stale cycles, so a transient
+   stall costs bounded slots rather than a permanent phase offset. Where
+   multiple cyclic items declare different periods, every cadence shares the
+   one scheduling epoch (a harmonic grid), so all periods phase-align at the
+   epoch.
+
+   The scheduling time source shall be **distinct** from the telemetry
+   measurement clock that produces the lateness of :need:`REQ_0106`, so that
+   substituting a test clock for telemetry can never alter dispatch timing.
+   The lateness grid of :need:`REQ_0106` is left unchanged and serves as the
+   independent witness for this requirement. Verification is by a
+   deterministic unit test over the grid state machine — the nominal target
+   advances by exactly one period per cycle with zero accumulated offset, and
+   a simulated stall skips whole slots; the long-run hardware drift bound is
+   recorded as field evidence in :need:`ADR_0100`.
+
 Event-driven I/O dispatch
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

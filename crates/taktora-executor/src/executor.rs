@@ -204,6 +204,18 @@ pub struct Executor {
     /// shared as an `Arc` so the dispatch loop and `record_cycle_for` see the
     /// same `OnceLock`.
     pub(crate) grid_epoch: Arc<OnceLock<u64>>,
+
+    /// Cyclic dispatch timing strategy (`REQ_0268` / `ADR_0100`). Read once at
+    /// `dispatch_loop` entry and hoisted to a local, so steady-state cost is a
+    /// single `Copy`-enum compare per cycle. Defaults to
+    /// [`DispatchMode::Grid`](crate::DispatchMode).
+    pub(crate) dispatch_mode: crate::DispatchMode,
+
+    /// Scheduling time source for the absolute grid (`REQ_0268`). Distinct from
+    /// [`Executor::clock`] (telemetry): a telemetry mock can never alter
+    /// dispatch timing. Defaults to
+    /// [`MonotonicCyclicClock`](crate::MonotonicCyclicClock).
+    pub(crate) cyclic_clock: std::sync::Arc<dyn crate::CyclicClock>,
 }
 
 // SAFETY: `IxListener<ipc::Service>` is `!Send` for the same Rc-based
@@ -290,6 +302,11 @@ impl Executor {
         item.declare_triggers(&mut declarer)?;
         let budget = declarer.budget;
         let decls = declarer.into_decls();
+
+        // REQ_0268: reject ill-defined trigger shapes (cyclic+event, zero
+        // period) before the task joins the table — the natural validation
+        // point, where the decls are first available, for every DispatchMode.
+        validate_decls(&id, &decls)?;
 
         let mut item_box: Box<dyn ExecutableItem> = Box::new(item);
         let app_id = item_box.app_id();
@@ -606,6 +623,10 @@ impl Executor {
         items[0].declare_triggers(&mut head_declarer)?;
         let decls = head_declarer.into_decls();
 
+        // REQ_0268: same trigger-shape validation as the single-item path,
+        // applied to the head item's decls (which gate the whole chain).
+        validate_decls(&id, &decls)?;
+
         // Warn if non-head items declared triggers (those will be ignored).
         for (i, body) in items.iter_mut().enumerate().skip(1) {
             let mut spurious = TriggerDeclarer::new_internal();
@@ -761,6 +782,12 @@ pub struct ExecutorBuilder {
     /// `build()`. Override with a [`MockClock`](crate::MockClock) for
     /// deterministic timing tests.
     clock: Option<Arc<dyn MonotonicClock>>,
+    /// Cyclic dispatch timing strategy (`REQ_0268`). Default
+    /// [`DispatchMode::Grid`](crate::DispatchMode).
+    dispatch_mode: crate::DispatchMode,
+    /// Scheduling clock for the absolute grid. `None` → resolved to
+    /// [`MonotonicCyclicClock`](crate::MonotonicCyclicClock) in `build()`.
+    cyclic_clock: Option<std::sync::Arc<dyn crate::CyclicClock>>,
 }
 
 impl Default for ExecutorBuilder {
@@ -774,6 +801,8 @@ impl Default for ExecutorBuilder {
             fatal_handler: None,
             stats_window: None,
             clock: None,
+            dispatch_mode: crate::DispatchMode::default(),
+            cyclic_clock: None,
         }
     }
 }
@@ -828,6 +857,22 @@ impl ExecutorBuilder {
     #[must_use]
     pub fn clock(mut self, clock: Arc<dyn MonotonicClock>) -> Self {
         self.clock = Some(clock);
+        self
+    }
+
+    /// Select cyclic dispatch timing (default `DispatchMode::Grid`). `Legacy` is
+    /// the pre-REQ_0268 `attach_interval` path, retained only until the Pi A/B.
+    #[must_use]
+    pub const fn dispatch_mode(mut self, mode: crate::DispatchMode) -> Self {
+        self.dispatch_mode = mode;
+        self
+    }
+
+    /// Override the scheduling clock (default `MonotonicCyclicClock`). Distinct
+    /// from `clock` (telemetry) — see `CyclicClock`.
+    #[must_use]
+    pub fn cyclic_clock(mut self, clock: std::sync::Arc<dyn crate::CyclicClock>) -> Self {
+        self.cyclic_clock = Some(clock);
         self
     }
 
@@ -943,6 +988,10 @@ impl ExecutorBuilder {
         let clock: Arc<dyn MonotonicClock> =
             self.clock.unwrap_or_else(|| Arc::new(SystemClock::new()));
 
+        let cyclic_clock: std::sync::Arc<dyn crate::CyclicClock> = self
+            .cyclic_clock
+            .unwrap_or_else(|| std::sync::Arc::new(crate::MonotonicCyclicClock::new()));
+
         let exec = Executor {
             node,
             pool,
@@ -964,6 +1013,8 @@ impl ExecutorBuilder {
             fatal_dispatch,
             clock,
             grid_epoch: Arc::new(OnceLock::new()),
+            dispatch_mode: self.dispatch_mode,
+            cyclic_clock,
         };
 
         Ok(exec)
@@ -1098,13 +1149,77 @@ impl Executor {
         // Maps guard index → task index.
         let mut attachment_to_task: Vec<usize> = Vec::new();
 
-        for (task_idx, task) in self.tasks.iter().enumerate() {
-            for decl in &task.decls {
-                let guard = attach_trigger_decl(&waitset, &mut listener_storage, decl)?;
-                guards.push(guard);
-                attachment_to_task.push(task_idx);
+        // Hoist to a local for the hot loop — one Copy-enum compare per cycle,
+        // never a field re-read (REQ_0268).
+        let dispatch_mode = self.dispatch_mode;
+
+        // Cyclic tasks are dispatched by the master timer + GridTimer (REQ_0268),
+        // not attached as individual WaitSet triggers. Cross-platform: only the
+        // wake source differs (Task 3).
+        let mut cyclic_task_indices: Vec<usize> = Vec::new();
+        let mut cyclic_periods: Vec<u64> = Vec::new();
+        build_attachments(
+            &waitset,
+            &self.tasks,
+            dispatch_mode,
+            &mut listener_storage,
+            &mut guards,
+            &mut attachment_to_task,
+            &mut cyclic_task_indices,
+            &mut cyclic_periods,
+        )?;
+        // `cyclic_periods` is cloned, not moved, because Task 3 reads it again to
+        // arm the single master timerfd; on non-Linux it is unused after this.
+        let mut grid =
+            crate::grid::GridTimer::new(self.cyclic_clock.now_nanos(), cyclic_periods.clone());
+        let mut due_cyclic: Vec<usize> = Vec::new();
+
+        // Master cyclic timer (REQ_0268, Linux). ONE timerfd armed at the base
+        // period (gcd of cyclic periods) drives the absolute grid; GridTimer
+        // decides which tasks are due each tick. Declared above its own guard so
+        // it drops AFTER the guard (detach before close → no EBADF). Must be
+        // declared here, after `build_attachments` has filled `cyclic_periods`.
+        #[cfg(target_os = "linux")]
+        let master_timer: Option<crate::timerfd::TimerFd> = {
+            let base = crate::grid::base_period(&cyclic_periods);
+            if base == 0 {
+                None
+            } else {
+                Some(
+                    crate::timerfd::TimerFd::new(std::time::Duration::from_nanos(base)).map_err(
+                        |e| {
+                            ExecutorError::DeclareTriggers(format!(
+                                "failed to arm master timerfd: {e}"
+                            ))
+                        },
+                    )?,
+                )
             }
-        }
+        };
+
+        // Attach the master timer as a wake-only notification, held separately
+        // (like the stop listener) so `process_attachment` never maps it to a
+        // task. `_master_timer_guard` is declared immediately after `master_timer`
+        // so on scope exit it drops FIRST — detaching the fd from the WaitSet's
+        // epoll set — and `master_timer` drops SECOND, closing the fd. That
+        // ordering is what prevents iceoryx2's `EPOLL_CTL_DEL` from hitting a
+        // closed fd (EBADF). `master_timer`'s fd is referenced ONLY by this guard
+        // (independent of `guards`/`listener_storage`, which own other fds), so
+        // its drop position relative to those Vecs is immaterial.
+        #[cfg(target_os = "linux")]
+        #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
+        let _master_timer_guard = match &master_timer {
+            // SAFETY: `master_timer` is a stack local that outlives this guard
+            // (declared above it); the cast erases the borrow lifetime to the
+            // attachment lifetime, sound by the same discipline as the stop
+            // listener. Dropped before `master_timer` closes the fd.
+            Some(tf) => Some(
+                waitset
+                    .attach_notification(unsafe { &*(tf as *const crate::timerfd::TimerFd) })
+                    .map_err(ExecutorError::iceoryx2)?,
+            ),
+            None => None,
+        };
 
         // Attach the internal stop listener so the WaitSet wakes when
         // stop() is called. We hold `self.stop_listener` (Arc) in the Executor
@@ -1213,10 +1328,23 @@ impl Executor {
                         iter_err: &iter_err_inner,
                     };
 
-                    waitset.wait_and_process_once(
+                    // Linux: block on fds — the master timerfd wakes us on the
+                    // absolute grid. Non-Linux dev: bound the wait by the earliest
+                    // pending grid target so the post-wait pass can dispatch.
+                    #[cfg(target_os = "linux")]
+                    let timeout = std::time::Duration::MAX;
+                    #[cfg(not(target_os = "linux"))]
+                    let timeout = match dispatch_mode {
+                        crate::DispatchMode::Grid => {
+                            grid.next_timeout(self.cyclic_clock.now_nanos())
+                        }
+                        crate::DispatchMode::Legacy => std::time::Duration::MAX,
+                    };
+                    waitset.wait_and_process_once_with_timeout(
                         |attachment_id: WaitSetAttachmentId<ipc::Service>| {
                             pass.process_attachment(&attachment_id)
                         },
+                        timeout,
                     )
                 })
             else {
@@ -1231,6 +1359,47 @@ impl Executor {
                 // here is immaterial to production behavior.
                 break Ok(());
             };
+
+            // Did the master timer tick this wake? Linux: drain it (clears epoll
+            // readiness; >0 overruns means the absolute grid advanced). Non-Linux:
+            // the self-computed timeout drove the wake, so always consult the grid
+            // (take_due self-gates per task on `now >= next`). REQ_0268.
+            #[cfg(target_os = "linux")]
+            let ticked = master_timer.as_ref().is_some_and(|tf| tf.drain() > 0);
+            #[cfg(not(target_os = "linux"))]
+            let ticked = true;
+
+            // Post-wait master-grid pass (Grid mode). `run_grid_cyclic_pass`
+            // self-gates on `ticked` / stop-wake / mode / non-empty, then
+            // dispatches EVERY due cyclic task atomically this tick (PLC
+            // semantics). `cpass` is a side-effect-free bundle of borrows, so
+            // building it unconditionally is free; the gate lives in the helper
+            // to keep `dispatch_loop` within the complexity budget. REQ_0268.
+            let cpass = DispatchPass {
+                guards: &guards,
+                attachment_to_task: &attachment_to_task,
+                tasks_ptr,
+                cycle_stats_ptr,
+                observer,
+                exec_fault_ptr,
+                exec_start_ptr,
+                clock,
+                grid_epoch_ptr,
+                stop_listener_ptr,
+                pool,
+                iter_err: &iter_err_inner,
+            };
+            run_grid_cyclic_pass(
+                cpass,
+                ticked,
+                dispatch_mode,
+                &stop_flag,
+                cb_result,
+                &mut grid,
+                self.cyclic_clock.now_nanos(),
+                &cyclic_task_indices,
+                &mut due_cyclic,
+            );
 
             // Funnel the post-callback decision (interrupt / item error /
             // stop request / run-mode termination) through one helper that
@@ -1306,6 +1475,101 @@ enum IterOutcome {
     Done,
     /// Terminate the loop with the given error.
     Failed(ExecutorError),
+}
+
+/// Post-wait absolute-grid pass (Grid mode only, `REQ_0268` / `ADR_0100`).
+///
+/// The `WaitSet` callback handles event/fd tasks; cyclic tasks are timed here
+/// off the scheduling clock. `pass` mirrors the callback's `DispatchPass`
+/// exactly — same borrows and raw pointers, same single-writer WaitSet-thread
+/// discipline — and the callback is already dropped (its borrows freed) by the
+/// time this runs. We poll `grid` for due cyclic slots, dispatch each due task,
+/// and fold their telemetry through the SHARED [`DispatchPass::barrier_and_record`]
+/// helper. This is a SEPARATE barrier phase from the callback's: each phase
+/// barriers and folds only its own `pending_cycle` stashes, so cyclic tasks
+/// record exactly once, identically to event tasks. We do NOT call
+/// `record_cycle_for` directly here.
+///
+/// Self-gates and returns early (no dispatch, no record) unless this wake should
+/// run the grid: the master timer ticked (`ticked`), we are in `Grid` mode, it is
+/// not a stop wake, and there is at least one cyclic task with something due.
+///
+/// **Stop-wake suppression (`REQ_0268`)**: a `stop()` (or a SIGINT/SIGTERM
+/// `cb_result`) must emit no spurious cyclic cycle — Legacy dispatches none on a
+/// stop wake, so the grid path matches, or a `stop()` would emit one extra cycle
+/// observation and desync the `FEAT_0038` `cycle_index` join key. Termination
+/// itself is still decided by `after_callback`; this only suppresses the side
+/// effects.
+#[allow(clippy::too_many_arguments)]
+fn run_grid_cyclic_pass(
+    mut pass: DispatchPass<'_, '_, '_>,
+    ticked: bool,
+    dispatch_mode: crate::DispatchMode,
+    stop_flag: &Stoppable,
+    cb_result: Result<WaitSetRunResult, iceoryx2::waitset::WaitSetRunError>,
+    grid: &mut crate::grid::GridTimer,
+    now_nanos: u64,
+    cyclic_task_indices: &[usize],
+    due_cyclic: &mut Vec<usize>,
+) {
+    let stopping = stop_flag.is_stopped()
+        || matches!(
+            cb_result,
+            Ok(WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest)
+        );
+    if !ticked
+        || stopping
+        || dispatch_mode != crate::DispatchMode::Grid
+        || cyclic_task_indices.is_empty()
+    {
+        return;
+    }
+    grid.take_due(now_nanos, due_cyclic);
+    if due_cyclic.is_empty() {
+        return;
+    }
+    for slot in due_cyclic.iter() {
+        pass.dispatch_task(cyclic_task_indices[*slot]);
+    }
+    pass.barrier_and_record();
+}
+
+/// Build every `WaitSet` attachment for the task table (`REQ_0268`). In `Grid`
+/// mode, `TriggerDecl::Interval` cyclic tasks are only *collected* into
+/// `cyclic_task_indices` / `cyclic_periods` — they are NOT attached as
+/// individual `WaitSet` triggers. The master timer + `GridTimer` owns their
+/// wakeups (cross-platform; wake-source wiring is done in the caller).
+/// Every other decl (and every decl in `Legacy` mode, including `Interval`
+/// via `attach_interval`) is attached normally. Extracted from `dispatch_loop`
+/// to keep that function within the cyclomatic-complexity budget.
+#[allow(clippy::too_many_arguments)]
+fn build_attachments<'w>(
+    waitset: &'w WaitSet<ipc::Service>,
+    tasks: &[TaskEntry],
+    dispatch_mode: crate::DispatchMode,
+    listener_storage: &mut Vec<Arc<crate::trigger::RawListener>>,
+    guards: &mut Vec<WaitSetGuard<'w, 'w, ipc::Service>>,
+    attachment_to_task: &mut Vec<usize>,
+    cyclic_task_indices: &mut Vec<usize>,
+    cyclic_periods: &mut Vec<u64>,
+) -> Result<(), ExecutorError> {
+    for (task_idx, task) in tasks.iter().enumerate() {
+        for decl in &task.decls {
+            if dispatch_mode == crate::DispatchMode::Grid {
+                if let TriggerDecl::Interval(d) = decl {
+                    // Grid mode owns cyclic timing via the master timer + GridTimer;
+                    // these decls are NOT attached as individual WaitSet triggers.
+                    cyclic_task_indices.push(task_idx);
+                    cyclic_periods.push(u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
+                    continue;
+                }
+            }
+            let guard = attach_trigger_decl(waitset, listener_storage, decl)?;
+            guards.push(guard);
+            attachment_to_task.push(task_idx);
+        }
+    }
+    Ok(())
 }
 
 /// Attaches a single [`TriggerDecl`] to `waitset`, returning the resulting
@@ -1385,6 +1649,57 @@ struct DispatchPass<'a, 'g, 'w> {
 }
 
 impl DispatchPass<'_, '_, '_> {
+    /// Dispatches a single task by index for one wakeup: takes the `&mut`
+    /// borrow into the task table, applies the pre-dispatch fault gate, stashes
+    /// this cycle's `pending_cycle` timestamp for the post-barrier telemetry
+    /// fold, and submits the task's work to the pool.
+    ///
+    /// Shared by the `WaitSet` callback (`process_attachment`) and — per
+    /// `REQ_0268` / `ADR_0100` — the forthcoming post-wait absolute-grid
+    /// dispatch pass, so the per-task barrier/telemetry contract is identical
+    /// across both call paths.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    #[allow(unsafe_code)]
+    fn dispatch_task(&mut self, task_idx: usize) {
+        // SAFETY: we are the only thread that may touch the task table
+        // during the callback. wait_and_process_once is single-threaded
+        // and dispatch_loop holds &mut self. The pointer is valid for the
+        // duration of this call.
+        let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
+
+        // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072). When it
+        // routes to a (possible) handler, normal dispatch is skipped.
+        if self.handle_fault_routing(task) {
+            // REQ_0107: a faulted/fault-routed scan STILL advances
+            // cycle_index and emits on_cycle_stats, or the executor's count
+            // desyncs from the connector's join key (FEAT_0038). took/jitter
+            // are None (poison-safe); the index always moves. Allocation-free:
+            // a CyclePending { Instant, bool } written onto the TaskEntry,
+            // no heap.
+            if task.scan_period.is_some() {
+                task.pending_cycle = Some(CyclePending {
+                    pre: self.clock.now_nanos(),
+                    faulted: true,
+                });
+            }
+            return;
+        }
+
+        // Stash the pre-dispatch instant so the post-barrier record pass
+        // can fold this cycle's telemetry. Allocation-free: the timestamp
+        // lives on the TaskEntry, not in a per-wakeup Vec. `take`n in the
+        // post-barrier loop below — guarantees exactly-once even if two
+        // guards map to the same task. `faulted: false`: a task that faulted
+        // last wakeup and recovered this one records the normal path (the
+        // whole CyclePending is overwritten, so the flag can't be stale).
+        task.pending_cycle = Some(CyclePending {
+            pre: self.clock.now_nanos(),
+            faulted: false,
+        });
+
+        self.submit_task_job(task);
+    }
+
     /// Handles a single `WaitSet` wakeup: drains stop notifications, then
     /// dispatches every task whose attachment fired. Always returns
     /// [`CallbackProgression::Continue`]; termination is decided by the
@@ -1402,53 +1717,30 @@ impl DispatchPass<'_, '_, '_> {
         let stop_l = unsafe { &*self.stop_listener_ptr };
         while let Ok(Some(_)) = stop_l.try_wait_one() {}
 
-        for (i, guard) in self.guards.iter().enumerate() {
+        for i in 0..self.guards.len() {
+            let guard = &self.guards[i];
             let fired =
                 attachment_id.has_event_from(guard) || attachment_id.has_missed_deadline(guard);
             if !fired {
                 continue;
             }
             let task_idx = self.attachment_to_task[i];
-
-            // SAFETY: we are the only thread that may touch the task table
-            // during the callback. wait_and_process_once is single-threaded
-            // and dispatch_loop holds &mut self. The pointer is valid for the
-            // duration of this call.
-            let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
-
-            // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072). When it
-            // routes to a (possible) handler, normal dispatch is skipped.
-            if self.handle_fault_routing(task) {
-                // REQ_0107: a faulted/fault-routed scan STILL advances
-                // cycle_index and emits on_cycle_stats, or the executor's count
-                // desyncs from the connector's join key (FEAT_0038). took/jitter
-                // are None (poison-safe); the index always moves. Allocation-free:
-                // a CyclePending { Instant, bool } written onto the TaskEntry,
-                // no heap.
-                if task.scan_period.is_some() {
-                    task.pending_cycle = Some(CyclePending {
-                        pre: self.clock.now_nanos(),
-                        faulted: true,
-                    });
-                }
-                continue;
-            }
-
-            // Stash the pre-dispatch instant so the post-barrier record pass
-            // can fold this cycle's telemetry. Allocation-free: the timestamp
-            // lives on the TaskEntry, not in a per-wakeup Vec. `take`n in the
-            // post-barrier loop below — guarantees exactly-once even if two
-            // guards map to the same task. `faulted: false`: a task that faulted
-            // last wakeup and recovered this one records the normal path (the
-            // whole CyclePending is overwritten, so the flag can't be stale).
-            task.pending_cycle = Some(CyclePending {
-                pre: self.clock.now_nanos(),
-                faulted: false,
-            });
-
-            self.dispatch_task(task);
+            self.dispatch_task(task_idx);
         }
 
+        self.barrier_and_record();
+
+        CallbackProgression::Continue
+    }
+
+    /// Barrier all submitted pool jobs for this dispatch phase, then fold each
+    /// task's stashed `pending_cycle` into recorded cycle telemetry. Shared by
+    /// the `WaitSet` callback (event/fd tasks) and the post-wait grid pass
+    /// (cyclic tasks, `REQ_0268`). Keyed on `pending_cycle` so it records
+    /// exactly the tasks dispatched this phase, exactly once.
+    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    #[allow(unsafe_code)]
+    fn barrier_and_record(&mut self) {
         // Wait for all submitted jobs to finish before leaving the callback
         // scope (validates item_ptr safety contract). The barrier also makes
         // every worker's `last_took_ns` Release-store visible to the record
@@ -1475,8 +1767,6 @@ impl DispatchPass<'_, '_, '_> {
                 self.record_cycle_for(task_idx, faulted, pre);
             }
         }
-
-        CallbackProgression::Continue
     }
 
     /// Fold one scan cycle's telemetry and push it to the observer. Called
@@ -1641,7 +1931,7 @@ impl DispatchPass<'_, '_, '_> {
     /// per-iteration error slot.
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
-    fn dispatch_task(&self, task: &mut TaskEntry) {
+    fn submit_task_job(&self, task: &mut TaskEntry) {
         match &mut task.kind {
             TaskKind::Single(_) | TaskKind::Chain(_) => {
                 // The dispatch closure was pre-allocated at task-add time and
@@ -1783,6 +2073,57 @@ struct FaultDispatchCtx {
     exec_start: Arc<OnceLock<Instant>>,
     /// Observer for `on_task_fault` / `on_executor_fault` notifications.
     observer: Arc<dyn Observer>,
+}
+
+/// Validate a task's collected trigger declarations before it joins the task
+/// table (`REQ_0268`). Applied at every add path — single, chain head, and
+/// fault-handler main — at the point the `TriggerDecl`s are first available,
+/// regardless of [`DispatchMode`] (the rejected shapes are ill-defined in any
+/// mode; Legacy is temporary).
+///
+/// Rejects two shapes:
+///
+/// 1. **Cyclic AND event-driven** — a task carrying both an `Interval` decl and
+///    any listener-backed decl (`Subscriber` / `Deadline` / `RawListener`). Per
+///    `REQ_0106` a task is cyclic XOR event-driven: cyclic tasks have a
+///    period/lateness, event-driven tasks do not. Allowing both would dispatch
+///    and record the task twice in one wake (phase-a event + phase-b grid),
+///    desyncing the `FEAT_0038` `cycle_index` join key (`REQ_0107`).
+/// 2. **Zero-period interval** — an `Interval(Duration::ZERO)` busy-spins the
+///    grid (`GridTimer::next_timeout` returns `0` every wake and `take_due`
+///    re-fires without advancing). A zero scan period is nonsensical.
+fn validate_decls(id: &TaskId, decls: &[crate::trigger::TriggerDecl]) -> Result<(), ExecutorError> {
+    use crate::trigger::TriggerDecl;
+
+    let has_interval = decls.iter().any(|d| matches!(d, TriggerDecl::Interval(_)));
+    let has_listener = decls.iter().any(|d| {
+        matches!(
+            d,
+            TriggerDecl::Subscriber { .. }
+                | TriggerDecl::Deadline { .. }
+                | TriggerDecl::RawListener(_)
+        )
+    });
+
+    if has_interval && has_listener {
+        return Err(ExecutorError::DeclareTriggers(format!(
+            "task `{id}` declares both an interval (cyclic) and a listener \
+             (event-driven) trigger; a task may be cyclic (interval) or \
+             event-driven (listener) but not both — split it into two tasks"
+        )));
+    }
+
+    if decls
+        .iter()
+        .any(|d| matches!(d, TriggerDecl::Interval(dur) if dur.is_zero()))
+    {
+        return Err(ExecutorError::DeclareTriggers(format!(
+            "task `{id}` declares a zero-duration interval; a cyclic scan \
+             period must be strictly positive"
+        )));
+    }
+
+    Ok(())
 }
 
 /// Extract the declared scan period (first `Interval` trigger) from a task's
@@ -2158,6 +2499,13 @@ impl ExecutorGraphBuilder<'_> {
             .or(self.custom_id)
             .unwrap_or_else(auto_id);
         let decls = g.decls.clone();
+        // The graph root's decls become a grid-registered TaskEntry, so the same
+        // cyclic-XOR-event-driven / non-zero-period validation that guards the
+        // single-item, fault-handler, and chain add paths must guard this one too
+        // (REQ_0268). Non-root vertex triggers never reach a TaskEntry — they are
+        // discarded in `GraphBuilder::collect_root_decls` — so validating the root
+        // decls is sufficient.
+        validate_decls(&id, &decls)?;
         let scan_period = scan_period_from_decls(&decls);
 
         // Box the graph for address stability — per-vertex dispatch
@@ -2208,6 +2556,13 @@ impl ExecutorGraphBuilder<'_> {
 mod tests {
     use super::*;
     use crate::{ControlFlow, item};
+    use iceoryx2::prelude::ZeroCopySend;
+
+    /// Minimal zero-copy payload for tests that need a real subscriber to
+    /// produce a listener-backed trigger decl.
+    #[derive(Debug, Default, Clone, Copy, ZeroCopySend)]
+    #[repr(C)]
+    struct Msg(u32);
 
     #[test]
     fn add_returns_unique_ids() {
@@ -2215,6 +2570,351 @@ mod tests {
         let a = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
         let b = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn grid_mode_dispatches_cyclic_task_each_cycle() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let hits = Arc::new(AtomicU64::new(0));
+        let h = Arc::clone(&hits);
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .dispatch_mode(crate::DispatchMode::Grid)
+            .build()
+            .expect("build");
+        exec.add(crate::item::item_with_triggers(
+            move |d| {
+                d.interval(std::time::Duration::from_millis(1));
+                Ok(())
+            },
+            move |_ctx| {
+                h.fetch_add(1, Ordering::Relaxed);
+                Ok(ControlFlow::Continue)
+            },
+        ))
+        .expect("add");
+        exec.run_n(10).expect("run");
+        assert!(
+            hits.load(Ordering::Relaxed) >= 8,
+            "grid mode under-dispatched: {}",
+            hits.load(Ordering::Relaxed)
+        );
+    }
+
+    #[test]
+    fn legacy_mode_dispatches_cyclic_task_each_cycle() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let hits = Arc::new(AtomicU64::new(0));
+        let h = Arc::clone(&hits);
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .dispatch_mode(crate::DispatchMode::Legacy)
+            .build()
+            .expect("build");
+        exec.add(crate::item::item_with_triggers(
+            move |d| {
+                d.interval(std::time::Duration::from_millis(1));
+                Ok(())
+            },
+            move |_ctx| {
+                h.fetch_add(1, Ordering::Relaxed);
+                Ok(ControlFlow::Continue)
+            },
+        ))
+        .expect("add");
+        exec.run_n(10).expect("run");
+        assert!(
+            hits.load(Ordering::Relaxed) >= 8,
+            "legacy mode under-dispatched: {}",
+            hits.load(Ordering::Relaxed)
+        );
+    }
+
+    // --- REQ_0268 trigger-combination validation (Fix 1 / Fix 3) ---
+
+    #[test]
+    fn add_rejects_cyclic_plus_subscriber_combination() {
+        use core::time::Duration;
+        // A task declaring BOTH an Interval and a listener-backed trigger is
+        // ill-defined (cyclic XOR event-driven, REQ_0106) and must be rejected
+        // at add time. We use a real subscriber so the listener decl is genuine.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let ch = exec.channel::<Msg>("taktora.test.req0268.combo").unwrap();
+        let sub = ch.subscriber().unwrap();
+        let err = exec
+            .add(crate::item::item_with_triggers(
+                move |d| {
+                    d.interval(Duration::from_millis(1));
+                    d.subscriber(&sub);
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .expect_err("interval + subscriber must be rejected");
+        match err {
+            ExecutorError::DeclareTriggers(msg) => {
+                assert!(
+                    msg.contains("cyclic") && msg.contains("event-driven"),
+                    "message must explain cyclic vs event-driven: {msg}"
+                );
+                assert!(
+                    msg.contains("split"),
+                    "message must suggest splitting into two tasks: {msg}"
+                );
+            }
+            other => panic!("expected DeclareTriggers, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_rejects_cyclic_plus_listener_regardless_of_mode() {
+        use core::time::Duration;
+        // The combination is ill-defined irrespective of DispatchMode (Legacy
+        // is temporary), so Legacy must reject it too.
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .dispatch_mode(crate::DispatchMode::Legacy)
+            .build()
+            .unwrap();
+        let ch = exec
+            .channel::<Msg>("taktora.test.req0268.combo.legacy")
+            .unwrap();
+        let sub = ch.subscriber().unwrap();
+        let err = exec
+            .add(crate::item::item_with_triggers(
+                move |d| {
+                    d.interval(Duration::from_millis(1));
+                    d.subscriber(&sub);
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .expect_err("interval + subscriber must be rejected in Legacy too");
+        assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn add_accepts_multiple_intervals_and_single_kinds() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        // Multiple Interval decls: still cyclic-only, accepted.
+        exec.add(crate::item::item_with_triggers(
+            |d| {
+                d.interval(Duration::from_millis(1));
+                d.interval(Duration::from_millis(2));
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ))
+        .expect("multiple intervals accepted");
+        // Single interval: accepted.
+        exec.add(crate::item::item_with_triggers(
+            |d| {
+                d.interval(Duration::from_millis(1));
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ))
+        .expect("single interval accepted");
+        // Multiple listeners (no interval): accepted.
+        let ch = exec
+            .channel::<Msg>("taktora.test.req0268.multi.listener")
+            .unwrap();
+        let sub_a = ch.subscriber().unwrap();
+        let sub_b = ch.subscriber().unwrap();
+        exec.add(crate::item::item_with_triggers(
+            move |d| {
+                d.subscriber(&sub_a);
+                d.subscriber(&sub_b);
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ))
+        .expect("multiple listeners accepted");
+    }
+
+    #[test]
+    fn add_rejects_zero_period_interval() {
+        use core::time::Duration;
+        // A zero-period interval busy-spins the grid (next_timeout == 0 every
+        // wake), so it must be rejected at add time.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let err = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::ZERO);
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .expect_err("zero-period interval must be rejected");
+        match err {
+            ExecutorError::DeclareTriggers(msg) => {
+                assert!(
+                    msg.contains("zero"),
+                    "message must mention the zero period: {msg}"
+                );
+            }
+            other => panic!("expected DeclareTriggers, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_chain_rejects_cyclic_plus_listener() {
+        use core::time::Duration;
+        // The chain path collects the head item's decls; the same validation
+        // must apply there.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let ch = exec
+            .channel::<Msg>("taktora.test.req0268.chain.combo")
+            .unwrap();
+        let sub = ch.subscriber().unwrap();
+        let err = exec
+            .add_chain(vec![crate::item::item_with_triggers(
+                move |d| {
+                    d.interval(Duration::from_millis(1));
+                    d.subscriber(&sub);
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            )])
+            .expect_err("chain head interval + subscriber must be rejected");
+        assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn add_chain_rejects_zero_period_interval() {
+        use core::time::Duration;
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let err = exec
+            .add_chain(vec![crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::ZERO);
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            )])
+            .expect_err("chain head zero-period interval must be rejected");
+        assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn add_graph_rejects_cyclic_plus_listener() {
+        use core::time::Duration;
+        // The graph path collects the root vertex's decls into a grid-registered
+        // TaskEntry; the same cyclic-XOR-event-driven validation must apply there
+        // (REQ_0268). We use a real subscriber so the listener decl is genuine.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let ch = exec
+            .channel::<Msg>("taktora.test.req0268.graph.combo")
+            .unwrap();
+        let sub = ch.subscriber().unwrap();
+        let mut g = exec.add_graph();
+        let r = g.vertex(crate::item::item_with_triggers(
+            move |d| {
+                d.interval(Duration::from_millis(1));
+                d.subscriber(&sub);
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ));
+        g.root(r);
+        let err = g
+            .build()
+            .expect_err("graph root interval + subscriber must be rejected");
+        assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn add_graph_rejects_zero_period_interval() {
+        use core::time::Duration;
+        // A zero-period interval on the graph root busy-spins the grid, so the
+        // graph path must reject it just like the single-item/chain paths.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let mut g = exec.add_graph();
+        let r = g.vertex(crate::item::item_with_triggers(
+            |d| {
+                d.interval(Duration::ZERO);
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ));
+        g.root(r);
+        let err = g
+            .build()
+            .expect_err("graph root zero-period interval must be rejected");
+        assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn stopped_iteration_emits_no_cyclic_cycle_observation() {
+        use core::time::Duration;
+        use std::sync::atomic::AtomicU64;
+
+        // A CyclicClock that starts at 0 (epoch) then jumps far past the first
+        // grid target, so the post-wait `take_due` finds the cyclic task due on
+        // the very first (stopping) wake. Distinct from the telemetry clock
+        // (scheduling role).
+        struct JumpClock {
+            calls: AtomicU64,
+        }
+        impl crate::CyclicClock for JumpClock {
+            fn now_nanos(&self) -> u64 {
+                // First read (grid epoch at loop entry) = 0; every later read
+                // is well past the 1ms target.
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    0
+                } else {
+                    1_000_000_000
+                }
+            }
+        }
+
+        // Observer that counts on_cycle_stats calls.
+        struct Counter {
+            cycles: AtomicU64,
+        }
+        impl Observer for Counter {
+            fn on_cycle_stats(&self, _obs: &CycleObservation) {
+                self.cycles.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let counter = Arc::new(Counter {
+            cycles: AtomicU64::new(0),
+        });
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .dispatch_mode(crate::DispatchMode::Grid)
+            .cyclic_clock(Arc::new(JumpClock {
+                calls: AtomicU64::new(0),
+            }))
+            .observer(Arc::clone(&counter) as Arc<dyn Observer>)
+            .build()
+            .unwrap();
+        exec.add(crate::item::item_with_triggers(
+            |d| {
+                d.interval(Duration::from_millis(1));
+                Ok(())
+            },
+            |_| Ok(crate::ControlFlow::Continue),
+        ))
+        .unwrap();
+
+        // Stop BEFORE running: the WaitSet wakes immediately on the stop
+        // listener; the grid target is already due (JumpClock). Without the
+        // stop guard the post-wait cyclic pass would dispatch + record one
+        // spurious cycle on this stopping iteration; with it, zero.
+        exec.stoppable().stop();
+        exec.run().expect("run returns cleanly after stop");
+
+        assert_eq!(
+            counter.cycles.load(Ordering::SeqCst),
+            0,
+            "no cyclic cycle observation may be emitted on a stop wake"
+        );
     }
 
     #[test]

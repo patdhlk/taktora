@@ -35,10 +35,15 @@ proptest            = { workspace = true }
 [features]
 default      = []
 tracing      = ["dep:tracing"]
-thread_attrs = ["dep:core_affinity", "dep:libc"]
+# `libc` is unconditionally present on Linux (timerfd cyclic dispatch, REQ_0268),
+# so `thread_attrs` only needs to pull in `core_affinity`.
+thread_attrs = ["dep:core_affinity"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
-libc = { version = "0.2", optional = true }
+# Always present on Linux: timerfd FFI + the iceoryx2 file-descriptor traits
+# needed to attach a timerfd to the WaitSet (REQ_0268 "Option 2", timerfd.rs).
+libc              = "0.2"
+iceoryx2-bb-posix = "0.8"
 
 [lints.rust]
 unsafe_code = "deny"

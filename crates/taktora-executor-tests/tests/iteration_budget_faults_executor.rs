@@ -38,6 +38,12 @@ impl Observer for ScopedObserver {
 #[test]
 fn executor_wide_breach_faults_executor_and_cascades_silently() {
     let observer = Arc::new(ScopedObserver::default());
+    // Uses the platform default DispatchMode: the master-timerfd Grid on Linux
+    // (atomic, interrupt-driven), the stable attach_interval Legacy on non-Linux
+    // dev/CI hosts. This is a tight 60 ms fault-cascade window, and the non-Linux
+    // Grid fallback's ms-rounding jitter would make it flaky on loaded CI — the
+    // platform default avoids that. The test is mode-agnostic (it exercises the
+    // fault cascade, not the dispatch timer). REQ_0268.
     let mut exec = Executor::builder()
         .worker_threads(2)
         .iteration_budget(Duration::from_millis(10))

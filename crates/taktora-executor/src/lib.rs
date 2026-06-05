@@ -28,6 +28,7 @@ mod executor;
 mod fatal;
 mod fault;
 mod graph;
+mod grid;
 mod item;
 mod monitor;
 mod observer;
@@ -41,6 +42,9 @@ mod stats;
 mod task_id;
 mod task_kind;
 mod thread_attrs;
+/// Linux `timerfd`-backed absolute-grid cyclic wake source (`REQ_0268`).
+#[cfg(target_os = "linux")]
+mod timerfd;
 mod trigger;
 
 pub use channel::{Channel, EVENT_SUFFIX, NotifyOutcome, Publisher, Subscriber};
@@ -53,6 +57,7 @@ pub use executor::{Executor, ExecutorBuilder, ExecutorGraphBuilder};
 pub use fatal::{FatalContext, FatalHandler, FatalSite};
 pub use fault::{ExecutorFaultReason, ExecutorFaultState, FaultReason, FaultState};
 pub use graph::{GraphBuilder, Vertex};
+pub use grid::{CyclicClock, DispatchMode, MonotonicCyclicClock};
 pub use item::{ExecutableItem, FnItem, FnItemWithTriggers, item, item_with_triggers};
 pub use monitor::ExecutionMonitor;
 pub use observer::{Observer, UserEvent};

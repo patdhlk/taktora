@@ -367,6 +367,49 @@ Test cases verifying the scan-cycle observability sub-feature
    Lives under
    ``crates/taktora-executor/tests/cycle_stats_faulted_scan.rs``.
 
+.. test:: GridTimer holds the absolute grid (advance, skip-realign, multi-period)
+   :id: TEST_0852
+   :status: implemented
+   :verifies: REQ_0268
+
+   **Goal.** The pure ``GridTimer`` state machine
+   (:need:`BB_0095`) phase-locks cyclic dispatch to an *absolute* grid —
+   single-period advance accumulates zero offset, a stall skip-realigns
+   without bursting, harmonic multi-period grids pick the earliest slot and
+   coalesce coincident ones, and an empty grid yields no wakeup. These are
+   the CI witnesses for the bounded long-run lateness of :need:`REQ_0268`;
+   the long-run *hardware* drift bound is field evidence recorded in the Pi5
+   A/B of :need:`ADR_0100`, not a CI test.
+
+   **Fixture.** Deterministic unit tests over ``grid::GridTimer`` with an
+   explicit ``now`` passed to ``next_timeout`` / ``take_due`` — **no clock,
+   no sleep, no executor**. Tests live under
+   ``crates/taktora-executor/src/grid.rs`` (``#[cfg(test)]`` module).
+
+   **Steps.**
+
+   1. *Single-period advance, zero offset.* With one cyclic period, drive
+      ``take_due`` at successive ``now`` values that vary the per-cycle
+      lateness; assert each slot fires exactly once and ``next_k`` stays on
+      ``epoch + k × period`` — accumulated offset is zero regardless of how
+      late the previous wakeup was.
+   2. *Skip-realign on a stall.* Withhold ``take_due`` past one or more whole
+      periods, then call it once; assert exactly **one** dispatch and that
+      ``next_k`` snaps to the next *future* slot (closed-form re-anchor),
+      never a replayed burst of stale cycles; a boundary-exact stall lands
+      cleanly on a slot.
+   3. *Harmonic multi-period.* With two harmonic periods, assert
+      ``next_timeout`` returns the distance to the **earliest** pending slot
+      and that slots coincident at a shared grid point coalesce within a
+      single ``take_due`` pass.
+   4. *Empty grid.* With no cyclic task registered, assert
+      ``next_timeout(now) == Duration::MAX`` exactly (no grid-driven wakeup).
+
+   **Expected outcome.** The grid never slides under per-cycle lateness, a
+   transient stall costs bounded slots rather than a permanent phase offset,
+   and multi-cadence grids share the one scheduling epoch — the structural
+   guarantee behind the bounded lateness of :need:`REQ_0268`.
+
 ----
 
 PREEMPT_RT validation harness
