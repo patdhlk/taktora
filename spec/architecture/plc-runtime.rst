@@ -1107,9 +1107,12 @@ Absolute-grid cyclic dispatch
      ``MonotonicClock`` that produces the lateness of :need:`REQ_0106`: a
      separate trait, so substituting a test clock for telemetry can never
      alter dispatch timing.
-   * **``DispatchMode`` toggle** — ``Grid`` (default) | ``Legacy``, selecting
-     the absolute-grid path or the retained ``attach_interval`` path of
-     :need:`ADR_0100`.
+   * **``DispatchMode`` toggle** — ``Grid`` | ``Legacy``, selecting the
+     absolute-grid path or the retained ``attach_interval`` path of
+     :need:`ADR_0100`. The ``Default`` is **platform-conditional**: ``Grid`` on
+     Linux (the production ``timerfd`` path), ``Legacy`` on non-Linux dev hosts
+     (where ``Grid`` is only a self-computed-timeout fallback whose ms-rounding
+     jitter makes tight timing tests flaky on loaded CI).
    * **``base_period`` / ``gcd`` — pure helpers** that fold all declared cyclic
      periods to the master-tick period (``base_period = gcd`` of the set), so
      one master timerfd phase-locks every cyclic task and a task of period
@@ -1136,9 +1139,9 @@ Absolute-grid cyclic dispatch
    :need:`BB_0095` into the dispatch loop.
 
    * **Builder setters** — ``ExecutorBuilder::dispatch_mode`` selects
-     ``DispatchMode`` (default ``Grid``); ``ExecutorBuilder::cyclic_clock``
-     installs a ``CyclicClock`` (defaulting to ``MonotonicCyclicClock`` at
-     ``build``).
+     ``DispatchMode`` (default is platform-conditional: ``Grid`` on Linux,
+     ``Legacy`` on non-Linux); ``ExecutorBuilder::cyclic_clock`` installs a
+     ``CyclicClock`` (defaulting to ``MonotonicCyclicClock`` at ``build``).
    * **Grid path owns cyclic timing** — in ``Grid`` mode the loop skips
      ``WaitSet::attach_interval`` for cyclic declarations and instead owns
      them via ``GridTimer``: the epoch is sampled from the ``CyclicClock`` at

@@ -49,15 +49,29 @@ impl CyclicClock for MonotonicCyclicClock {
 /// Cyclic dispatch timing strategy.
 ///
 /// `Grid` is the absolute-grid timer of `REQ_0268`; `Legacy` is the pre-fix
-/// `attach_interval` path, retained behind this toggle only until the Pi5 A/B
-/// validates `Grid`, then removed.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// `attach_interval` path. The [`Default`] is **platform-conditional**: `Grid`
+/// on Linux (the production absolute-grid `timerfd` path), `Legacy` on non-Linux
+/// dev hosts. On non-Linux `Grid` is only a self-computed-`epoll`-timeout
+/// fallback — not the real-time target — and its millisecond-rounding jitter
+/// makes tight timing tests flaky on loaded CI, so the stable `attach_interval`
+/// path is the better default there. The Linux production behaviour is unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DispatchMode {
-    /// Self-computed absolute grid (default).
-    #[default]
+    /// Self-computed absolute grid; the production default on Linux.
     Grid,
-    /// iceoryx2 `attach_interval` relative timer (drifts — temporary).
+    /// iceoryx2 `attach_interval` relative timer; the default on non-Linux dev
+    /// hosts (and the opt-in legacy path on Linux).
     Legacy,
+}
+
+impl Default for DispatchMode {
+    fn default() -> Self {
+        if cfg!(target_os = "linux") {
+            Self::Grid
+        } else {
+            Self::Legacy
+        }
+    }
 }
 
 /// Pure absolute-grid timer. Holds one nominal target per cyclic task; advances
@@ -183,8 +197,13 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_mode_defaults_to_grid() {
+    fn dispatch_mode_default_is_grid_on_linux_legacy_elsewhere() {
+        // Production default: the absolute-grid timerfd path on Linux; the
+        // stable attach_interval fallback on non-Linux dev hosts (REQ_0268).
+        #[cfg(target_os = "linux")]
         assert_eq!(DispatchMode::default(), DispatchMode::Grid);
+        #[cfg(not(target_os = "linux"))]
+        assert_eq!(DispatchMode::default(), DispatchMode::Legacy);
     }
 
     #[test]

@@ -38,22 +38,18 @@ impl Observer for ScopedObserver {
 #[test]
 fn executor_wide_breach_faults_executor_and_cascades_silently() {
     let observer = Arc::new(ScopedObserver::default());
-    let builder = Executor::builder()
+    // Uses the platform default DispatchMode: the master-timerfd Grid on Linux
+    // (atomic, interrupt-driven), the stable attach_interval Legacy on non-Linux
+    // dev/CI hosts. This is a tight 60 ms fault-cascade window, and the non-Linux
+    // Grid fallback's ms-rounding jitter would make it flaky on loaded CI — the
+    // platform default avoids that. The test is mode-agnostic (it exercises the
+    // fault cascade, not the dispatch timer). REQ_0268.
+    let mut exec = Executor::builder()
         .worker_threads(2)
         .iteration_budget(Duration::from_millis(10))
-        .observer(Arc::clone(&observer) as Arc<dyn Observer>);
-    // This is a tight 60 ms fault-cascade window (a 20 ms slow dispatch must
-    // fault the executor and leave room for post-fault wakeups). On Linux the
-    // production master-timerfd `Grid` is interrupt-driven and atomic, so the
-    // default cadence is exercised. On non-Linux dev/CI hosts `Grid` is only a
-    // self-computed-`epoll`-timeout fallback (not the real-time path) whose
-    // ms-rounding makes post-fault wakeups miss the window on a loaded macOS CI
-    // runner — flaky. Pin `Legacy` (`attach_interval`) there: the test is
-    // mode-agnostic (it exercises the fault cascade, not the dispatch timer), so
-    // coverage is unchanged while CI stays deterministic. REQ_0268.
-    #[cfg(not(target_os = "linux"))]
-    let builder = builder.dispatch_mode(taktora_executor::DispatchMode::Legacy);
-    let mut exec = builder.build().expect("build");
+        .observer(Arc::clone(&observer) as Arc<dyn Observer>)
+        .build()
+        .expect("build");
 
     // Task A — slow, will breach the executor-wide 10ms budget.
     let slow_id = exec
