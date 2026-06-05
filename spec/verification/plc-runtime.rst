@@ -459,7 +459,7 @@ Test cases verifying the scan-cycle observability sub-feature
       grid. Back-to-back realigns hand the carry over without loss or
       doubling.
 
-   **Layer 2 — executor integration (real clocks, loose bounds).**
+   **Layer 2 — executor integration (Linux-only, real clocks, loose bounds).**
 
    1. ``Grid`` mode forced; one 50 ms cyclic task whose body sleeps
       ≈ 130 ms on one cycle (``worker_threads(0)`` — the dispatch
@@ -472,6 +472,11 @@ Test cases verifying the scan-cycle observability sub-feature
       cycle reports ``0``; the starved cycle's lateness spikes past one
       period; the final cycle's lateness is back under half a period
       (re-anchored, not accumulating).
+
+   Layer 2 runs on Linux only — the production ``timerfd`` grid path.
+   The non-Linux ``Grid`` fallback is not a real-time target: a stalled
+   runner can leave the final sample mid-starvation, so no tail bound
+   holds there; the carry mechanics remain covered everywhere by layer 1.
 
    Layer 1 lives in ``crates/taktora-executor/src/grid.rs`` (unit
    tests); layer 2 in

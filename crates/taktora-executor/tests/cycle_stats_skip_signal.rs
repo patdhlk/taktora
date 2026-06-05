@@ -3,6 +3,14 @@
 //! (the starvation is genuine: `worker_threads(0)` runs the sleeping body on
 //! the dispatch thread), so assertions are deliberately loose bounds — the
 //! exact carry arithmetic is pinned by the `GridTimer` unit tests.
+
+// The whole file is Linux-only: layer 2 of TEST_0853 needs the production
+// absolute-grid timerfd path. The non-Linux Grid fallback (ms-rounded epoll
+// timeout) is not a real-time target — a loaded CI runner can stall the
+// final wakes, leaving the last sample mid-starvation with its re-anchor
+// landing after `run_n` returns, so no tail bound holds there. The ferry
+// mechanics stay covered everywhere by the GridTimer unit tests (grid.rs).
+#![cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
