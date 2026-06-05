@@ -38,17 +38,8 @@ impl Observer for ScopedObserver {
 #[test]
 fn executor_wide_breach_faults_executor_and_cascades_silently() {
     let observer = Arc::new(ScopedObserver::default());
-    // Pin to the stable `attach_interval` cadence (`Legacy`): this is a
-    // tight-timing budget-fault test (a 20ms slow dispatch + fault detection +
-    // post-fault wakeups inside a 60ms window) and is mode-agnostic — it
-    // exercises the fault cascade, not the dispatch timer. The default `Grid`
-    // cadence is platform-validated separately (REQ_0268, the Pi5 timerfd A/B);
-    // using it here only adds runner-dependent jitter (observed: post-fault
-    // wakeups missing the window on slow macOS CI). Forward-compatible: on
-    // non-Linux `Grid` resolves to `attach_interval` too.
     let mut exec = Executor::builder()
         .worker_threads(2)
-        .dispatch_mode(taktora_executor::DispatchMode::Legacy)
         .iteration_budget(Duration::from_millis(10))
         .observer(Arc::clone(&observer) as Arc<dyn Observer>)
         .build()
