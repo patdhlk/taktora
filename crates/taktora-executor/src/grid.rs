@@ -169,14 +169,17 @@ impl GridTimer {
 /// cyclic tasks (caller arms no timer). Zero-valued periods are ignored (they
 /// are rejected at registration, `REQ_0268`).
 // `redundant_pub_crate`: this module is private, so `pub(crate)` looks redundant,
-// but the symbol is consumed by a sibling module in a later task.
-// `dead_code`: wired up by the dispatch-loop integration task; suppress until then.
-#[allow(clippy::redundant_pub_crate, dead_code)]
+// but the symbol is consumed by `executor::dispatch_loop` (the master timer).
+// `dead_code`: only the Linux master-timer path calls `base_period`; on non-Linux
+// the `GridTimer` drives dispatch via `next_timeout`, so it is genuinely unused.
+#[allow(clippy::redundant_pub_crate)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn base_period(periods: &[u64]) -> u64 {
     periods.iter().copied().filter(|p| *p != 0).fold(0, gcd)
 }
 
-#[allow(dead_code)]
+// Called only from `base_period`, so it shares the same non-Linux dead-code fate.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const fn gcd(a: u64, b: u64) -> u64 {
     if b == 0 { a } else { gcd(b, a % b) }
 }
