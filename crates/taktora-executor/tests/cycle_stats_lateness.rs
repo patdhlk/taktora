@@ -11,8 +11,8 @@
 //!    as a persistent offset (healing requires the explicit `REQ_0840`
 //!    signal; the mock-clock gap here is not a real dispatcher skip).
 //! 4. **Per-task grid epoch** — each task anchors at its own first dispatch —
-//!    the first sample is exactly zero and later samples stay bounded under
-//!    real-time interleave.
+//!    the first sample is exactly zero; later samples are unasserted
+//!    (cross-task clock coupling is unbounded under real-time starvation).
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -219,16 +219,10 @@ fn each_task_anchors_lateness_on_its_own_first_dispatch() {
     // reported B's start phase — at least one A-advance, typically +2·10 ms —
     // from the very first sample.
     assert_eq!(b[0], Some(0), "task B first sample anchors its own epoch");
-    // Later B samples ride the real-time A/B interleave: each flip moves
-    // B's scripted `pre` by one A-advance (±10 ms), and a coalesced B wake
-    // can add one more. Lateness must stay bounded (no accumulation) — the
-    // grid-slot fold advancing wrongly would compound past this in a few
-    // cycles.
-    for (n, l) in b.iter().enumerate().skip(1) {
-        let v = l.expect("task B records lateness every cycle");
-        assert!(
-            v.abs() < 40_000_000,
-            "task B cycle {n}: lateness must stay bounded, got {v}"
-        );
-    }
+    // Later B samples are deliberately NOT asserted: B's scripted clock is
+    // driven by A's fire count, and under real-time starvation a coalesced
+    // A wake fires once for several elapsed periods — the A:B fire ratio
+    // (and hence B's lateness) is unbounded in this fixture. The per-task
+    // epoch property is fully pinned by the first sample above; accumulation
+    // semantics are pinned exactly by the single-task tests in this file.
 }

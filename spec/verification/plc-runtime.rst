@@ -352,9 +352,10 @@ Test cases verifying the scan-cycle observability sub-feature
       exactly ``0`` — it anchors at its own first dispatch, where the
       pre-fix executor-shared epoch reported the start phase (at least
       one foreign period) from the first sample on. Later samples of
-      the second task ride the real-time interleave of the two relative
-      timers and are asserted **bounded** (no accumulation) rather than
-      exact.
+      the second task are not asserted: its scripted clock is driven by
+      the first task's fire count, which is unbounded under real-time
+      runner starvation; accumulation semantics are pinned by the
+      single-task scenarios above.
 
    All four live in
    ``crates/taktora-executor/tests/cycle_stats_lateness.rs``.
