@@ -116,13 +116,25 @@ pub(crate) struct TaskEntry {
     /// Telemetry-clock nanoseconds (see [`MonotonicClock`]).
     pub(crate) last_dispatch: Option<u64>,
 
-    /// WaitSet-thread-only running grid-slot index for deadline lateness
-    /// (`REQ_0106`). Counts nominal periods elapsed since the grid epoch,
-    /// advancing one slot per cycle under steady drift and several at once
-    /// across a coalesced/missed wakeup — decoupled from `cycle_index` so a
-    /// transient hiccup re-anchors the grid instead of biasing it forever.
-    /// Starts at `0` (the first cycle is on its own grid point by definition).
+    /// WaitSet-thread-only lateness grid slot for this task (`REQ_0106`).
+    /// Advances by exactly **one per scan attempt plus the dispatcher's
+    /// skipped-slot signal** (`REQ_0840`) — never reconstructed from the
+    /// noisy measured period, which over-counts on coalesced catch-up wakes
+    /// (issue #46 / `ADR_0101`). Starts at `0` (the first recorded cycle is
+    /// the task's own grid origin).
     pub(crate) grid_slot: u64,
+
+    /// WaitSet-thread-only per-task lateness grid epoch (`REQ_0106`): the
+    /// task's own first recorded `pre` — including a faulted first scan,
+    /// whose dispatch instant is real. Per-task (not executor-shared) so a
+    /// task's start phase never reads as permanent lateness.
+    pub(crate) grid_epoch: Option<u64>,
+
+    /// WaitSet-thread-only dispatcher skip signal for the *current* wakeup
+    /// (`REQ_0840`): written by the Grid dispatch pass before `dispatch_task`,
+    /// consumed (`take`n) by `record_cycle_for`. Never written in `Legacy`
+    /// mode or for event-driven tasks — stays `0`.
+    pub(crate) pending_skipped: u32,
 
     /// WaitSet-thread-only stash of the *current* wakeup's pending cycle —
     /// the pre-dispatch timestamp plus its `faulted` flag — carried across
@@ -197,13 +209,6 @@ pub struct Executor {
     /// [`ExecutorBuilder::clock`] for deterministic timing assertions. Affects
     /// only telemetry — never scheduling or fault behaviour.
     pub(crate) clock: Arc<dyn MonotonicClock>,
-
-    /// Lateness grid epoch in telemetry-clock nanoseconds (`REQ_0106`): the
-    /// `pre` of this executor's first recorded cyclic dispatch. Grid point `n`
-    /// is `grid_epoch + n * period`. Set once (lazily) on the `WaitSet` thread;
-    /// shared as an `Arc` so the dispatch loop and `record_cycle_for` see the
-    /// same `OnceLock`.
-    pub(crate) grid_epoch: Arc<OnceLock<u64>>,
 
     /// Cyclic dispatch timing strategy (`REQ_0268` / `ADR_0100`). Read once at
     /// `dispatch_loop` entry and hoisted to a local, so steady-state cost is a
@@ -372,6 +377,8 @@ impl Executor {
             last_took_ns: Arc::clone(&last_took_ns),
             last_dispatch: None,
             grid_slot: 0,
+            grid_epoch: None,
+            pending_skipped: 0,
             pending_cycle: None,
         });
         self.cycle_stats
@@ -688,6 +695,8 @@ impl Executor {
             last_took_ns: Arc::clone(&last_took_ns),
             last_dispatch: None,
             grid_slot: 0,
+            grid_epoch: None,
+            pending_skipped: 0,
             pending_cycle: None,
         });
         self.cycle_stats
@@ -1012,7 +1021,6 @@ impl ExecutorBuilder {
             start_time: Arc::new(OnceLock::new()),
             fatal_dispatch,
             clock,
-            grid_epoch: Arc::new(OnceLock::new()),
             dispatch_mode: self.dispatch_mode,
             cyclic_clock,
         };
@@ -1293,11 +1301,10 @@ impl Executor {
             // cascade below to compute `since_ms` on task transitions
             // triggered by an executor-wide fault.
             let exec_start_ptr = &*self.start_time as *const OnceLock<Instant>;
-            // Telemetry clock + lateness grid epoch. Same lifetime/aliasing
-            // discipline as the pointers above: the Executor outlives the
-            // dispatch loop and the WaitSet callback is the sole reader.
+            // Telemetry clock. Same lifetime/aliasing discipline as the
+            // pointers above: the Executor outlives the dispatch loop and the
+            // WaitSet callback is the sole reader.
             let clock = &self.clock;
-            let grid_epoch_ptr = &*self.grid_epoch as *const OnceLock<u64>;
 
             // Wrap the per-iteration dispatch body in the framework panic
             // boundary. A panic escaping here is *infrastructure* (the WaitSet
@@ -1322,7 +1329,6 @@ impl Executor {
                         exec_fault_ptr,
                         exec_start_ptr,
                         clock,
-                        grid_epoch_ptr,
                         stop_listener_ptr,
                         pool,
                         iter_err: &iter_err_inner,
@@ -1384,7 +1390,6 @@ impl Executor {
                 exec_fault_ptr,
                 exec_start_ptr,
                 clock,
-                grid_epoch_ptr,
                 stop_listener_ptr,
                 pool,
                 iter_err: &iter_err_inner,
@@ -1638,8 +1643,6 @@ struct DispatchPass<'a, 'g, 'w> {
     exec_start_ptr: *const OnceLock<Instant>,
     /// Borrow of the executor's telemetry clock, read for each cycle's `pre`.
     clock: &'a Arc<dyn MonotonicClock>,
-    /// Raw pointer to `Executor::grid_epoch` (lateness grid anchor, `REQ_0106`).
-    grid_epoch_ptr: *const OnceLock<u64>,
     /// Raw pointer to the internal stop listener.
     stop_listener_ptr: *const IxListener<ipc::Service>,
     /// Borrow of the executor thread pool.
@@ -1807,20 +1810,21 @@ impl DispatchPass<'_, '_, '_> {
             actual_period.map(|ap| ap.abs_diff(period_ns))
         };
 
-        // Advance the lateness grid slot (REQ_0106). The slot counts nominal
-        // periods elapsed and is decoupled from `cycle_index`: a steady
-        // sub-period slip rounds to exactly one slot per cycle, so drift
-        // accumulates; a coalesced/missed wakeup (the WaitSet was starved past
-        // one or more whole periods) advances several slots at once,
-        // re-anchoring the grid so a transient hiccup does not permanently bias
-        // every later cycle's lateness. First cycle (`actual_period == None`):
-        // the slot stays at its initial 0.
-        if let Some(ap) = actual_period {
-            // round(ap / period) = (ap + period/2) / period, via checked_div so
-            // a degenerate period_ns == 0 simply contributes no slot advance.
-            if let Some(slots) = ap.saturating_add(period_ns / 2).checked_div(period_ns) {
-                task.grid_slot = task.grid_slot.saturating_add(slots.max(1));
-            }
+        // Per-task lateness grid (REQ_0106 / ADR_0101): the task's first
+        // record anchors the grid (grid_epoch = its own first `pre`, slot 0 —
+        // a faulted first scan anchors too, its dispatch instant is real);
+        // every later record advances by exactly one slot plus the
+        // dispatcher's skipped-slot signal (REQ_0840). Never reconstructed
+        // from the measured period, which over-counts on coalesced catch-up
+        // wakes and fabricates negative lateness (issue #46).
+        let skipped = core::mem::take(&mut task.pending_skipped);
+        let first = task.grid_epoch.is_none();
+        let grid_epoch = *task.grid_epoch.get_or_insert(pre_ns);
+        if !first {
+            task.grid_slot = task
+                .grid_slot
+                .saturating_add(1)
+                .saturating_add(u64::from(skipped));
         }
         let grid_slot = task.grid_slot;
 
@@ -1828,14 +1832,13 @@ impl DispatchPass<'_, '_, '_> {
         let stats = unsafe { &mut (&mut *self.cycle_stats_ptr)[task_idx] };
 
         // Deadline lateness (REQ_0106): signed offset of the actual start
-        // (`pre_ns`) from its nominal grid point `grid_epoch + grid_slot*period`,
-        // where `grid_epoch` is this task set's first recorded `pre`. Positive
-        // => started late; negative => early. Captures steady drift (jitter is
-        // blind to a constant offset; lateness is not) while self-healing across
-        // discrete missed wakeups via the grid-slot re-anchoring above.
+        // (`pre_ns`) from its nominal grid point `grid_epoch + grid_slot *
+        // period`. Positive => started late; negative => early. Captures
+        // steady drift (jitter is blind to a constant offset; lateness is
+        // not). A dispatcher skip re-anchors via `skipped` above; absent a
+        // signal (Legacy mode), a whole missed period honestly remains
+        // visible as a persistent offset rather than being absorbed.
         let lateness = if period_ns > 0 && !faulted {
-            // SAFETY: grid_epoch_ptr derefs the Executor owning this dispatch_loop.
-            let grid_epoch = *unsafe { &*self.grid_epoch_ptr }.get_or_init(|| pre_ns);
             let elapsed_ns = i64::try_from(pre_ns.saturating_sub(grid_epoch)).unwrap_or(i64::MAX);
             let expected_ns =
                 i64::try_from(u128::from(grid_slot) * u128::from(period_ns)).unwrap_or(i64::MAX);
@@ -1856,7 +1859,7 @@ impl DispatchPass<'_, '_, '_> {
             actual_period_ns: actual_period,
             jitter_ns: jitter,
             lateness_ns: lateness,
-            skipped_slots: 0,
+            skipped_slots: skipped,
             took_ns: took,
         };
         self.observer.on_cycle_stats(&obs);
@@ -2542,6 +2545,8 @@ impl ExecutorGraphBuilder<'_> {
             last_took_ns: Arc::new(AtomicU64::new(u64::MAX)),
             last_dispatch: None,
             grid_slot: 0,
+            grid_epoch: None,
+            pending_skipped: 0,
             pending_cycle: None,
         });
         self.executor
