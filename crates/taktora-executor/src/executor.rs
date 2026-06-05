@@ -1856,6 +1856,7 @@ impl DispatchPass<'_, '_, '_> {
             actual_period_ns: actual_period,
             jitter_ns: jitter,
             lateness_ns: lateness,
+            skipped_slots: 0,
             took_ns: took,
         };
         self.observer.on_cycle_stats(&obs);

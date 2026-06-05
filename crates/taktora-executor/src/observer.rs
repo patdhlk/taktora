@@ -120,6 +120,7 @@ mod cycle_stats_hook_tests {
             actual_period_ns: None,
             jitter_ns: None,
             lateness_ns: None,
+            skipped_slots: 0,
             took_ns: None,
         }
     }
