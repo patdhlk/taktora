@@ -1533,8 +1533,8 @@ fn run_grid_cyclic_pass(
     if due_cyclic.is_empty() {
         return;
     }
-    for (slot, _skipped) in due_cyclic.iter() {
-        pass.dispatch_task(cyclic_task_indices[*slot]);
+    for (slot, skipped) in due_cyclic.iter() {
+        pass.dispatch_cyclic(cyclic_task_indices[*slot], *skipped);
     }
     pass.barrier_and_record();
 }
@@ -1661,6 +1661,21 @@ impl DispatchPass<'_, '_, '_> {
     /// `REQ_0268` / `ADR_0100` — the forthcoming post-wait absolute-grid
     /// dispatch pass, so the per-task barrier/telemetry contract is identical
     /// across both call paths.
+    /// Grid-mode cyclic dispatch: stashes the dispatcher's skipped-slot
+    /// signal (`REQ_0840`) on the task, then runs the shared dispatch path —
+    /// the post-barrier `record_cycle_for` `take`s it and folds
+    /// `grid_slot += 1 + skipped` (`REQ_0106` / `ADR_0101`). Only this
+    /// discrete count crosses the scheduler→telemetry boundary; timestamps
+    /// stay on the telemetry clock (`REQ_0268`).
+    #[allow(unsafe_code)]
+    fn dispatch_cyclic(&mut self, task_idx: usize, skipped: u64) {
+        // SAFETY: same single-writer WaitSet-thread discipline as
+        // dispatch_task; the pointer is valid for the duration of this call.
+        let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
+        task.pending_skipped = u32::try_from(skipped).unwrap_or(u32::MAX);
+        self.dispatch_task(task_idx);
+    }
+
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(unsafe_code)]
     fn dispatch_task(&mut self, task_idx: usize) {
@@ -1836,8 +1851,9 @@ impl DispatchPass<'_, '_, '_> {
         // period`. Positive => started late; negative => early. Captures
         // steady drift (jitter is blind to a constant offset; lateness is
         // not). A dispatcher skip re-anchors via `skipped` above; absent a
-        // signal (Legacy mode), a whole missed period honestly remains
-        // visible as a persistent offset rather than being absorbed.
+        // signal (e.g. `Legacy` mode, which never signals), a whole missed
+        // period honestly remains visible as a persistent offset rather than
+        // being absorbed.
         let lateness = if period_ns > 0 && !faulted {
             let elapsed_ns = i64::try_from(pre_ns.saturating_sub(grid_epoch)).unwrap_or(i64::MAX);
             let expected_ns =
