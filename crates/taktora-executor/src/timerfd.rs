@@ -25,7 +25,7 @@
 #![allow(clippy::doc_markdown)]
 
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::time::Duration;
 
 use iceoryx2_bb_posix::file_descriptor::{FileDescriptor, FileDescriptorBased};
@@ -139,14 +139,5 @@ fn ns_to_timespec(ns: i128) -> libc::timespec {
     libc::timespec {
         tv_sec: libc::time_t::try_from(secs).unwrap_or(libc::time_t::MAX),
         tv_nsec: nsec as libc::c_long,
-    }
-}
-
-/// Suppress an "unused" warning for `raw_fd` accessor on builds that do not
-/// reference it directly (kept for diagnostics/tests).
-#[allow(dead_code)]
-impl TimerFd {
-    pub(crate) fn raw_fd(&self) -> RawFd {
-        self.owned.as_raw_fd()
     }
 }
