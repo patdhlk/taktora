@@ -19,7 +19,7 @@ fn healthy_cycle_renders_all_numbers() {
         line_of(&rec),
         "{\"cycle_index\":7,\"task_id\":2,\"faulted\":false,\"ts_ns\":1000,\
 \"period_ns\":1000000,\"actual_period_ns\":1000100,\"jitter_ns\":100,\
-\"lateness_ns\":-50,\"took_ns\":250000}\n"
+\"lateness_ns\":-50,\"took_ns\":250000,\"skipped_slots\":0}\n"
     );
 }
 
@@ -34,6 +34,6 @@ fn faulted_cycle_renders_nulls() {
         line_of(&rec),
         "{\"cycle_index\":8,\"task_id\":2,\"faulted\":true,\"ts_ns\":2000,\
 \"period_ns\":1000000,\"actual_period_ns\":null,\"jitter_ns\":null,\
-\"lateness_ns\":null,\"took_ns\":null}\n"
+\"lateness_ns\":null,\"took_ns\":null,\"skipped_slots\":0}\n"
     );
 }

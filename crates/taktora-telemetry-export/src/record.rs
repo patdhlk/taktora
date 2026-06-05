@@ -40,6 +40,9 @@ pub struct PodRecord {
     pub took_ns: u64,
     /// Stable task registration index (`REQ_0111` `task_id` column).
     pub task_index: u32,
+    /// Dispatcher skipped-slot count (`REQ_0840`); always present, `0` in
+    /// steady state. Not flag-gated: like `period_ns`, it is always known.
+    pub skipped_slots: u32,
     /// Faulted flag + per-field presence bits.
     pub flags: u32,
 }
@@ -82,6 +85,7 @@ impl PodRecord {
             lateness_ns,
             took_ns,
             task_index: obs.task_index,
+            skipped_slots: obs.skipped_slots,
             flags,
         }
     }
@@ -108,6 +112,7 @@ impl PodRecord {
             lateness_ns,
             took_ns,
             task_index,
+            skipped_slots: 0,
             flags: F_ACTUAL_PERIOD | F_JITTER | F_LATENESS | F_TOOK,
         }
     }
@@ -129,6 +134,7 @@ impl PodRecord {
             lateness_ns: 0,
             took_ns: 0,
             task_index,
+            skipped_slots: 0,
             flags: F_FAULTED,
         }
     }
@@ -159,6 +165,7 @@ impl PodRecord {
         put_i64(w, self.flags & F_LATENESS != 0, self.lateness_ns)?;
         w.write_all(b",\"took_ns\":")?;
         put_u64(w, self.flags & F_TOOK != 0, self.took_ns)?;
+        write!(w, ",\"skipped_slots\":{}", self.skipped_slots)?;
         w.write_all(b"}\n")
     }
 }
@@ -176,5 +183,64 @@ fn put_i64<W: Write>(w: &mut W, present: bool, v: i64) -> io::Result<()> {
         write!(w, "{v}")
     } else {
         w.write_all(b"null")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn healthy_obs(skipped_slots: u32) -> CycleObservation {
+        CycleObservation {
+            cycle_index: 7,
+            task_id: taktora_executor::TaskId::from("t"),
+            task_index: 2,
+            faulted: false,
+            period_ns: 1_000_000,
+            pre_ns: 99,
+            actual_period_ns: Some(1_000_010),
+            jitter_ns: Some(10),
+            lateness_ns: Some(-3),
+            took_ns: Some(250),
+            skipped_slots,
+        }
+    }
+
+    #[test]
+    fn from_observation_copies_skipped_slots() {
+        let obs = healthy_obs(3);
+        let rec = PodRecord::from_observation(&obs);
+        assert_eq!(rec.skipped_slots, 3);
+    }
+
+    #[test]
+    fn write_ndjson_always_renders_skipped_slots_as_number() {
+        // Healthy record with skipped_slots: 2 → key present as number.
+        let base = PodRecord::new_healthy(0, 1, 0, 1_000_000, 1_000_010, 10, -3, 250);
+        let rec = PodRecord {
+            skipped_slots: 2,
+            ..base
+        };
+        let mut buf = Vec::new();
+        rec.write_ndjson(&mut buf).unwrap();
+        let line = String::from_utf8(buf).unwrap();
+        assert!(
+            line.contains("\"skipped_slots\":2"),
+            "expected \"skipped_slots\":2 in {line:?}"
+        );
+
+        // Faulted record → skipped_slots: 0 (never null).
+        let faulted = PodRecord::new_faulted(1, 1, 0, 1_000_000);
+        let mut buf2 = Vec::new();
+        faulted.write_ndjson(&mut buf2).unwrap();
+        let line2 = String::from_utf8(buf2).unwrap();
+        assert!(
+            line2.contains("\"skipped_slots\":0"),
+            "expected \"skipped_slots\":0 in {line2:?}"
+        );
+        assert!(
+            !line2.contains("\"skipped_slots\":null"),
+            "skipped_slots must never be null, got {line2:?}"
+        );
     }
 }

@@ -47,6 +47,7 @@ mod tests {
             jitter_ns: Some(10),
             lateness_ns: Some(-3),
             took_ns: Some(250),
+            skipped_slots: 0,
         }
     }
 
