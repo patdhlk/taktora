@@ -96,6 +96,11 @@ impl GridTimer {
 
     /// Time to sleep until the earliest pending grid target (zero if already
     /// due — a zero `epoll` timeout polls and catches up).
+    //
+    // Used only on the non-Linux self-computed-timeout path: on Linux the master
+    // timerfd owns the wake (the wait blocks with `Duration::MAX`), so this is
+    // dead there (REQ_0268 / ADR_0100).
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     pub(crate) fn next_timeout(&self, now: u64) -> Duration {
         // No cyclic targets → no grid-driven wakeup. Return `Duration::MAX`
         // exactly (not `u64::MAX` nanos): the WaitSet treats `Duration::MAX`
