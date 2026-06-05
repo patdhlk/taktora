@@ -1013,17 +1013,24 @@ Absolute-grid cyclic dispatch
    attachments"; the relative-timeout behaviour is unchanged.)
 
    **Decision.** Stop using ``attach_interval`` for the grid. Cyclic dispatch
-   is phase-locked to an absolute ``CLOCK_MONOTONIC`` grid using a **Linux
-   ``timerfd``** (``TFD_TIMER_ABSTIME``) — one per cyclic task — attached to the
-   WaitSet as a notification (``attach_notification`` via an
-   ``iceoryx2-bb-posix`` ``FileDescriptor`` wrapper). The kernel arms an
-   ``hrtimer`` that makes the fd readable at the exact grid point and
-   auto-rearms every ``period`` (counting overruns); the task dispatches through
-   the normal callback the instant its fd fires. The WaitSet blocks
-   (``Duration::MAX``) on **fd-readiness** — interrupt-driven, and therefore
-   immune to the ``epoll`` timeout's millisecond rounding. The loop drains each
-   timerfd (8-byte read) per wake to clear readiness. The lateness path of
-   :need:`REQ_0106` is left untouched.
+   is phase-locked to an absolute ``CLOCK_MONOTONIC`` grid using a **single
+   master Linux ``timerfd``** (``TFD_TIMER_ABSTIME``) armed at
+   ``base_period = gcd`` of all declared cyclic periods — one master cycle
+   timer per PLC, with every cyclic task phase-locked to it (a task of period
+   ``N·base`` fires every ``N``-th tick). It is attached to the WaitSet
+   **wake-only**
+   (``attach_notification`` via an ``iceoryx2-bb-posix`` ``FileDescriptor``
+   wrapper), held separately from the per-task attachment arrays so the callback
+   never maps it to a task. The kernel arms an ``hrtimer`` that makes the fd
+   readable at the exact grid point and auto-rearms every ``base_period``
+   (counting overruns); the master timerfd only **wakes** the WaitSet, and a
+   **post-wait ``GridTimer::take_due`` pass dispatches every due cyclic task
+   atomically per tick**. The WaitSet blocks (``Duration::MAX``) on
+   **fd-readiness** — interrupt-driven, and therefore immune to the ``epoll``
+   timeout's millisecond rounding. The loop drains the single master timerfd
+   (8-byte read) per wake to clear readiness; ``drain() > 0`` (the grid ticked)
+   gates the post-wait pass. The lateness path of :need:`REQ_0106` is left
+   untouched.
 
    This **supersedes** the original self-computed-timeout decision (a
    ``GridTimer`` driving ``wait_and_process_once_with_timeout`` with
@@ -1051,12 +1058,13 @@ Absolute-grid cyclic dispatch
      ``Ok(0)`` with no elapsed deadline — ``handle_deadlines`` fires nothing, so
      we wake but do not dispatch; dispatch stays welded to the drifting anchor.
 
-   **Consequences.** Long-run lateness is bounded. Pi5 FIFO A/B
-   (``chrt -f 80 taskset -c 3``, 1 ms, ``cycle_index``-anchored grid):
-   timerfd-grid slope **≈ 0 ns/cycle**, ``|final lateness|`` **≈ 7 µs at
-   600 000 cycles** — versus legacy ``attach_interval`` **+3.1 µs/cycle /
-   1879 ms** (reproducing the bug). Grid jitter is also far tighter (p50
-   ~50 ns vs ~5.8 µs). A C-level ``timerfd``+``epoll`` probe independently
+   **Consequences.** Long-run lateness is bounded. Pi5 FIFO A/B of the
+   single master timerfd (``chrt -f 80``, 1 ms, ``cycle_index``-anchored grid):
+   timerfd-grid slope **≈ 0 ns/cycle** (0.0001), ``|final lateness|`` **≈ 13 µs
+   at 600 000 cycles** — versus legacy ``attach_interval`` **+3.6 µs/cycle /
+   2174 ms** (reproducing the bug). Grid jitter is also far tighter (p50
+   ~170 ns, p99 ~2.5 µs, vs legacy p50 ~6.5 µs) and held even without core
+   pinning. A C-level ``timerfd``+``epoll`` probe independently
    confirmed slope ≈ 0 even under ``SCHED_OTHER``. Linux gains ``libc`` +
    ``iceoryx2-bb-posix`` dependencies. ``Legacy`` (``attach_interval``) is
    retained behind the runtime ``dispatch_mode`` toggle and removed in a
@@ -1102,12 +1110,19 @@ Absolute-grid cyclic dispatch
    * **``DispatchMode`` toggle** — ``Grid`` (default) | ``Legacy``, selecting
      the absolute-grid path or the retained ``attach_interval`` path of
      :need:`ADR_0100`.
+   * **``base_period`` / ``gcd`` — pure helpers** that fold all declared cyclic
+     periods to the master-tick period (``base_period = gcd`` of the set), so
+     one master timerfd phase-locks every cyclic task and a task of period
+     ``N·base`` fires every ``N``-th tick.
 
-   Wiring: the ``GridTimer`` drives the wait — ``next_timeout`` feeds the
-   ``timeout`` argument of ``WaitSet::wait_and_process_once_with_timeout``
-   from ``dispatch_loop`` — and cyclic tasks dispatch in a **post-wait pass**
-   that calls ``take_due`` and routes each due task through
-   ``DispatchPass::dispatch_task``. Event/fd-driven tasks remain on the
+   Wiring: on **Linux** the single master ``timerfd`` (armed at ``base_period``,
+   attached wake-only and drained each wake) drives the wake and the wait blocks
+   with ``Duration::MAX``; on **non-Linux** dev hosts (no ``timerfd``) the
+   ``GridTimer`` drives — ``next_timeout`` feeds the ``timeout`` argument of
+   ``WaitSet::wait_and_process_once_with_timeout`` from ``dispatch_loop``. In
+   **both** cases cyclic tasks dispatch in a **post-wait pass** that calls
+   ``take_due`` and routes each due task through ``DispatchPass::dispatch_task``,
+   folded by ``barrier_and_record``. Event/fd-driven tasks remain on the
    per-attachment callback path; one ``pool.barrier()`` per iteration covers
    both passes.
 
@@ -1127,10 +1142,14 @@ Absolute-grid cyclic dispatch
    * **Grid path owns cyclic timing** — in ``Grid`` mode the loop skips
      ``WaitSet::attach_interval`` for cyclic declarations and instead owns
      them via ``GridTimer``: the epoch is sampled from the ``CyclicClock`` at
-     ``dispatch_loop`` entry, ``next_timeout`` computes each iteration's
-     ``wait_and_process_once_with_timeout`` timeout, and a post-wait pass
-     dispatches the ``take_due`` set through ``DispatchPass::dispatch_task``.
-     In ``Legacy`` mode the timeout is ``Duration::MAX`` and the old
+     ``dispatch_loop`` entry. On **Linux** the iteration timeout is
+     ``Duration::MAX`` and a **single master ``timerfd``**
+     (``crates/taktora-executor/src/timerfd.rs``, armed at ``base_period``,
+     attached wake-only and drained each wake) drives the wake; on **non-Linux**
+     dev hosts ``next_timeout`` computes each iteration's
+     ``wait_and_process_once_with_timeout`` timeout. In both cases a post-wait
+     pass dispatches the ``take_due`` set through ``DispatchPass::dispatch_task``.
+     In ``Legacy`` mode the timeout is also ``Duration::MAX`` and the old
      ``attach_interval`` heartbeat path is used unchanged.
    * **Mode branch hoisted** — ``dispatch_mode`` is read once at
      ``dispatch_loop`` entry into a local, so the per-iteration branch costs
