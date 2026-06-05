@@ -128,3 +128,13 @@ loom              = "0.7"
 tempfile          = "3"
 rsruckig          = "2"
 pollster          = "0.3"
+
+# Pinned alloc-free fork of iceoryx2 0.8.1's WaitSet fd-notification dispatch
+# (REQ_0104). Upstream allocates two scratch Vecs per fired-fd dispatch
+# (waitset.rs ~901 + ~624), which the master-timerfd cyclic path hits every
+# cycle, violating the zero-alloc steady-state guarantee. The fork reuses the
+# per-wait triggered-fd buffer and drops the dead (fd, deadline-idx) Vec; only
+# src/waitset.rs differs from published 0.8.1. Remove once released upstream.
+# Fork: https://github.com/patdhlk/iceoryx2 (branch taktora-pin-0.8.1-alloc-free).
+[patch.crates-io]
+iceoryx2 = { git = "https://github.com/patdhlk/iceoryx2", rev = "bf3f4be595fc0388047fff68e29b149765c8f04b" }
