@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/patdhlk/taktora/compare/taktora-executor-v0.1.6...taktora-executor-v0.2.0) - 2026-06-06
+
+
+### Fixed
+
+- *(executor)* Linux-gated clippy denials in the new hardening tests ([#51](https://github.com/patdhlk/taktora/pull/51))
+- *(executor)* Production hardening — EINTR-immune run loop, nominal-slot lateness anchor, 1 µs dispatch timer slack (REQ_0269/REQ_0106/REQ_0274) ([#50](https://github.com/patdhlk/taktora/pull/50))
+- *(executor)* Scan-count + skip-signal lateness grid — no fabricated negative lateness (REQ_0106/REQ_0840, closes #46) ([#49](https://github.com/patdhlk/taktora/pull/49))
+
 ## [0.1.6](https://github.com/patdhlk/taktora/compare/taktora-executor-v0.1.5...taktora-executor-v0.1.6) - 2026-06-05
 
 
