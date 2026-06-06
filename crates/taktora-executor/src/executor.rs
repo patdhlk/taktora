@@ -1160,6 +1160,25 @@ impl Executor {
         clippy::borrow_as_ptr
     )]
     fn dispatch_loop(&mut self, mode: &mut RunMode<'_>) -> Result<(), ExecutorError> {
+        // Tight timer slack for the dispatch thread (REQ_0274). SCHED_OTHER
+        // threads inherit the kernel's 50 µs default, and `epoll_wait`
+        // sleeps through `schedule_hrtimeout_range` WITH that slack: on the
+        // Pi5 rig that cost 56 µs/cycle accumulated Legacy-dispatch drift
+        // (5.5 µs/cycle at 1 µs slack — the residual is iceoryx2's
+        // ms-rounded epoll timeout + wake latency). Real-time classes force
+        // slack to 0, so this is a no-op under SCHED_FIFO and for the
+        // Grid/timerfd path (fd readiness, not timeout, drives the wake);
+        // it removes a 10× cyclic-precision regression for non-RT Legacy
+        // deployments. Thread-local, never fails for valid args; an error
+        // (exotic kernel) would only restore today's behavior, so the
+        // return value is deliberately not checked.
+        #[cfg(target_os = "linux")]
+        // SAFETY: prctl(PR_SET_TIMERSLACK) only adjusts the calling
+        // thread's timer slack; no memory is involved.
+        unsafe {
+            libc::prctl(libc::PR_SET_TIMERSLACK, 1_000u64, 0, 0, 0);
+        }
+
         let waitset: WaitSet<ipc::Service> = WaitSetBuilder::new()
             .create()
             .map_err(ExecutorError::iceoryx2)?;

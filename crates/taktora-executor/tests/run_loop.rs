@@ -197,10 +197,10 @@ fn run_n_survives_eintr_from_unrelated_signals() {
     unsafe {
         let mut sa: libc::sigaction = std::mem::zeroed();
         sa.sa_sigaction = noop as *const () as usize;
-        libc::sigemptyset(&mut sa.sa_mask);
+        libc::sigemptyset(&raw mut sa.sa_mask);
         sa.sa_flags = 0;
         assert_eq!(
-            libc::sigaction(libc::SIGUSR1, &sa, std::ptr::null_mut()),
+            libc::sigaction(libc::SIGUSR1, &raw const sa, std::ptr::null_mut()),
             0,
             "sigaction(SIGUSR1) failed"
         );

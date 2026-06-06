@@ -1,4 +1,4 @@
-//! `REQ_0106`: in `Grid` mode the per-task lateness grid anchors at the
+//! `REQ_0106` / `TEST_0856`: in `Grid` mode the per-task lateness grid anchors at the
 //! first dispatch's **nominal slot**, not its observed dispatch instant. A
 //! late first dispatch (process started under load) must report its real
 //! startup delay as positive lateness — anchoring at the observed instant
