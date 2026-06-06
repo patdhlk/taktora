@@ -24,6 +24,7 @@ taktora-connector-core           = { workspace = true }
 taktora-connector-ethercat       = { workspace = true }
 taktora-connector-host           = { workspace = true }
 taktora-connector-transport-iox  = { workspace = true }
+taktora-executor                 = { workspace = true }
 
 iceoryx2   = { workspace = true }
 serde      = { workspace = true, features = ["std", "derive"] }
