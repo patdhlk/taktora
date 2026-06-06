@@ -28,20 +28,29 @@ The decisive difference is the EtherCAT topology:
 
 ### Process image map
 
-| Module | Role | `PdoDirection` | SubDevice addr | Bit offset | Bits |
-|---|---|---|---|---|---|
-| 750-354 | EtherCAT coupler (the node) | — | `0x1000` | — | — |
-| 750-430 | 8× DI | `Tx` (read) | `0x1000` | 0 | 8 |
-| 750-530 | 8× DO | `Rx` (write) | `0x1000` | 0 | 8 |
-| 750-600 | End module | — | — | — | — |
+The 750-354's PDO assignment is **fixed** (`PdoAssign=0` in its ESI —
+not remappable via CoE), and in each direction a 4-byte
+fieldbus-coupler (FC) status/control header precedes the K-bus module
+data. With this node (750-430 + 750-530) the image is 6 bytes in each
+direction:
 
-Inputs and outputs both sit at **bit offset 0** because they live in
-*separate* Tx and Rx process images. The example assumes the 750-354
-presents this all-digital configuration as a plain 1-input-byte /
-1-output-byte process image. The `SUBDEV`, `DI_BIT_OFFSET`, and
-`DO_BIT_OFFSET` constants in `src/main.rs` make a differing layout a
-one-line edit — confirm yours with your EtherCAT config tool if the
-mirror doesn't track.
+| PDO | Direction | Content | Byte offset | Bits |
+|---|---|---|---|---|
+| `0x1AFF` | Tx (read) | FC status: K-Bus Cycle Overrun Flag, hold/clear acks, 16-bit Diagnostics Status Word | 0 | 32 |
+| `0x1A00` | Tx (read) | **750-430 digital inputs** | 4 | 8 |
+| `0x1B01` | Tx (read) | padding | 5 | 8 |
+| `0x16FF` | Rx (write) | FC control: overrun-flag disable, hold/clear requests, 16-bit Diagnostics Control Word | 0 | 32 |
+| `0x1601` | Rx (write) | **750-530 digital outputs** | 4 | 8 |
+| `0x1701` | Rx (write) | padding | 5 | 8 |
+
+The I/O bytes therefore sit at **bit offset 32** in both directions —
+the FC header comes first, *then* the K-bus data. Both routings share
+`subdevice_address = 0x1000` and differ only by PDO direction. If you
+add modules ahead of the 430/530 in the K-bus order, the offsets
+shift; confirm yours by reading the PDO assignment (`0x1C12` /
+`0x1C13` and the mapped PDO entries) with your EtherCAT config tool.
+The `SUBDEV`, `DI_BIT_OFFSET`, and `DO_BIT_OFFSET` constants in
+`src/main.rs` make a differing layout a one-line edit.
 
 ### The address DIP switch does not affect this example
 
@@ -66,15 +75,36 @@ do **not** set `SUBDEV` to the DIP number.
 
 ## Hardware required
 
-- WAGO **750-354/000-001** EtherCAT fieldbus coupler.
-- WAGO **750-430** 8-channel 24 V digital input module, snapped onto
-  the coupler's right side.
+- WAGO **750-354** (or /000-001) EtherCAT fieldbus coupler.
+- WAGO **750-602** (or 750-601/610/613) 24 V DC **potential supply
+  module**, snapped on immediately after the coupler — see the field
+  supply note below.
+- WAGO **750-430** 8-channel 24 V digital input module, snapped on
+  after the supply module.
 - WAGO **750-530** 8-channel 24 V digital output module (0.5 A),
   snapped on after the 750-430.
 - WAGO **750-600** end module (bus terminator) on the far right.
-- **24 V DC supply** on the coupler's system/field supply terminals.
+- **24 V DC supply** — wired to the coupler's system-supply terminals
+  AND to the potential supply module's field terminals.
 - Standard Cat5e (or better) Ethernet cable from your host's wired NIC
   to the coupler's **IN** port.
+
+### The ECO coupler provides no field power
+
+The 750-354 is an **ECO** coupler: its two CAGE CLAMP terminals are
+the **system supply only**. It has no field-supply terminals and no
+power jumper contacts of its own — without a potential supply module
+the 750-430/750-530 field electronics are completely unpowered. The
+symptom is purely electrical and invisible on the bus: bring-up
+reaches OP and the process image reads/writes fine, but input channel
+LEDs stay dark no matter what you wire, and output channel LEDs never
+light even when commanded on. (The Beckhoff EK1100 doesn't have this
+trap — it feeds its power contacts from its own Up terminals.)
+
+Snap a 24 V DC potential supply module (750-602 is the basic, fuseless
+one) between the coupler and the first I/O module and feed 24 V/0 V
+into it; its power jumper contacts distribute field power rightward to
+every module after it.
 
 ## Host setup
 
@@ -146,8 +176,31 @@ appears until you touch 24 V to one of the input channels.
   wrong NIC name. Run with `RUST_LOG=ethercrab=debug` for
   ethercrab-level diagnostics. Confirm 24 V on the coupler and that the
   cable is in the **IN** port.
+- **Stuck in `Connecting` forever while bus frames flow (equal TX/RX
+  deltas on the NIC).** The 750-354 refuses SAFE-OP → OP until it sees
+  cyclic output process data: its SM watchdog (its ESI declares
+  `SafeopOpTimeout=100` ms) trips during a traffic-less wait and the
+  AL error `0x001B` latches, blocking the transition. This needs
+  `taktora-connector-ethercat` ≥ 0.2.5, whose bring-up exchanges
+  process data while walking into OP and acknowledges latched AL
+  errors (`REQ_0841`). Older connectors deadlock here — the Beckhoff
+  example never showed this because the EK1100 grants OP without
+  traffic.
 - **`Permission denied (os error 13)` from ethercrab.** Raw socket caps
   not applied to the binary. Re-run `setcap`, or invoke with `sudo`.
+  Remember `cargo build` replaces the binary and silently clears the
+  capabilities.
+- **`in`/`out` oscillate 0 ↔ 1 every scan cycle with nothing wired.**
+  The offsets point at the FC status/control header instead of the
+  K-bus data (see "Process image map"). The mirror then feeds the
+  K-Bus Cycle Overrun Flag (status bit 0) back into the overrun-flag
+  *disable* control bit — a feedback oscillator through the coupler's
+  diagnostic plumbing. Set `DI_BIT_OFFSET` / `DO_BIT_OFFSET` to 32.
+- **Bring-up fine, image reads/writes fine, but input LEDs stay dark
+  and output LEDs never light.** No field power — the ECO coupler
+  doesn't provide it. See "The ECO coupler provides no field power"
+  above; you need a 24 V DC potential supply module (e.g. 750-602)
+  ahead of the I/O modules.
 - **Inputs read but outputs don't follow (or vice versa).** The process
   image offsets don't match your module order. The 750-430 inputs and
   750-530 outputs are placed in K-bus (left-to-right) order; if you
@@ -182,8 +235,8 @@ Same three modes as `ethercat-real-bus`, adapted to the mirror rig.
 ### Rig
 
 - Raspberry Pi 4 (or any Linux host with `CAP_NET_RAW`).
-- WAGO 750-354 coupler, 750-430 (8 DI), 750-530 (8 DO), 750-600 end
-  module, in that K-bus order.
+- WAGO 750-354 coupler, 750-602 (24 V field supply), 750-430 (8 DI),
+  750-530 (8 DO), 750-600 end module, in that K-bus order.
 
 ### Procedure
 
