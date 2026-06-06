@@ -306,7 +306,9 @@ Test cases verifying the scan-cycle observability sub-feature
    fabricated negative lateness** and no permanent step, (3) absent a
    dispatcher skip signal, reports a whole missed period as an honest
    **persistent** offset, and (4) anchors each task's grid at its
-   **own** first dispatch.
+   **own** first dispatch (in ``Legacy`` mode, the dispatch instant
+   itself — no dispatcher grid exists; the ``Grid``-mode nominal-slot
+   anchor is verified by :need:`TEST_0856`).
 
    **Fixture.** Executor (``worker_threads(0)``) with cyclic task(s);
    telemetry ``MockClock`` advanced from the task body; per-cycle
@@ -481,6 +483,88 @@ Test cases verifying the scan-cycle observability sub-feature
    Layer 1 lives in ``crates/taktora-executor/src/grid.rs`` (unit
    tests); layer 2 in
    ``crates/taktora-executor/tests/cycle_stats_skip_signal.rs``.
+
+.. test:: Grid lateness anchors at the first dispatch's nominal slot
+   :id: TEST_0856
+   :status: implemented
+   :verifies: REQ_0106
+
+   **Goal.** In ``Grid`` mode a late first dispatch reports its real
+   startup delay as first-cycle lateness — the epoch back-dates to the
+   nominal slot — instead of erasing it to 0 and reading every later
+   on-grid cycle as constantly early (the Pi5 −110 µs…−792 µs floor
+   under loaded starts).
+
+   **Fixture.** Linux-gated (the scripted call sequence is only
+   deterministic on the production ``timerfd`` path): a scripted
+   ``CyclicClock`` reads 0 at loop entry (grid epoch), 1.7 ms at the
+   first wake (0.7 ms past the task's first nominal slot at 1 ms) and
+   2.0 ms at the second; the telemetry clock is real; per-cycle
+   lateness is captured via the push ``Observer``.
+
+   **Steps.**
+
+   1. ``run_n(2)`` with a 1 ms cyclic task.
+   2. Assert sample 0's ``lateness_ns`` is **exactly** ``700 000`` —
+      the anchor back-dates the first observed ``pre`` by the scripted
+      ``late_by``, so no real-clock term enters the assertion (pre-fix:
+      exactly ``0``).
+   3. Assert no skip was signalled on either sample.
+
+   Lives in ``crates/taktora-executor/tests/cycle_stats_grid_anchor.rs``.
+   The exact ``late_by`` arithmetic — normal and snap paths, and the
+   last-*passed*-lattice-point rule on a whole-slot first-dispatch miss
+   — is pinned by the ``GridTimer`` unit tests in
+   ``crates/taktora-executor/src/grid.rs``.
+
+.. test:: Run loop survives EINTR storms
+   :id: TEST_0854
+   :status: implemented
+   :verifies: REQ_0269
+
+   **Goal.** A storm of handled signals interrupting the blocking wait
+   neither terminates ``run_n`` nor skips or over-counts iterations.
+
+   **Fixture.** Unix-gated: a no-op ``SIGUSR1`` handler (registered
+   without ``SA_RESTART``), the dispatch loop on its own thread
+   (``worker_threads(0)``, 5 ms cyclic task), and ``pthread_kill``
+   pelting that exact thread every 10 ms across the whole nominal run
+   window.
+
+   **Steps.**
+
+   1. ``run_n(50)`` while 25 signals land on the waiting thread.
+   2. Assert ``run_n`` returns ``Ok`` **and** the task body ran exactly
+      50 times (pre-fix: the first ``EINTR`` ended the run — observed
+      1 of 50).
+
+   Lives in ``crates/taktora-executor/tests/run_loop.rs``. Secondary
+   guard: the ``preempt-rt`` bench warns on stderr when it wrote fewer
+   records than the requested cycles, so a gracefully-truncated
+   envelope (``SIGINT``/``SIGTERM``) cannot be mistaken for a complete
+   run (``xtask/preempt-rt/tests/idle_bench.rs``).
+
+.. test:: Dispatch thread runs with 1 µs timer slack
+   :id: TEST_0855
+   :status: implemented
+   :verifies: REQ_0274
+
+   **Goal.** The dispatch thread's effective timer slack is 1 µs, not
+   the kernel's 50 µs ``SCHED_OTHER`` default.
+
+   **Fixture.** Linux-gated: ``worker_threads(0)`` so the task body
+   runs **on** the dispatch thread; the body reads its own
+   ``/proc/<tid>/timerslack_ns`` (the file exists only at the top
+   ``/proc/<pid>/`` level, which resolves for any thread id).
+
+   **Steps.**
+
+   1. ``run_n(1)``; assert the value read is exactly ``1000``.
+
+   Lives in
+   ``crates/taktora-executor/tests/dispatch_thread_timerslack.rs``; the
+   drift impact (56.0 → 5.5 µs/cycle on the Pi5 rig) is recorded as
+   field evidence on :need:`REQ_0274`.
 
 ----
 

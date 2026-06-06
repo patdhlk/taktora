@@ -1166,6 +1166,31 @@ Absolute-grid cyclic dispatch
      the ``DispatchMode`` toggle until the Pi5 A/B of :need:`ADR_0100`
      resolves, then removed in a follow-up.
 
+.. impl:: Run-loop EINTR continue — executor.rs
+   :id: IMPL_0088
+   :status: implemented
+   :implements: REQ_0269
+
+   ``after_callback`` distinguishes iceoryx2's ``WaitSetRunResult``
+   variants instead of lumping them: ``TerminationRequest`` (iceoryx2's
+   latched SIGINT/SIGTERM) still ends the loop; a bare ``Interrupt``
+   (``EINTR`` from any handled signal) funnels past the item-error and
+   stop-flag checks and returns ``Continue`` **without counting an
+   iteration** — nothing was dispatched on that wake. The grid pass's
+   stop-wake suppression already gates on the same variants, so an
+   interrupted wake emits no spurious cyclic cycle either.
+
+.. impl:: Dispatch-thread timer slack — executor.rs
+   :id: IMPL_0089
+   :status: implemented
+   :implements: REQ_0274
+
+   ``dispatch_loop`` entry issues ``prctl(PR_SET_TIMERSLACK, 1_000)``
+   (Linux-gated). Thread-local; a no-op under real-time scheduling
+   classes (the kernel forces RT slack to 0); the return value is
+   deliberately unchecked — failure on an exotic kernel merely retains
+   the 50 µs default, i.e. today's behavior.
+
 .. arch-decision:: Lateness grid anchored on scan count plus dispatcher skip signal
    :id: ADR_0101
    :status: accepted
@@ -1189,13 +1214,20 @@ Absolute-grid cyclic dispatch
    **Decision.** Advance the lateness grid slot by exactly **one per
    scan attempt plus a dispatcher-signalled skip count**
    (:need:`REQ_0840`), and anchor ``grid_epoch`` **per task** at the
-   task's own first recorded dispatch. ``GridTimer::take_due`` already
-   computes skip-realigns exactly (:need:`BB_0095`); it now carries the
-   abandoned-slot count to the task's next dispatch — backward-looking,
-   the same row whose fold consumes it — where telemetry folds
-   ``grid_slot += 1 + skipped``. All timestamps stay on the telemetry
-   clock; only the discrete count crosses the scheduler→telemetry
-   boundary.
+   task's own first recorded dispatch, **back-dated by the dispatcher's
+   one-shot ``late_by`` signal** so the epoch lands on the first
+   dispatch's nominal slot (:need:`REQ_0106`). ``GridTimer::take_due``
+   already computes skip-realigns exactly (:need:`BB_0095`); it now
+   carries the abandoned-slot count to the task's next dispatch —
+   backward-looking, the same row whose fold consumes it — where
+   telemetry folds ``grid_slot += 1 + skipped`` — plus, per due entry,
+   ``late_by``: the dispatch's distance past the most recent grid point
+   at or before it (on a whole-slot miss, the last *passed* lattice
+   point — abandoned slots do not exist on the task's own grid, matching
+   the first-dispatch carry suppression of :need:`REQ_0840`). All
+   timestamps stay on the telemetry clock; exactly two discrete facts
+   cross the scheduler→telemetry boundary: the skip count, and the
+   first dispatch's ``late_by`` consumed once as the anchor offset.
 
    **Rejected alternatives.**
 
@@ -1210,15 +1242,29 @@ Absolute-grid cyclic dispatch
    * *Measure against the dispatcher's own nominal target* — exact by
      construction but collapses the witness: a ``GridTimer`` that drifts
      its targets would self-report zero lateness, precisely what the
-     :need:`REQ_0268` independence clause forbids.
+     :need:`REQ_0268` independence clause forbids. (Distinct from the
+     one-shot ``late_by`` **anchor**: that places the epoch on the
+     dispatcher's lattice exactly once, at the first dispatch; every
+     subsequent sample still folds telemetry-clock deltas, so a
+     target-drifting ``GridTimer`` can shift the constant anchor at most
+     and can never zero its own slope.)
 
    **Consequences.** Coalesced catch-up pairs report one transient
    positive spike and heal; dispatcher skips re-anchor through the
    signal and become observable (``skipped_slots`` — a skipped slot is a
    scan that never ran, previously invisible); ``Legacy`` mode (no
    signal) honestly reports a persistent offset after a missed period
-   instead of silently absorbing it. Lateness is blind to a constant
-   offset already present at the task's first dispatch — acceptable:
-   the metric exists to expose drift and post-start offsets. Field
-   evidence (Pi5 60 k-cycle re-run with the corrected metric) is to be
-   appended here after merge.
+   instead of silently absorbing it. In ``Grid`` mode the epoch
+   back-dates by the first dispatch's ``late_by`` (:need:`REQ_0106`), so
+   a late process start reads once as real first-cycle lateness — the
+   first-sample anchor would otherwise erase it to 0 and invert it into
+   a permanent negative floor on every later on-grid cycle (observed on
+   the Pi5 rig as a constant −110 µs…−792 µs under loaded starts).
+   Without a dispatcher signal (``Legacy``, event-driven) the
+   constant-offset blindness of the first-dispatch anchor remains, by
+   construction. **Field evidence** (Pi5, ``SCHED_OTHER`` + 6-hog CPU
+   starvation, 60 k cycles @ 1 ms, grid dispatch): the corrected metric
+   held decile-mean lateness flat across 535 provoked coalesce events,
+   while the pre-fix reconstruction staircased −1.4 ms → −30.5 ms over
+   645 events on the same load profile; a quiet run's envelope was
+   −14.5 µs … +275 µs with zero skips.
