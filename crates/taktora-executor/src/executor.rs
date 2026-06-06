@@ -1501,16 +1501,18 @@ impl Executor {
         if stop_flag.is_stopped() {
             return IterOutcome::Done;
         }
-        if interrupted {
-            return IterOutcome::Continue;
-        }
 
-        iterations_done.fetch_add(1, Ordering::SeqCst);
-        let reached_limit = match mode {
-            RunMode::Forever => false,
-            RunMode::Iterations(n) => iterations_done.load(Ordering::SeqCst) >= *n,
-            RunMode::Until(deadline) => Instant::now() >= *deadline,
-            RunMode::Predicate(p) => (p)(),
+        // An interrupted wake is spurious (REQ_0269): it dispatched nothing,
+        // so it neither counts as an iteration nor evaluates the run-mode
+        // limit — it short-circuits to `Continue` and re-enters the wait.
+        let reached_limit = !interrupted && {
+            iterations_done.fetch_add(1, Ordering::SeqCst);
+            match mode {
+                RunMode::Forever => false,
+                RunMode::Iterations(n) => iterations_done.load(Ordering::SeqCst) >= *n,
+                RunMode::Until(deadline) => Instant::now() >= *deadline,
+                RunMode::Predicate(p) => (p)(),
+            }
         };
         if reached_limit {
             IterOutcome::Done
