@@ -13,11 +13,19 @@ license     = "Apache-2.0 OR MIT"
 # every example in this directory.
 
 [dependencies]
-taktora-executor                = "0.1"
+# NOTE: 0.2 (not 0.1) for the same reason as the connector below — `^0.1`
+# rejects the local 0.2.x path patch AND splits the dependency graph into two
+# `taktora_executor` versions (the published connector-host already requires
+# ^0.2.0), which fails `register_with` with a type mismatch.
+taktora-executor                = "0.2"
 taktora-connector-core          = "0.2"
 taktora-connector-host          = "0.1"
 taktora-connector-transport-iox = "0.1"
-taktora-connector-ethercat      = { version = "0.1", features = ["bus-integration"] }
+# NOTE: 0.2 (not 0.1) so the `[patch.crates-io]` path override (local 0.2.x)
+# actually applies — `^0.1` rejects the 0.2.x patch and silently falls back to
+# the stale published 0.1.x connector. This example needs ≥0.2.5 for the
+# cyclic-traffic SAFE-OP → OP walk (REQ_0841) the WAGO 750-354 requires.
+taktora-connector-ethercat      = { version = "0.2", features = ["bus-integration"] }
 
 clap       = { version = "4", features = ["derive"] }
 serde      = { version = "1", features = ["derive"] }

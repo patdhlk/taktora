@@ -28,12 +28,16 @@ use std::time::Duration;
 use ethercrab::std::{ethercat_now, tx_rx_task};
 use ethercrab::subdevice_group::{Op, PreOp};
 use ethercrab::{
-    DefaultLock, MainDevice, MainDeviceConfig, SubDeviceGroup, Timeouts, error::Error as EcError,
+    DefaultLock, MainDevice, MainDeviceConfig, RegisterAddress, SubDeviceGroup, Timeouts,
+    error::Error as EcError,
 };
 use taktora_connector_core::ConnectorError;
 
 use crate::bus::EthercatPduStorage;
 use crate::driver::{BringUp, BusDriver};
+use crate::op_transition::{
+    OP_WAIT_MAX_SPINS, OP_WAIT_SPIN_INTERVAL, OpWaitAction, op_wait_action,
+};
 use crate::options::EthercatConnectorOptions;
 use crate::sdo::{SdoValue, pdo_sdo_writes};
 
@@ -184,8 +188,9 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
             apply_pdo_mapping_for_subdevice(&maindevice, &group, *map).await?;
         }
 
-        // PRE-OP → SAFE-OP → OP via the fast path (REQ_0313).
-        let group = group.into_op(&maindevice).await.map_err(map_ec_error)?;
+        // PRE-OP → SAFE-OP → OP under cyclic process data
+        // (REQ_0313 / REQ_0841).
+        let group = walk_into_op(group, &maindevice).await?;
 
         let subdevice_count = group.len();
         // Asymmetric WKC per `REQ_0329`: each SubDeviceMap carries its
@@ -235,7 +240,7 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
             apply_pdo_mapping_for_subdevice(&maindevice, &group, *map).await?;
         }
 
-        let group = group.into_op(&maindevice).await.map_err(map_ec_error)?;
+        let group = walk_into_op(group, &maindevice).await?;
 
         let subdevice_count = group.len();
         let expected_wkc = crate::wkc::expected_wkc_from_map(&self.options);
@@ -344,6 +349,83 @@ async fn apply_pdo_mapping_for_subdevice<const MAX_SUBDEVICES: usize, const MAX_
         )));
     }
     Ok(())
+}
+
+/// Walk a PRE-OP group into OP under cyclic process-data exchange
+/// (`REQ_0841`).
+///
+/// `into_safe_op` applies the FMMU/SM configuration; OP is then
+/// *requested* (`request_into_op`) rather than awaited. SM-watchdog
+/// couplers (canonically the WAGO 750-354, whose ESI declares
+/// `SafeopOpTimeout=100` ms) refuse OP until they see cyclic output
+/// process data — a blocking wait (ethercrab's `into_op`) deadlocks
+/// against their watchdog, and the watchdog error (`0x001B`) latches
+/// once tripped, blocking the transition even after traffic resumes.
+/// The loop therefore exchanges process data every spin and
+/// periodically sweeps latched AL errors via
+/// [`ack_latched_al_errors`]. Pacing decisions are the pure
+/// [`op_wait_action`] (`TEST_0857`); the loop gives up after
+/// [`OP_WAIT_MAX_SPINS`] spins.
+async fn walk_into_op<const MAX_SUBDEVICES: usize, const MAX_PDI: usize>(
+    group: SubDeviceGroup<MAX_SUBDEVICES, MAX_PDI, DefaultLock, PreOp>,
+    maindevice: &MainDevice<'_>,
+) -> Result<SubDeviceGroup<MAX_SUBDEVICES, MAX_PDI, DefaultLock, Op>, ConnectorError> {
+    let group = group.into_safe_op(maindevice).await.map_err(map_ec_error)?;
+    let group = group
+        .request_into_op(maindevice)
+        .await
+        .map_err(map_ec_error)?;
+
+    let mut spins = 0_u32;
+    loop {
+        let response = group.tx_rx(maindevice).await.map_err(map_ec_error)?;
+        if response.all_op() {
+            return Ok(group);
+        }
+        spins = spins.saturating_add(1);
+        match op_wait_action(spins) {
+            OpWaitAction::Continue => {}
+            OpWaitAction::AckLatchedErrors => {
+                ack_latched_al_errors(&group, maindevice).await;
+            }
+            OpWaitAction::GiveUp => {
+                return Err(ConnectorError::Down {
+                    reason: format!(
+                        "bus did not reach OP within {OP_WAIT_MAX_SPINS} cyclic-traffic spins"
+                    ),
+                });
+            }
+        }
+        tokio::time::sleep(OP_WAIT_SPIN_INTERVAL).await;
+    }
+}
+
+/// Acknowledge latched AL errors on every SubDevice that reports one.
+///
+/// Best-effort by design: a SubDevice whose status read or AL Control
+/// write fails simply keeps its latched error until the next sweep —
+/// the wait loop's bound is the failure backstop, not this sweep.
+async fn ack_latched_al_errors<const MAX_SUBDEVICES: usize, const MAX_PDI: usize>(
+    group: &SubDeviceGroup<MAX_SUBDEVICES, MAX_PDI, DefaultLock, Op>,
+    maindevice: &MainDevice<'_>,
+) {
+    /// AL Control (`0x0120`): OP request (`0x08`) + error
+    /// acknowledge (`0x10`). Per ETG1000.6, a latched AL error is
+    /// only cleared by a state request carrying the acknowledge bit.
+    const AL_CONTROL_OP_REQUEST_ERR_ACK: u16 = 0x0018;
+
+    for idx in 0..group.len() {
+        let Ok(sd) = group.subdevice(maindevice, idx) else {
+            continue;
+        };
+        // `status()` maps a set AL error indicator to `Err`, so an
+        // `Err` here is exactly "this SubDevice has a latched error".
+        if sd.status().await.is_err() {
+            let _ = sd
+                .register_write::<u16>(RegisterAddress::AlControl, AL_CONTROL_OP_REQUEST_ERR_ACK)
+                .await;
+        }
+    }
 }
 
 fn map_ec_error(e: EcError) -> ConnectorError {

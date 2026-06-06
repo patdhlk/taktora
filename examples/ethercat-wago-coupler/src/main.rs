@@ -10,8 +10,10 @@
 //! image. `ethercrab`'s `init_single_group` assigns the coupler the
 //! configured station address `0x1000`. The 8 input bits (750-430) and
 //! 8 output bits (750-530) are separate Tx and Rx slices on that one
-//! SubDevice, both at bit offset 0 because they live in distinct
-//! process images.
+//! SubDevice, both at bit offset 32: the 750-354's fixed PDO
+//! assignment places a 4-byte fieldbus-coupler status/control header
+//! (PDOs `0x1AFF`/`0x16FF`) ahead of the K-bus module data in each
+//! direction.
 //!
 //! Behaviour: each 10 ms scan cycle the example reads the 750-430's 8
 //! input bits and writes them straight through to the 750-530's 8
@@ -43,17 +45,26 @@ const N: usize = 256;
 const SUBDEV: u16 = 0x1000;
 
 /// 750-430: bit offset of the 8 digital inputs within the coupler's Tx
-/// process image. Offset 0 — they are first in the Tx image.
-const DI_BIT_OFFSET: u32 = 0;
+/// process image. The 750-354's fixed PDO assignment (`PdoAssign=0`
+/// in its ESI — not remappable via CoE) maps TxPDO `0x1AFF` FIRST: a
+/// 4-byte fieldbus-coupler status header (K-Bus Cycle Overrun Flag,
+/// hold/clear acknowledge bits, 16-bit Diagnostics Status Word). The
+/// K-bus module data (TxPDO `0x1A00`) follows, so the 750-430's input
+/// byte starts at bit 32, not 0. Reading at offset 0 yields the
+/// status word instead — its overrun-flag bit even oscillates against
+/// the mirror (see README troubleshooting).
+const DI_BIT_OFFSET: u32 = 32;
 /// 750-430: number of digital input bits (one PDI byte).
 const DI_BITS: u16 = 8;
 
 /// 750-530: bit offset of the 8 digital outputs within the coupler's
-/// Rx process image. Offset 0 — inputs and outputs both start at 0
-/// because they sit in separate Tx and Rx process images. Adjust if
-/// your config tool reports different offsets (e.g. extra modules
-/// ahead of these).
-const DO_BIT_OFFSET: u32 = 0;
+/// Rx process image. Mirrors the input side: RxPDO `0x16FF` (4-byte
+/// fieldbus-coupler control header) precedes the K-bus output data
+/// (RxPDO `0x1601`), so the 750-530's byte starts at bit 32. Adjust
+/// both offsets if modules sit ahead of these in the K-bus order —
+/// confirm the layout by reading the PDO assignment (`0x1C12` /
+/// `0x1C13`) with your EtherCAT config tool.
+const DO_BIT_OFFSET: u32 = 32;
 /// 750-530: number of digital output bits (one PDI byte).
 const DO_BITS: u16 = 8;
 
