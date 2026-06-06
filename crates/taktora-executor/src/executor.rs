@@ -125,9 +125,13 @@ pub(crate) struct TaskEntry {
     pub(crate) grid_slot: u64,
 
     /// WaitSet-thread-only per-task lateness grid epoch (`REQ_0106`): the
-    /// task's own first recorded `pre` — including a faulted first scan,
-    /// whose dispatch instant is real. Per-task (not executor-shared) so a
-    /// task's start phase never reads as permanent lateness.
+    /// task's first recorded `pre` — including a faulted first scan, whose
+    /// dispatch instant is real — back-dated by the dispatcher's `late_by`
+    /// signal when one is present (`Grid` mode), so the grid anchors at the
+    /// first dispatch's NOMINAL slot and a late process start is reported as
+    /// real first-cycle lateness instead of becoming a permanent negative
+    /// floor on every later on-grid cycle. Per-task (not executor-shared) so
+    /// a task's start phase never reads as permanent lateness.
     pub(crate) grid_epoch: Option<u64>,
 
     /// WaitSet-thread-only dispatcher skip signal for the *current* wakeup
@@ -135,6 +139,15 @@ pub(crate) struct TaskEntry {
     /// consumed (`take`n) by `record_cycle_for`. Never written in `Legacy`
     /// mode or for event-driven tasks — stays `0`.
     pub(crate) pending_skipped: u32,
+
+    /// WaitSet-thread-only dispatcher lateness signal for the *current*
+    /// wakeup (`REQ_0106`): how far past its nominal grid slot this dispatch
+    /// is, in scheduling-clock nanoseconds. Written by the Grid dispatch
+    /// pass, consumed (`take`n) by `record_cycle_for`, which uses the FIRST
+    /// one to anchor [`Self::grid_epoch`] on the nominal grid. `None` in
+    /// `Legacy` mode and for event-driven tasks (no dispatcher grid exists:
+    /// the epoch falls back to the first observed `pre`).
+    pub(crate) pending_late: Option<u64>,
 
     /// WaitSet-thread-only stash of the *current* wakeup's pending cycle —
     /// the pre-dispatch timestamp plus its `faulted` flag — carried across
@@ -379,6 +392,7 @@ impl Executor {
             grid_slot: 0,
             grid_epoch: None,
             pending_skipped: 0,
+            pending_late: None,
             pending_cycle: None,
         });
         self.cycle_stats
@@ -697,6 +711,7 @@ impl Executor {
             grid_slot: 0,
             grid_epoch: None,
             pending_skipped: 0,
+            pending_late: None,
             pending_cycle: None,
         });
         self.cycle_stats
@@ -1145,6 +1160,25 @@ impl Executor {
         clippy::borrow_as_ptr
     )]
     fn dispatch_loop(&mut self, mode: &mut RunMode<'_>) -> Result<(), ExecutorError> {
+        // Tight timer slack for the dispatch thread (REQ_0274). SCHED_OTHER
+        // threads inherit the kernel's 50 µs default, and `epoll_wait`
+        // sleeps through `schedule_hrtimeout_range` WITH that slack: on the
+        // Pi5 rig that cost 56 µs/cycle accumulated Legacy-dispatch drift
+        // (5.5 µs/cycle at 1 µs slack — the residual is iceoryx2's
+        // ms-rounded epoll timeout + wake latency). Real-time classes force
+        // slack to 0, so this is a no-op under SCHED_FIFO and for the
+        // Grid/timerfd path (fd readiness, not timeout, drives the wake);
+        // it removes a 10× cyclic-precision regression for non-RT Legacy
+        // deployments. Thread-local, never fails for valid args; an error
+        // (exotic kernel) would only restore today's behavior, so the
+        // return value is deliberately not checked.
+        #[cfg(target_os = "linux")]
+        // SAFETY: prctl(PR_SET_TIMERSLACK) only adjusts the calling
+        // thread's timer slack; no memory is involved.
+        unsafe {
+            libc::prctl(libc::PR_SET_TIMERSLACK, 1_000u64, 0, 0, 0);
+        }
+
         let waitset: WaitSet<ipc::Service> = WaitSetBuilder::new()
             .create()
             .map_err(ExecutorError::iceoryx2)?;
@@ -1180,7 +1214,7 @@ impl Executor {
         // arm the single master timerfd; on non-Linux it is unused after this.
         let mut grid =
             crate::grid::GridTimer::new(self.cyclic_clock.now_nanos(), cyclic_periods.clone());
-        let mut due_cyclic: Vec<(usize, u64)> = Vec::new();
+        let mut due_cyclic: Vec<(usize, u64, u64)> = Vec::new();
 
         // Master cyclic timer (REQ_0268, Linux). ONE timerfd armed at the base
         // period (gcd of cyclic periods) drives the absolute grid; GridTimer
@@ -1422,7 +1456,9 @@ impl Executor {
     ///
     /// Order of precedence matches the original inline checks: `WaitSet`
     /// errors, then SIGINT/SIGTERM, then a captured item error, then a stop
-    /// request, then the active [`RunMode`] limit.
+    /// request, then a bare-EINTR continue (`REQ_0269` — an interrupted wait
+    /// is a spurious wake, not a termination), then the active [`RunMode`]
+    /// limit.
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn after_callback(
         &self,
@@ -1436,14 +1472,23 @@ impl Executor {
             Err(e) => return IterOutcome::Failed(e),
         };
 
-        // iceoryx2's WaitSet catches SIGINT/SIGTERM internally; honor that
-        // here for a clean exit.
-        if matches!(
-            cb_result,
-            WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest
-        ) {
+        // iceoryx2's WaitSet catches SIGINT/SIGTERM internally and reports
+        // them as `TerminationRequest`; honor that here for a clean exit.
+        if matches!(cb_result, WaitSetRunResult::TerminationRequest) {
             return IterOutcome::Done;
         }
+
+        // `Interrupt` is a bare EINTR: ANY handled signal — job control
+        // (SIGSTOP/SIGCONT), a debugger attach, a user-installed handler —
+        // interrupts the reactor wait. That is a spurious wake, not a
+        // termination request: a cyclic control runtime must keep running
+        // (REQ_0269; found on the Pi5 rig, where `kill -STOP`/`-CONT` ended
+        // `run_n(60000)` cleanly at ~5k cycles). Item errors and `stop()`
+        // are still honored below; the wake is NOT counted as an iteration
+        // (nothing was dispatched). A real SIGINT/SIGTERM still terminates:
+        // iceoryx2 latches it and the NEXT wait call returns
+        // `TerminationRequest` before blocking.
+        let interrupted = matches!(cb_result, WaitSetRunResult::Interrupt);
 
         // Extract the error before dropping the MutexGuard — avoids holding the
         // lock across the return (clippy::significant_drop_in_scrutinee).
@@ -1457,12 +1502,17 @@ impl Executor {
             return IterOutcome::Done;
         }
 
-        iterations_done.fetch_add(1, Ordering::SeqCst);
-        let reached_limit = match mode {
-            RunMode::Forever => false,
-            RunMode::Iterations(n) => iterations_done.load(Ordering::SeqCst) >= *n,
-            RunMode::Until(deadline) => Instant::now() >= *deadline,
-            RunMode::Predicate(p) => (p)(),
+        // An interrupted wake is spurious (REQ_0269): it dispatched nothing,
+        // so it neither counts as an iteration nor evaluates the run-mode
+        // limit — it short-circuits to `Continue` and re-enters the wait.
+        let reached_limit = !interrupted && {
+            iterations_done.fetch_add(1, Ordering::SeqCst);
+            match mode {
+                RunMode::Forever => false,
+                RunMode::Iterations(n) => iterations_done.load(Ordering::SeqCst) >= *n,
+                RunMode::Until(deadline) => Instant::now() >= *deadline,
+                RunMode::Predicate(p) => (p)(),
+            }
         };
         if reached_limit {
             IterOutcome::Done
@@ -1515,7 +1565,7 @@ fn run_grid_cyclic_pass(
     grid: &mut crate::grid::GridTimer,
     now_nanos: u64,
     cyclic_task_indices: &[usize],
-    due_cyclic: &mut Vec<(usize, u64)>,
+    due_cyclic: &mut Vec<(usize, u64, u64)>,
 ) {
     let stopping = stop_flag.is_stopped()
         || matches!(
@@ -1533,8 +1583,8 @@ fn run_grid_cyclic_pass(
     if due_cyclic.is_empty() {
         return;
     }
-    for (slot, skipped) in due_cyclic.iter() {
-        pass.dispatch_cyclic(cyclic_task_indices[*slot], *skipped);
+    for (slot, skipped, late_by) in due_cyclic.iter() {
+        pass.dispatch_cyclic(cyclic_task_indices[*slot], *skipped, *late_by);
     }
     pass.barrier_and_record();
 }
@@ -1668,11 +1718,12 @@ impl DispatchPass<'_, '_, '_> {
     /// discrete count crosses the scheduler→telemetry boundary; timestamps
     /// stay on the telemetry clock (`REQ_0268`).
     #[allow(unsafe_code)]
-    fn dispatch_cyclic(&mut self, task_idx: usize, skipped: u64) {
+    fn dispatch_cyclic(&mut self, task_idx: usize, skipped: u64, late_by: u64) {
         // SAFETY: same single-writer WaitSet-thread discipline as
         // dispatch_task; the pointer is valid for the duration of this call.
         let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
         task.pending_skipped = u32::try_from(skipped).unwrap_or(u32::MAX);
+        task.pending_late = Some(late_by);
         self.dispatch_task(task_idx);
     }
 
@@ -1826,15 +1877,25 @@ impl DispatchPass<'_, '_, '_> {
         };
 
         // Per-task lateness grid (REQ_0106 / ADR_0101): the task's first
-        // record anchors the grid (grid_epoch = its own first `pre`, slot 0 —
-        // a faulted first scan anchors too, its dispatch instant is real);
-        // every later record advances by exactly one slot plus the
-        // dispatcher's skipped-slot signal (REQ_0840). Never reconstructed
-        // from the measured period, which over-counts on coalesced catch-up
-        // wakes and fabricates negative lateness (issue #46).
+        // record anchors the grid at slot 0 (a faulted first scan anchors
+        // too, its dispatch instant is real); every later record advances by
+        // exactly one slot plus the dispatcher's skipped-slot signal
+        // (REQ_0840). Never reconstructed from the measured period, which
+        // over-counts on coalesced catch-up wakes and fabricates negative
+        // lateness (issue #46). The anchor is the first dispatch's NOMINAL
+        // slot — `pre` back-dated by the dispatcher's `late_by` signal — so
+        // a late process start is reported as real first-cycle lateness
+        // instead of becoming a permanent negative floor on later on-grid
+        // cycles. `late_by` is a scheduling-clock difference applied to a
+        // telemetry-clock instant: domain-safe, both are monotonic ns.
+        // Without a dispatcher signal (Legacy mode, event-driven tasks) the
+        // anchor stays the first observed `pre`.
         let skipped = core::mem::take(&mut task.pending_skipped);
+        let late_by = task.pending_late.take();
         let first = task.grid_epoch.is_none();
-        let grid_epoch = *task.grid_epoch.get_or_insert(pre_ns);
+        let grid_epoch = *task
+            .grid_epoch
+            .get_or_insert_with(|| pre_ns.saturating_sub(late_by.unwrap_or(0)));
         if !first {
             task.grid_slot = task
                 .grid_slot
@@ -2563,6 +2624,7 @@ impl ExecutorGraphBuilder<'_> {
             grid_slot: 0,
             grid_epoch: None,
             pending_skipped: 0,
+            pending_late: None,
             pending_cycle: None,
         });
         self.executor

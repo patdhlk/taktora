@@ -119,15 +119,63 @@ Cyclic scan execution
    that substituting a test clock for telemetry can never alter dispatch
    timing. The lateness of :need:`REQ_0106` remains the independent
    witness for this requirement: every timestamp it folds is read from
-   the telemetry clock, never from the scheduler. The single scheduling
-   fact that crosses into telemetry is the discrete skipped-slot count
-   of :need:`REQ_0840` — a skip-realign is a loud, countable event, not
-   a timing source — so a drifting scheduler still cannot mask its own
-   drift in the witness metric. Verification is by a
+   the telemetry clock, never from the scheduler. Exactly two discrete
+   scheduling facts cross into telemetry: the skipped-slot count of
+   :need:`REQ_0840` and the one-shot first-dispatch anchor offset of
+   :need:`REQ_0106` — a loud countable event and a single constant, not
+   a timing source — so a drifting scheduler can at most shift the
+   witness's constant anchor once and still cannot mask its own
+   accumulating drift in the witness metric. Verification is by a
    deterministic unit test over the grid state machine — the nominal target
    advances by exactly one period per cycle with zero accumulated offset, and
    a simulated stall skips whole slots; the long-run hardware drift bound is
    recorded as field evidence in :need:`ADR_0100`.
+
+.. req:: Run-loop immunity to spurious wait interruptions
+   :id: REQ_0269
+   :status: implemented
+   :satisfies: FEAT_0011
+   :links: IMPL_0088, TEST_0854
+
+   A bare ``EINTR`` of the dispatch loop's blocking wait — any handled
+   signal: job control (``SIGSTOP``/``SIGCONT``), a debugger or profiler
+   attach, a user-installed handler — shall **not** terminate the run
+   loop. The interrupted iteration shall dispatch nothing, count
+   nothing, and re-enter the wait. Only an explicit stop request, a task
+   error escalation, the active run-mode limit, or a latched termination
+   signal (``SIGINT``/``SIGTERM``) may end the loop.
+
+   Rationale: the dispatch loop is the cyclic control plane. Treating an
+   interrupted wait as a termination request silently freezes a PLC
+   runtime's outputs with exit code 0 — observed on the Pi5 rig, where a
+   single ``kill -STOP``/``-CONT`` ended ``run_n(60000)`` cleanly at
+   ~5 000 cycles with no diagnostic. ``SIGINT``/``SIGTERM`` termination
+   is unaffected: iceoryx2 latches the signal and the loop ends on the
+   next wait entry.
+
+.. req:: Tight dispatch-thread timer slack
+   :id: REQ_0274
+   :status: implemented
+   :satisfies: FEAT_0011
+   :links: IMPL_0089, TEST_0855
+
+   On Linux the runtime shall set the dispatch thread's timer slack to
+   **1 µs** at dispatch-loop entry. ``SCHED_OTHER`` threads inherit the
+   kernel's 50 µs default, and the blocking wait's timeout sleep is
+   subject to that slack (``epoll_wait`` sleeps through
+   ``schedule_hrtimeout_range``), which dominates relative-timer
+   (``Legacy``) cyclic precision for non-real-time deployments.
+
+   Field evidence (Pi5, idle, ``SCHED_OTHER``, 1 ms period, 10 k
+   cycles): ``Legacy`` dispatch accumulated **56.0 µs/cycle** lateness
+   at the default 50 µs slack and **5.5 µs/cycle** at 1 µs slack — the
+   residual is iceoryx2's ms-rounded epoll timeout plus wake latency
+   (:need:`ADR_0100`). Real-time scheduling classes force slack to 0
+   (the same rig under ``SCHED_FIFO`` drifted ~3 µs/cycle) and the
+   ``Grid`` ``timerfd`` path is woken by fd readiness rather than a
+   timeout, so both are unaffected; the setting removes a 10× cyclic
+   precision regression for the non-RT ``Legacy`` case at zero cost
+   elsewhere.
 
 Event-driven I/O dispatch
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -685,7 +733,7 @@ Scan-cycle observability
    :id: REQ_0106
    :status: implemented
    :satisfies: FEAT_0021
-   :links: BB_0050, IMPL_0070, TEST_0850
+   :links: BB_0050, IMPL_0070, TEST_0850, TEST_0856
 
    For each cyclic task, the runtime shall report **deadline lateness** —
    the signed offset between the task's actual task-logic start (the
@@ -704,8 +752,14 @@ Scan-cycle observability
 
    **Grid anchoring.** The nominal grid point for a cycle is
    ``grid_epoch + grid_slot × period``, where ``grid_epoch`` is the
-   task's **own** first recorded dispatch (a faulted first scan anchors
-   too — its dispatch instant is real) and ``grid_slot`` advances by
+   task's **own** first recorded dispatch **back-dated by the
+   dispatcher's one-shot ``late_by`` signal** — the distance from that
+   dispatch to the most recent dispatcher grid point at or before it —
+   so the grid anchors at the first dispatch's **nominal slot** and a
+   late process start is reported once, honestly, as first-cycle
+   lateness instead of becoming a permanent negative floor on every
+   later on-grid cycle (a faulted first scan anchors too — its dispatch
+   instant is real). ``grid_slot`` advances by
    exactly **one slot per scan attempt plus the dispatcher's
    skipped-slot signal** (:need:`REQ_0840`). The slot is never
    reconstructed from the measured period: rounding
@@ -718,9 +772,11 @@ Scan-cycle observability
    (:need:`REQ_0268`) re-anchors through the signal. Absent a signal —
    the ``Legacy`` relative-timer mode never skips slots — a whole
    missed period honestly remains visible as a persistent offset rather
-   than being silently absorbed. Lateness is measured relative to the
-   task's first dispatch: a constant phase offset already present there
-   reads as zero by construction. The slot advance is aligned with the
+   than being silently absorbed. Absent the anchor signal likewise —
+   ``Legacy`` mode and event-driven dispatch have no dispatcher grid —
+   the epoch stays the first recorded dispatch itself, and a constant
+   phase offset already present there reads as zero by construction.
+   The slot advance is aligned with the
    :need:`REQ_0107` ``cycle_index`` (one per scan attempt) except for
    the explicit skip signal.
 
