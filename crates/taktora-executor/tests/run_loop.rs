@@ -196,7 +196,7 @@ fn run_n_survives_eintr_from_unrelated_signals() {
     // signal this test owns; no other test in this binary touches SIGUSR1.
     unsafe {
         let mut sa: libc::sigaction = std::mem::zeroed();
-        sa.sa_sigaction = noop as usize;
+        sa.sa_sigaction = noop as *const () as usize;
         libc::sigemptyset(&mut sa.sa_mask);
         sa.sa_flags = 0;
         assert_eq!(
