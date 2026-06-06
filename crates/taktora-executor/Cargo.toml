@@ -45,6 +45,11 @@ thread_attrs = ["dep:core_affinity"]
 libc              = "0.2"
 iceoryx2-bb-posix = "0.8"
 
+[target.'cfg(unix)'.dev-dependencies]
+# EINTR robustness test (run_loop.rs): installs a no-op signal handler and
+# pthread_kills the dispatch thread to provoke EINTR mid-wait (REQ_0269).
+libc = "0.2"
+
 [lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"

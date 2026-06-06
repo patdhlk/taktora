@@ -124,6 +124,14 @@ fn run() -> Result<(), String> {
             summary.lapped
         );
     }
+    let requested = u64::try_from(args.cycles).unwrap_or(u64::MAX);
+    if summary.written < requested {
+        eprintln!(
+            "preempt-rt-bench: WARNING wrote {} of {requested} requested cycles — the run was cut \
+             short (SIGINT/SIGTERM or stop); the envelope is incomplete",
+            summary.written
+        );
+    }
     Ok(())
 }
 

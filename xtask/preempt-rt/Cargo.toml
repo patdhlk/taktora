@@ -23,3 +23,7 @@ taktora-telemetry-export  = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[target.'cfg(unix)'.dev-dependencies]
+# truncation-warning e2e test: SIGTERMs the bench mid-run.
+libc = "0.2"

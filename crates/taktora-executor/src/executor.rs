@@ -1422,7 +1422,9 @@ impl Executor {
     ///
     /// Order of precedence matches the original inline checks: `WaitSet`
     /// errors, then SIGINT/SIGTERM, then a captured item error, then a stop
-    /// request, then the active [`RunMode`] limit.
+    /// request, then a bare-EINTR continue (`REQ_0269` — an interrupted wait
+    /// is a spurious wake, not a termination), then the active [`RunMode`]
+    /// limit.
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn after_callback(
         &self,
@@ -1436,14 +1438,23 @@ impl Executor {
             Err(e) => return IterOutcome::Failed(e),
         };
 
-        // iceoryx2's WaitSet catches SIGINT/SIGTERM internally; honor that
-        // here for a clean exit.
-        if matches!(
-            cb_result,
-            WaitSetRunResult::Interrupt | WaitSetRunResult::TerminationRequest
-        ) {
+        // iceoryx2's WaitSet catches SIGINT/SIGTERM internally and reports
+        // them as `TerminationRequest`; honor that here for a clean exit.
+        if matches!(cb_result, WaitSetRunResult::TerminationRequest) {
             return IterOutcome::Done;
         }
+
+        // `Interrupt` is a bare EINTR: ANY handled signal — job control
+        // (SIGSTOP/SIGCONT), a debugger attach, a user-installed handler —
+        // interrupts the reactor wait. That is a spurious wake, not a
+        // termination request: a cyclic control runtime must keep running
+        // (REQ_0269; found on the Pi5 rig, where `kill -STOP`/`-CONT` ended
+        // `run_n(60000)` cleanly at ~5k cycles). Item errors and `stop()`
+        // are still honored below; the wake is NOT counted as an iteration
+        // (nothing was dispatched). A real SIGINT/SIGTERM still terminates:
+        // iceoryx2 latches it and the NEXT wait call returns
+        // `TerminationRequest` before blocking.
+        let interrupted = matches!(cb_result, WaitSetRunResult::Interrupt);
 
         // Extract the error before dropping the MutexGuard — avoids holding the
         // lock across the return (clippy::significant_drop_in_scrutinee).
@@ -1455,6 +1466,9 @@ impl Executor {
         }
         if stop_flag.is_stopped() {
             return IterOutcome::Done;
+        }
+        if interrupted {
+            return IterOutcome::Continue;
         }
 
         iterations_done.fetch_add(1, Ordering::SeqCst);

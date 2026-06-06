@@ -176,3 +176,78 @@ fn item_task_id_override_takes_precedence() {
     );
     exec.run().unwrap();
 }
+
+/// A bare `EINTR` (any handled signal — job control, debugger attach, a
+/// user-installed handler) must NOT terminate the run loop: only
+/// SIGINT/SIGTERM (iceoryx2 `TerminationRequest`) and `stop()` may end it.
+/// Regression test for the silent-truncation bug found on the Pi5 rig:
+/// `kill -STOP`/`-CONT` ended `run_n(60000)` cleanly at ~5k cycles, exit 0.
+#[cfg(unix)]
+#[test]
+#[allow(unsafe_code)]
+fn run_n_survives_eintr_from_unrelated_signals() {
+    use std::sync::mpsc;
+
+    // No-op handler for SIGUSR1, registered WITHOUT `SA_RESTART` so a
+    // blocked `epoll_wait`/`select` returns `EINTR` (`epoll_wait` is never
+    // auto-restarted anyway, see signal(7)).
+    extern "C" fn noop(_: libc::c_int) {}
+    // SAFETY: installs a trivially async-signal-safe no-op handler for a
+    // signal this test owns; no other test in this binary touches SIGUSR1.
+    unsafe {
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = noop as usize;
+        libc::sigemptyset(&mut sa.sa_mask);
+        sa.sa_flags = 0;
+        assert_eq!(
+            libc::sigaction(libc::SIGUSR1, &sa, std::ptr::null_mut()),
+            0,
+            "sigaction(SIGUSR1) failed"
+        );
+    }
+
+    let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+    let counter = Arc::new(AtomicU32::new(0));
+    let c = Arc::clone(&counter);
+    exec.add(item_with_triggers(
+        |d| {
+            d.interval(Duration::from_millis(5));
+            Ok(())
+        },
+        move |_| {
+            c.fetch_add(1, Ordering::SeqCst);
+            Ok(ControlFlow::Continue)
+        },
+    ))
+    .unwrap();
+
+    // Run the dispatch loop on its own thread and ferry out its pthread id
+    // so the signals land exactly on the thread blocked in the WaitSet.
+    let (tid_tx, tid_rx) = mpsc::channel();
+    let dispatch = std::thread::spawn(move || {
+        // SAFETY: pthread_self is always safe to call.
+        let tid = unsafe { libc::pthread_self() };
+        tid_tx.send(tid as usize).expect("send tid");
+        exec.run_n(50).map(|()| exec)
+    });
+    let tid = tid_rx.recv().expect("recv tid") as libc::pthread_t;
+
+    // Pelt the dispatch thread with EINTRs for the whole nominal run
+    // window (50 cycles x 5 ms = 250 ms).
+    for _ in 0..25 {
+        std::thread::sleep(Duration::from_millis(10));
+        // SAFETY: tid stays valid — the thread is joined below, after the
+        // signal loop completes.
+        unsafe {
+            libc::pthread_kill(tid, libc::SIGUSR1);
+        }
+    }
+
+    let result = dispatch.join().expect("dispatch thread panicked");
+    assert!(result.is_ok(), "run_n failed: {:?}", result.err());
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        50,
+        "EINTR must not truncate run_n: all 50 cycles must dispatch"
+    );
+}
