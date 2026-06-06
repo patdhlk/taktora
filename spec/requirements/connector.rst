@@ -767,14 +767,16 @@ EtherCAT reference connector
    refines :need:`REQ_0318` by specifying the per-cycle behaviour of
    the DC opt-in.
 
-   **Implementation status (2026-05-28).** Deferred. ``tx_rx_dc`` is
+   **Implementation status (2026-06-06).** Deferred. ``tx_rx_dc`` is
    only callable when the ``SubDeviceGroup`` typestate is ``HasDc``,
    but the current ``EthercrabBusDriver::bring_up`` walks
-   PRE-OP → OP via ``into_op`` which yields ``NoDc``. Honouring this
-   requirement requires the alternate bring-up path
-   (``into_pre_op_pdi`` → ``configure_dc_sync`` →
-   ``request_into_op``) and threading the ``HasDc`` typestate
-   through ``OperationalState`` (and ``recover``). The mock-side
+   PRE-OP → SAFE-OP → OP via ``into_safe_op`` + ``request_into_op``
+   (:need:`REQ_0841`), which still yields ``NoDc``. Honouring this
+   requirement requires inserting ``into_pre_op_pdi`` →
+   ``configure_dc_sync`` ahead of that walk and threading the
+   ``HasDc`` typestate through ``OperationalState`` (and
+   ``recover``). The walk already uses ``request_into_op``, so only
+   the DC-sync configuration step remains. The mock-side
    ``CycleKind`` recorder (:need:`TEST_0224`) is in place to drive
    that follow-on once it lands.
 
@@ -827,6 +829,28 @@ EtherCAT reference connector
      ``recover`` error.
    * ``Degraded → Down { reason: "reconnect policy exhausted" }``
      when the policy returns ``None``.
+
+.. req:: SAFE-OP to OP transition exchanges cyclic process data
+   :id: REQ_0841
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0857
+
+   When transitioning the bus from SAFE-OP to OP — during both
+   bring-up and recovery — the gateway shall request the OP state
+   without blocking and shall continue cyclic process-data exchange
+   until every SubDevice reports OP. While waiting, the gateway shall
+   periodically acknowledge latched AL errors (AL Control with the
+   error-acknowledge bit plus a renewed OP request) and shall fail
+   the attempt after a bounded number of exchanges.
+
+   **Rationale.** SM-watchdog couplers — canonically the WAGO
+   750-354, whose ESI declares ``SafeopOpTimeout=100`` ms — refuse OP
+   until output process data flows. A blocking state-poll wait
+   (ethercrab's ``into_op``) deadlocks against their watchdog, and
+   the watchdog error (AL status ``0x001B``) latches once tripped,
+   blocking the transition even after traffic resumes, until
+   explicitly acknowledged.
 
 Host wiring
 ~~~~~~~~~~~

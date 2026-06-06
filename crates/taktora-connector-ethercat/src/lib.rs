@@ -54,6 +54,7 @@ pub mod ethercrab_driver;
 pub mod gateway;
 pub mod health;
 pub mod mock;
+pub mod op_transition;
 pub mod options;
 pub mod pdi;
 pub mod registry;

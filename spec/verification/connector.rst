@@ -636,6 +636,21 @@ exercised without hardware. Bench tests run only when invoked as
    ``Up → Degraded → Connecting → Up`` sequence within the policy's
    backoff envelope during the drill.
 
+.. test:: OP wait-loop pacing decisions
+   :id: TEST_0857
+   :status: open
+   :verifies: REQ_0841
+
+   Unit tests in
+   ``crates/taktora-connector-ethercat/tests/op_transition.rs`` over
+   the pure ``op_wait_action`` decision: regular spins continue,
+   every ``OP_WAIT_ACK_INTERVAL``-th spin acknowledges latched AL
+   errors, spins beyond ``OP_WAIT_MAX_SPINS`` give up. The
+   cyclic-exchange walk itself is hardware-verified via the
+   ``#[ignore]``-gated ``tests/ethercrab_driver.rs`` bring-up test
+   run against a WAGO 750-354 — the SM-watchdog coupler that
+   motivated the requirement.
+
 ----
 
 Workspace end-to-end tests
