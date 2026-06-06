@@ -487,7 +487,7 @@ per-sample update path), and per-task aggregate slots allocated at
 
    * ``mod.rs`` — defines the std-side value types only:
      ``CycleObservation { cycle_index, task_id, period_ns,
-     actual_period_ns, jitter_ns, lateness_ns, took_ns }``,
+     actual_period_ns, jitter_ns, lateness_ns, took_ns, skipped_slots }``,
      ``StatsSnapshot``, and ``TaskStatsEntry``.
      ``lateness_ns: i64`` is the signed deadline lateness of
      :need:`REQ_0106`; ``cycle_index`` is the monotonic per-task scan
@@ -516,7 +516,8 @@ per-sample update path), and per-task aggregate slots allocated at
      ``build`` time from the registered-task count. Pre-allocate per
      :need:`REQ_0060`.
    * In the ``dispatch_loop`` post-execute integration: fold
-     ``took``, ``jitter``, and ``lateness`` into the task's
+     ``took``, ``jitter``, and ``lateness`` (grid: scan count +
+     dispatcher skip signal per :need:`ADR_0101`) into the task's
      ``ExecutorCycleStats`` via ``record_cycle(...)`` — windowed max
      uses ``MinMaxDeque`` (not ``fetch_max``), then call
      ``observer.on_cycle_stats(&obs)``. The pre-existing
@@ -1075,8 +1076,8 @@ Absolute-grid cyclic dispatch
    *Metric caveat.* :need:`REQ_0106`'s ``grid_slot`` reconstruction
    (``round(actual_period / period).max(1)``) over-counts on coalesced
    catch-up wakes, fabricating spurious *negative* lateness; the A/B above uses
-   a ``cycle_index``-anchored grid immune to it. Correcting the ``grid_slot``
-   metric is a separate telemetry follow-up, independent of this dispatch fix.
+   a ``cycle_index``-anchored grid immune to it. Corrected by
+   :need:`ADR_0101` (scan-count + skip-signal anchoring).
 
 .. building-block:: Absolute-grid timer and cyclic scheduling clock
    :id: BB_0095
@@ -1164,3 +1165,60 @@ Absolute-grid cyclic dispatch
    * **Legacy retention** — the ``attach_interval`` path is retained behind
      the ``DispatchMode`` toggle until the Pi5 A/B of :need:`ADR_0100`
      resolves, then removed in a follow-up.
+
+.. arch-decision:: Lateness grid anchored on scan count plus dispatcher skip signal
+   :id: ADR_0101
+   :status: accepted
+   :refines: FEAT_0021
+   :links: REQ_0106, REQ_0840
+
+   **Context.** Issue #46: :need:`REQ_0106`'s original grid-slot
+   reconstruction (``round(actual_period / period).max(1)``) over-counted
+   on a coalesced catch-up pair — a late wake (``actual_period ≈ 1.6 ×
+   period``, rounds to 2) followed by a short catch-up (``< period / 2``,
+   forced to 1) advances the grid by 3 slots across 2 elapsed periods,
+   stamping a permanent ≈ −1 period step into every later cycle's
+   lateness. On a Pi5 ``timerfd`` capture whose realized mean period was
+   exactly on grid, the reported lateness drifted 0 → −2.006 ms over
+   60 000 cycles from two such events; a scan-count-anchored reference
+   over the same data showed slope ≈ 0. The witness metric fabricated
+   the very drift it exists to expose. A second latent defect: the grid
+   epoch was executor-shared (first task to record wins), so every later
+   task's start phase read as a permanent constant lateness offset.
+
+   **Decision.** Advance the lateness grid slot by exactly **one per
+   scan attempt plus a dispatcher-signalled skip count**
+   (:need:`REQ_0840`), and anchor ``grid_epoch`` **per task** at the
+   task's own first recorded dispatch. ``GridTimer::take_due`` already
+   computes skip-realigns exactly (:need:`BB_0095`); it now carries the
+   abandoned-slot count to the task's next dispatch — backward-looking,
+   the same row whose fold consumes it — where telemetry folds
+   ``grid_slot += 1 + skipped``. All timestamps stay on the telemetry
+   clock; only the discrete count crosses the scheduler→telemetry
+   boundary.
+
+   **Rejected alternatives.**
+
+   * *Keep the measured-period reconstruction* — conflates per-cycle
+     period noise with absolute grid position; the rounding artifact is
+     structural, not tunable.
+   * *Pure scan-count anchor* (the fix direction proposed on issue #46)
+     — exact until the dispatcher genuinely skip-realigns
+     (:need:`REQ_0268`), after which every later cycle reports a
+     permanent ``+N × period`` lateness: the mirror image of the
+     original artifact.
+   * *Measure against the dispatcher's own nominal target* — exact by
+     construction but collapses the witness: a ``GridTimer`` that drifts
+     its targets would self-report zero lateness, precisely what the
+     :need:`REQ_0268` independence clause forbids.
+
+   **Consequences.** Coalesced catch-up pairs report one transient
+   positive spike and heal; dispatcher skips re-anchor through the
+   signal and become observable (``skipped_slots`` — a skipped slot is a
+   scan that never ran, previously invisible); ``Legacy`` mode (no
+   signal) honestly reports a persistent offset after a missed period
+   instead of silently absorbing it. Lateness is blind to a constant
+   offset already present at the task's first dispatch — acceptable:
+   the metric exists to expose drift and post-start offsets. Field
+   evidence (Pi5 60 k-cycle re-run with the corrected metric) is to be
+   appended here after merge.

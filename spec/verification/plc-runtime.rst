@@ -294,45 +294,70 @@ Test cases verifying the scan-cycle observability sub-feature
    Lives under
    ``crates/taktora-executor/tests/cycle_stats_minmax.rs``.
 
-.. test:: Deadline lateness accumulates under steady drift
+.. test:: Deadline lateness — drift accumulates, coalesced pair heals, offsets stay honest
    :id: TEST_0850
    :status: implemented
    :verifies: REQ_0106
 
-   **Goal.** The grid-anchored lateness model of :need:`REQ_0106` exhibits
-   both required properties: (1) it **accumulates** a steady signed offset
-   past one period (not a phase-within-period readout), and (2) it
-   **self-heals** across a coalesced/missed wakeup instead of leaving a
-   permanent per-cycle bias.
+   **Goal.** The scan-count-anchored lateness of :need:`REQ_0106`
+   (1) **accumulates** a steady signed offset past one period (not a
+   phase-within-period readout), (2) reports the issue-#46 coalesced
+   catch-up pair as a single transient positive spike with **no
+   fabricated negative lateness** and no permanent step, (3) absent a
+   dispatcher skip signal, reports a whole missed period as an honest
+   **persistent** offset, and (4) anchors each task's grid at its
+   **own** first dispatch.
 
-   **Fixture.** Executor (``worker_threads(0)``) with one cyclic task whose
-   telemetry clock is an injected ``MockClock``, driven from the task body.
+   **Fixture.** Executor (``worker_threads(0)``) with cyclic task(s);
+   telemetry ``MockClock`` advanced from the task body; per-cycle
+   lateness captured via the push ``Observer``. ``Legacy`` dispatch
+   mode is forced: the scripted-clock figures must not depend on
+   real-time dispatcher behavior (the ``Grid`` skip ferry is verified
+   by :need:`TEST_0853`).
 
    **Steps — accumulation.**
 
-   1. Every body advances the clock by ``PERIOD + DRIFT`` where
-      ``DRIFT < PERIOD/2`` (10 ms period, 2 ms slip), so each cycle rounds
-      to one grid slot and starts ``n * DRIFT`` past its grid point.
-   2. Run ``N`` = 40 cycles.
-   3. Assert
-      ``stats_snapshot().per_task[0].max_lateness_ns == (N - 1) * DRIFT``
-      exactly — far exceeding one period, impossible under a
-      phase-within-period model, pinned to the nanosecond.
+   1. Every body advances the clock by ``PERIOD + DRIFT``
+      (10 ms period, 2 ms slip, ``DRIFT < PERIOD/2``).
+   2. Run 40 cycles; assert per-cycle lateness ``n × DRIFT`` and
+      ``max_lateness_ns == 39 × DRIFT`` exactly.
 
-   **Steps — self-healing.**
+   **Steps — coalesced catch-up pair (the #46 regression).**
 
-   1. Every body advances by exactly ``PERIOD`` except one cycle that
-      advances by ``2 * PERIOD`` (a coalesced/missed wakeup).
-   2. Run 25 cycles.
-   3. Assert ``max_lateness_ns == 0`` exactly — the grid-slot advance of
-      ``round(2 * PERIOD / PERIOD) = 2`` absorbs the skip, so every cycle
-      reads back on-grid. The pre-fix dispatch-count model would instead
-      leave a permanent ``PERIOD`` offset on every subsequent cycle.
+   1. Every body advances ``PERIOD``, except cycle 10 advances
+      ``1.6 × PERIOD`` (late wake) and cycle 11 advances
+      ``0.4 × PERIOD`` (catch-up).
+   2. Run 20 cycles.
+   3. Assert per-cycle lateness is ``0`` everywhere except exactly
+      ``+0.6 × PERIOD`` at the late cycle, and **no observation is
+      negative** — the pre-fix reconstruction reported a permanent
+      ``−PERIOD`` from cycle 12 onward.
 
-   **Expected outcome.** Steady drift accumulates exactly; a discrete
-   missed wakeup re-anchors the grid and leaves no residual lateness.
+   **Steps — missed period without a skip signal.**
 
-   Both tests live under
+   1. Every body advances ``PERIOD``, except one cycle advances
+      ``2 × PERIOD``; no dispatcher skip is signalled (a mock-clock
+      gap, not a real starvation).
+   2. Run 25 cycles; assert every cycle from the gap onward reports
+      exactly ``+PERIOD`` — the honest persistent offset. Healing
+      requires the explicit :need:`REQ_0840` signal (see
+      :need:`TEST_0853`).
+
+   **Steps — per-task epoch.**
+
+   1. Two cyclic tasks (10 ms and 20 ms) share the mock clock; only
+      the 10 ms body advances it.
+   2. Assert the first task's every sample is exactly ``0`` (it drives
+      the clock itself) and the second task's **first** sample is
+      exactly ``0`` — it anchors at its own first dispatch, where the
+      pre-fix executor-shared epoch reported the start phase (at least
+      one foreign period) from the first sample on. Later samples of
+      the second task are not asserted: its scripted clock is driven by
+      the first task's fire count, which is unbounded under real-time
+      runner starvation; accumulation semantics are pinned by the
+      single-task scenarios above.
+
+   All four live in
    ``crates/taktora-executor/tests/cycle_stats_lateness.rs``.
 
 .. test:: Cycle index is monotonic across faulted scans
@@ -409,6 +434,53 @@ Test cases verifying the scan-cycle observability sub-feature
    transient stall costs bounded slots rather than a permanent phase offset,
    and multi-cadence grids share the one scheduling epoch — the structural
    guarantee behind the bounded lateness of :need:`REQ_0268`.
+
+.. test:: Dispatcher skip-realign is carried, consumed once, and re-anchors lateness
+   :id: TEST_0853
+   :status: implemented
+   :verifies: REQ_0840
+
+   **Goal.** The :need:`REQ_0268` skip-realign reaches telemetry as
+   ``skipped_slots`` exactly once, on the dispatch **after** the realign
+   (backward-looking), advancing the lateness grid by ``1 + skipped`` so
+   post-skip cycles read back on-grid.
+
+   **Layer 1 — ``GridTimer`` unit (pure, exact).**
+
+   1. Period 1000 ns, epoch 0; an on-grid dispatch carries
+      ``skipped = 0``.
+   2. Starve to 3500: the wake serves the overdue slot (carrying ``0`` —
+      nothing was passed over before it), realigns to 4000, and records
+      carry ``(4000 − 3000) / 1000 = 1``.
+   3. The next ``take_due`` at 4000 carries ``skipped = 1``; at 5000 it
+      is ``0`` again (consumed exactly once).
+   4. A realign on a task's **first-ever** dispatch sets no carry —
+      slots before the first dispatch do not exist on the task's own
+      grid. Back-to-back realigns hand the carry over without loss or
+      doubling.
+
+   **Layer 2 — executor integration (Linux-only, real clocks, loose bounds).**
+
+   1. ``Grid`` mode forced; one 50 ms cyclic task whose body sleeps
+      ≈ 130 ms on one cycle (``worker_threads(0)`` — the dispatch
+      thread genuinely starves).
+   2. Run 8 wakeups capturing ``(lateness_ns, skipped_slots)`` via the
+      push ``Observer`` (observation count is a lower bound — the
+      non-Linux ``Grid`` fallback may emit fewer observations than
+      wakeups).
+   3. Assert: some observation reports ``skipped_slots ≥ 1``; the first
+      cycle reports ``0``; the starved cycle's lateness spikes past one
+      period; the final cycle's lateness is back under half a period
+      (re-anchored, not accumulating).
+
+   Layer 2 runs on Linux only — the production ``timerfd`` grid path.
+   The non-Linux ``Grid`` fallback is not a real-time target: a stalled
+   runner can leave the final sample mid-starvation, so no tail bound
+   holds there; the carry mechanics remain covered everywhere by layer 1.
+
+   Layer 1 lives in ``crates/taktora-executor/src/grid.rs`` (unit
+   tests); layer 2 in
+   ``crates/taktora-executor/tests/cycle_stats_skip_signal.rs``.
 
 ----
 

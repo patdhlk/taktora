@@ -115,10 +115,15 @@ Cyclic scan execution
    epoch.
 
    The scheduling time source shall be **distinct** from the telemetry
-   measurement clock that produces the lateness of :need:`REQ_0106`, so that
-   substituting a test clock for telemetry can never alter dispatch timing.
-   The lateness grid of :need:`REQ_0106` is left unchanged and serves as the
-   independent witness for this requirement. Verification is by a
+   measurement clock that produces the lateness of :need:`REQ_0106`, so
+   that substituting a test clock for telemetry can never alter dispatch
+   timing. The lateness of :need:`REQ_0106` remains the independent
+   witness for this requirement: every timestamp it folds is read from
+   the telemetry clock, never from the scheduler. The single scheduling
+   fact that crosses into telemetry is the discrete skipped-slot count
+   of :need:`REQ_0840` — a skip-realign is a loud, countable event, not
+   a timing source — so a drifting scheduler still cannot mask its own
+   drift in the witness metric. Verification is by a
    deterministic unit test over the grid state machine — the nominal target
    advances by exactly one period per cycle with zero accumulated offset, and
    a simulated stall skips whole slots; the long-run hardware drift bound is
@@ -603,7 +608,7 @@ Scan-cycle observability
      (including a faulted scan, see :need:`REQ_0107`) with the raw
      per-cycle observation (``cycle_index``, ``task_id``, ``task_index``,
      ``faulted``, ``period_ns``, ``pre_ns``, ``actual_period_ns``,
-     ``jitter_ns``, ``lateness_ns``, ``took_ns``). The ``cycle_index`` is
+     ``jitter_ns``, ``lateness_ns``, ``took_ns``, ``skipped_slots``). The ``cycle_index`` is
      the monotonic scan count of :need:`REQ_0107`, the join key by which a
      cyclic connector's telemetry (:need:`REQ_0265`) composes with the
      executor's. The push path delivers raw samples, not aggregates.
@@ -616,6 +621,9 @@ Scan-cycle observability
      ``pre_ns`` is the single time source for an exported sample's time axis;
      a consumer shall not read a second clock. Both fields are always present
      (never absent), including on a faulted scan.
+     ``skipped_slots`` — the dispatcher skip count of :need:`REQ_0840` —
+     is likewise always present (``0`` when nothing was skipped),
+     including on a faulted scan.
 
      A faulted scan shall be **distinguishable** from a healthy one, the
      cross-layer twin of the connector's ``CycleOutcome`` (:need:`REQ_0267`):
@@ -695,18 +703,26 @@ Scan-cycle observability
    period and therefore report no lateness.
 
    **Grid anchoring.** The nominal grid point for a cycle is
-   ``grid_epoch + grid_slot × period``, where ``grid_epoch`` is the task's
-   first dispatch and ``grid_slot`` advances each cycle by the *rounded
-   number of nominal periods elapsed since the previous dispatch*
-   (``round(actual_period / period)``, at least one), not by the raw
-   dispatch count. A steady sub-half-period slip rounds to one slot per
-   cycle, so lateness accumulates as intended; a coalesced or missed
-   wakeup (the dispatch thread starved past one or more whole periods)
-   advances several slots at once, re-anchoring the grid so the transient
-   does not leave a permanent per-cycle bias on every subsequent cycle.
-   This keeps the lateness grid independent of the :need:`REQ_0107`
-   ``cycle_index`` (which still increments by exactly one per scan
-   attempt).
+   ``grid_epoch + grid_slot × period``, where ``grid_epoch`` is the
+   task's **own** first recorded dispatch (a faulted first scan anchors
+   too — its dispatch instant is real) and ``grid_slot`` advances by
+   exactly **one slot per scan attempt plus the dispatcher's
+   skipped-slot signal** (:need:`REQ_0840`). The slot is never
+   reconstructed from the measured period: rounding
+   ``actual_period / period`` over-counts on a coalesced catch-up wake
+   (a late cycle followed by a short catch-up cycle), stamping a
+   permanent spurious negative step into every later cycle's lateness
+   (:need:`ADR_0101`). A steady sub-period slip therefore accumulates
+   as intended; a late-but-served wake shows a transient positive spike
+   that heals on the catch-up dispatch; a dispatcher skip-realign
+   (:need:`REQ_0268`) re-anchors through the signal. Absent a signal —
+   the ``Legacy`` relative-timer mode never skips slots — a whole
+   missed period honestly remains visible as a persistent offset rather
+   than being silently absorbed. Lateness is measured relative to the
+   task's first dispatch: a constant phase offset already present there
+   reads as zero by construction. The slot advance is aligned with the
+   :need:`REQ_0107` ``cycle_index`` (one per scan attempt) except for
+   the explicit skip signal.
 
 .. req:: Per-task scan index and faulted-scan emission
    :id: REQ_0107
@@ -731,6 +747,34 @@ Scan-cycle observability
    and every downstream pairing would desync — so emit-on-fault is
    required symmetrically on both layers. The update is allocation-free
    per :need:`REQ_0104`.
+
+.. req:: Per-task skipped-slot count
+   :id: REQ_0840
+   :status: implemented
+   :satisfies: FEAT_0021
+   :links: IMPL_0070, TEST_0853
+
+   For each cyclic task, the runtime shall report per scan cycle the
+   number of nominal grid slots the dispatcher passed over **unserved**
+   between the slot served by the task's previous dispatch and the slot
+   served by this dispatch (the skip-realign of :need:`REQ_0268`). The
+   count shall be ``0`` in steady state, ``0`` whenever the dispatch
+   mode provides no skip signal (the ``Legacy`` relative timer), and
+   ``0`` on a task's first recorded cycle — the lateness grid of
+   :need:`REQ_0106` anchors there, so earlier slots do not exist on the
+   task's own grid.
+
+   The count shall be carried on the push observation of
+   :need:`REQ_0103` (field ``skipped_slots``, always present, never
+   ``null``) and on the NDJSON record of :need:`REQ_0111`. The lateness
+   grid of :need:`REQ_0106` shall advance by exactly
+   ``1 + skipped_slots`` per scan attempt, so a dispatcher skip
+   re-anchors the grid without per-cycle reconstruction. Only this
+   discrete count crosses the scheduler→telemetry boundary; every
+   timestamp remains on the telemetry measurement clock
+   (:need:`REQ_0268`). A skipped slot is a scan that never executed —
+   previously invisible in the exported stream. The update is
+   allocation-free per :need:`REQ_0104`.
 
 PREEMPT_RT validation
 ~~~~~~~~~~~~~~~~~~~~~
@@ -773,12 +817,13 @@ PREEMPT_RT validation
    faulted scan, see :need:`REQ_0107`) and shall conform to the schema
    ``{ cycle_index: u64, task_id: u32, faulted: bool, ts_ns: u64,
    period_ns: u64, actual_period_ns: u64|null, jitter_ns: u64|null,
-   lateness_ns: i64|null, took_ns: u64|null }``. Consistent with the
+   lateness_ns: i64|null, took_ns: u64|null, skipped_slots: u32 }``. Consistent with the
    absent-vs-zero contract of :need:`REQ_0103`, a measurement not taken this
    cycle (first cycle, or any faulted scan) shall be encoded as JSON
    ``null``, never as a measured ``0``. ``ts_ns`` is the task-logic-start
    instant carried as ``pre_ns`` in :need:`REQ_0103`; ``task_id`` is the
-   ``task_index`` of :need:`REQ_0103`.
+   ``task_index`` of :need:`REQ_0103`. ``skipped_slots`` is always a
+   number (never ``null``), per :need:`REQ_0840`.
 
    The harness shall offer at least three selectable load profiles:
 

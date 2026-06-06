@@ -71,6 +71,14 @@ pub struct CycleObservation {
     /// scan or an event-driven task.
     pub lateness_ns: Option<i64>,
 
+    /// Nominal grid slots the dispatcher passed over **unserved** between the
+    /// slot served by this task's previous dispatch and the slot served by
+    /// this one (the skip-realign of `REQ_0268`), per `REQ_0840`. Always
+    /// present: `0` in steady state, always `0` in `Legacy` dispatch mode
+    /// (which never skips slots) and on a task's first recorded cycle. The
+    /// lateness grid of `REQ_0106` advances by exactly `1 + skipped_slots`.
+    pub skipped_slots: u32,
+
     /// Wall-clock execution duration of the task in nanoseconds. `None` on
     /// a faulted scan (the body was not entered) or when no sample was
     /// recorded this cycle (e.g. a fault handler ran in the item's place).
@@ -149,6 +157,7 @@ mod tests {
             actual_period_ns: Some(10_050_000),
             jitter_ns: Some(50_000),
             lateness_ns: Some(-120),
+            skipped_slots: 0,
             took_ns: Some(1_000_000),
         };
         // Verify Clone is implemented and produces an independent copy;
