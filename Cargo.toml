@@ -77,7 +77,7 @@ taktora-bounded-alloc            = { path = "crates/taktora-bounded-alloc", vers
 taktora-connector-can            = { path = "crates/taktora-connector-can", version = "0.1.8" }
 taktora-connector-codec          = { path = "crates/taktora-connector-codec", version = "0.1.7" }
 taktora-connector-core           = { path = "crates/taktora-connector-core", version = "0.2.6" }
-taktora-connector-ethercat       = { path = "crates/taktora-connector-ethercat", version = "0.2.4" }
+taktora-connector-ethercat       = { path = "crates/taktora-connector-ethercat", version = "0.2.5" }
 taktora-connector-host           = { path = "crates/taktora-connector-host", version = "0.1.8" }
 taktora-connector-transport-iox  = { path = "crates/taktora-connector-transport-iox", version = "0.1.7" }
 taktora-connector-zenoh          = { path = "crates/taktora-connector-zenoh", version = "0.2.7" }
