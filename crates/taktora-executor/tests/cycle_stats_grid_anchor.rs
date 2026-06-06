@@ -76,7 +76,10 @@ fn late_first_dispatch_reports_startup_delay_not_zero() {
 
     exec.run_n(2).expect("run_n");
 
-    let samples = recorder.samples.lock().unwrap();
+    // Clone out of the guard (same pattern as cycle_stats_skip_signal.rs):
+    // holding the MutexGuard across the asserts trips
+    // clippy::significant_drop_tightening on the Linux-gated clippy pass.
+    let samples = recorder.samples.lock().unwrap().clone();
     assert!(
         samples.len() >= 2,
         "expected 2 observations, got {}",
