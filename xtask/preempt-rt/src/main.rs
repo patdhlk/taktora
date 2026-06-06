@@ -105,6 +105,14 @@ fn run() -> Result<(), String> {
     ))
     .map_err(|e| format!("add task: {e}"))?;
 
+    // Start beacon: lets a supervisor (and the truncation-warning e2e test)
+    // know the run loop is about to install its signal handling and start —
+    // a SIGTERM delivered before this point hits the default action and
+    // kills the process without a summary.
+    eprintln!(
+        "preempt-rt-bench: running {} cycles @ {} us",
+        args.cycles, args.period_us
+    );
     exec.run_n(args.cycles).map_err(|e| format!("run: {e}"))?;
 
     // Drop the executor — and with it all internal `Arc` clones of the ring

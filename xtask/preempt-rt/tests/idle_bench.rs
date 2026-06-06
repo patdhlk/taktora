@@ -36,12 +36,13 @@ fn idle_run_emits_one_line_per_cycle() {
 #[cfg(unix)]
 #[test]
 fn truncated_run_warns_on_stderr() {
+    use std::io::{BufRead, BufReader};
     use std::process::Stdio;
 
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("run.ndjson");
 
-    let child = Command::new(env!("CARGO_BIN_EXE_preempt-rt-bench"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_preempt-rt-bench"))
         .args([
             "--cycles",
             "100000",
@@ -56,16 +57,38 @@ fn truncated_run_warns_on_stderr() {
         .spawn()
         .expect("spawn bench");
 
-    // Let it produce a few hundred records, then request termination.
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    // SAFETY: plain kill(2) on a child this test owns.
-    #[allow(unsafe_code)]
-    unsafe {
-        libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
-    }
+    // Drain stderr incrementally and wait for the start beacon: a SIGTERM
+    // delivered before the run loop installs its signal handling hits the
+    // default action and kills the process without a summary (flaky on a
+    // slow/loaded start with a fixed sleep).
+    let stderr_pipe = child.stderr.take().expect("piped stderr");
+    let lines: Vec<String> = {
+        let mut collected = Vec::new();
+        let mut reader = BufReader::new(stderr_pipe);
+        let mut beaconed = false;
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).expect("read stderr") == 0 {
+                break; // EOF: child exited
+            }
+            if !beaconed && line.contains("running") {
+                beaconed = true;
+                // Run loop is up; let some cycles pass, then request
+                // graceful termination.
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                // SAFETY: plain kill(2) on a child this test owns.
+                #[allow(unsafe_code)]
+                unsafe {
+                    libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+                }
+            }
+            collected.push(line);
+        }
+        collected
+    };
+    assert!(child.wait().expect("wait bench").success());
 
-    let output = child.wait_with_output().expect("wait bench");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = lines.concat();
     assert!(
         stderr.contains("WARNING") && stderr.contains("requested"),
         "truncated run must warn that fewer records than requested cycles \
