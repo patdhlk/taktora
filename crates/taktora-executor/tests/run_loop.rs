@@ -223,10 +223,16 @@ fn run_n_survives_eintr_from_unrelated_signals() {
 
     // Run the dispatch loop on its own thread and ferry out its pthread id
     // so the signals land exactly on the thread blocked in the WaitSet.
+    // The id rides the channel as `usize` because `pthread_t` is not `Send`
+    // on every platform (an opaque pointer on macOS). The round-trip is
+    // lossless on every supported target — `pthread_t` is `c_ulong` on
+    // glibc (usize-wide on 32- and 64-bit), `usize` on macOS — the
+    // truncation lint fires on the type-level u64→usize possibility only.
     let (tid_tx, tid_rx) = mpsc::channel();
     let dispatch = std::thread::spawn(move || {
         // SAFETY: pthread_self is always safe to call.
         let tid = unsafe { libc::pthread_self() };
+        #[allow(clippy::cast_possible_truncation)]
         tid_tx.send(tid as usize).expect("send tid");
         exec.run_n(50).map(|()| exec)
     });
