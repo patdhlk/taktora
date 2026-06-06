@@ -651,6 +651,19 @@ exercised without hardware. Bench tests run only when invoked as
    run against a WAGO 750-354 — the SM-watchdog coupler that
    motivated the requirement.
 
+.. test:: Bring-up failure surfaces as terminal Down
+   :id: TEST_0858
+   :status: open
+   :verifies: REQ_0842
+
+   Integration test in
+   ``crates/taktora-connector-ethercat-tests/tests/bring_up_failure.rs``:
+   an ``EthercatConnector`` over ``MockBusDriver::failing_bring_up``
+   is registered with an executor; the health subscription must
+   observe exactly ``Connecting → Down`` with a reason carrying both
+   the ``"bring-up failed"`` prefix and the driver's error text —
+   instead of the connector idling in ``Connecting`` forever.
+
 ----
 
 Workspace end-to-end tests

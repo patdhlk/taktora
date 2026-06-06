@@ -77,24 +77,24 @@ dependencies = [
  "quote",
  "regex",
  "rustc-hash",
- "shlex",
+ "shlex 1.3.0",
  "syn",
 ]
 
 [[package]]
 name = "bitflags"
-version = "2.11.1"
+version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
+checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
 
 [[package]]
 name = "cc"
-version = "1.2.62"
+version = "1.2.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1dce859f0832a7d088c4f1119888ab94ef4b5d6795d1ce05afb7fe159d79f98"
+checksum = "556e016178bb5662a08681bbe0f00f8e17631781a4dfc8c45e466e4b185ec27f"
 dependencies = [
  "find-msvc-tools",
- "shlex",
+ "shlex 2.0.1",
 ]
 
 [[package]]
@@ -169,7 +169,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
 dependencies = [
- "thiserror 2.0.18",
+ "thiserror",
 ]
 
 [[package]]
@@ -195,9 +195,9 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "either"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "embedded-io"
@@ -557,15 +557,15 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.29"
+version = "0.4.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
 
 [[package]]
 name = "memchr"
-version = "2.8.0"
+version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
 
 [[package]]
 name = "minimal-lexical"
@@ -757,9 +757,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
 dependencies = [
  "itoa",
  "memchr",
@@ -790,6 +790,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "shlex"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+[[package]]
 name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -814,9 +820,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-codec"
-version = "0.1.0"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf8ab05e373927b83ce425c6cabce9458a851675085e8647fb16466d3b9d1de5"
+checksum = "747cbfe8b49d4c0a4184ae0938f8d8c98de8963ef0a30531cfa6745e6329b423"
 dependencies = [
  "serde",
  "serde_json",
@@ -825,20 +831,20 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-core"
-version = "0.1.0"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eda7113cfe85850e1f96112d13a49942d52663f204c6a19cbc1e001ca59fe1a3"
+checksum = "b65658e35d42c829ea1bd7f6884cb0561e8d2fde58a2755f96299b0cbb53a7b9"
 dependencies = [
  "rand",
  "serde",
- "thiserror 1.0.69",
+ "thiserror",
 ]
 
 [[package]]
 name = "taktora-connector-host"
-version = "0.1.0"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64196c17d6196113f2ef99e245c44ae6171268dfc4e7b93ed65109b531c74c3f"
+checksum = "200c2d1f452fb009a438a51025d45eae0c411f7d2e17581a2ae102b7dc7fad46"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",
@@ -846,14 +852,14 @@ dependencies = [
  "taktora-connector-core",
  "taktora-connector-transport-iox",
  "taktora-executor",
- "thiserror 1.0.69",
+ "thiserror",
 ]
 
 [[package]]
 name = "taktora-connector-transport-iox"
-version = "0.1.0"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa7cf644eb7280d1c523455e846879ca44d23c6091de7f149aff2e4e380cc43e"
+checksum = "82a2c354c98149067cf51f992de452e6bfc2f251346b093a29ffadd773d98385"
 dependencies = [
  "iceoryx2",
  "serde",
@@ -862,9 +868,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-zenoh"
-version = "0.1.0"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07231134a098049224cad6e8622ee25f0f38fbd3e849523aaea066780142ae0f"
+checksum = "11684f318c5d41e8e8c2ccf4e2587236c4107f43400e9f6ed180e88904103eae"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",
@@ -873,33 +879,33 @@ dependencies = [
  "taktora-connector-host",
  "taktora-connector-transport-iox",
  "taktora-executor",
- "thiserror 1.0.69",
+ "thiserror",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "taktora-executor"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed2e18ec5eb68070e364dcb9d9bd8f33562bd1a49bf115408b50ef7cea0bf745"
+checksum = "465925ef2a0e250e1680dc10b36a5e8b68d299dd913e2e97760a501a5789ee62"
 dependencies = [
  "bitflags",
  "crossbeam-channel",
  "crossbeam-utils",
  "iceoryx2",
+ "iceoryx2-bb-posix",
+ "libc",
  "num_cpus",
- "thiserror 1.0.69",
+ "taktora-stats",
+ "thiserror",
 ]
 
 [[package]]
-name = "thiserror"
-version = "1.0.69"
+name = "taktora-stats"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
-dependencies = [
- "thiserror-impl 1.0.69",
-]
+checksum = "bda52ac9d21d0ce7ff79182b536ab1703ba18a234efaee35754217e394a37354"
 
 [[package]]
 name = "thiserror"
@@ -907,18 +913,7 @@ version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
 dependencies = [
- "thiserror-impl 2.0.18",
-]
-
-[[package]]
-name = "thiserror-impl"
-version = "1.0.69"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "thiserror-impl",
 ]
 
 [[package]]
@@ -1156,18 +1151,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.48"
+version = "0.8.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eed437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9"
+checksum = "3b065d4f0e55f82fae73202e189638116a87c55ab6b8e6c2721e13dd9d854ad1"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.48"
+version = "0.8.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
+checksum = "0b631b19d36a892ab55420c92dbc83ccd79274f25be714855d3074aa71cab639"
 dependencies = [
  "proc-macro2",
  "quote",

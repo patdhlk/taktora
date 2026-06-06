@@ -12,12 +12,19 @@ license     = "Apache-2.0 OR MIT"
 [workspace]
 
 [dependencies]
-taktora-executor                = "0.1"
-taktora-connector-core          = "0.1"
+# NOTE: version reqs must track the CURRENT published majors — a `^0.1` req on a
+# crate whose local/published version is 0.2.x silently rejects the
+# `[patch.crates-io]` path override (examples-local.sh on becomes a no-op
+# building stale crates.io versions) and can split the dependency graph into
+# two versions of a shared crate, failing cross-crate API calls with type
+# mismatches. Same trap previously fixed in the ethercat-real-bus and
+# ethercat-wago-coupler examples.
+taktora-executor                = "0.2"
+taktora-connector-core          = "0.2"
 taktora-connector-host          = "0.1"
 taktora-connector-transport-iox = "0.1"
 taktora-connector-codec         = "0.1"
-taktora-connector-zenoh         = "0.1"
+taktora-connector-zenoh         = "0.2"
 
 clap        = { version = "4", features = ["derive"] }
 serde       = { version = "1", features = ["derive"] }

@@ -231,15 +231,20 @@ where
         let stop = self.state.stop_signal();
         let cycle_period = options.cycle_time();
         handle.spawn(async move {
-            let runner = match CycleRunner::new(driver, &options, health).await {
+            let runner = match CycleRunner::new(driver, &options, Arc::clone(&health)).await {
                 Ok(r) => r,
                 Err(e) => {
-                    // Bring-up failure already drove the health
-                    // monitor; nothing else to do but exit. The
-                    // dispatcher task ending without panic is the
-                    // standard signal — observers learn via the
-                    // health subscription.
-                    let _ = e;
+                    // Surface the failure on the health channel
+                    // (REQ_0842). Without this the connector sits in
+                    // `Connecting` forever and the error is invisible
+                    // — every bring-up bug becomes a silent hang.
+                    // Best-effort transition: ARCH_0012 only rejects
+                    // it if the monitor somehow already left
+                    // Connecting.
+                    let _ = health.transition_to(ConnectorHealth::Down {
+                        reason: format!("bring-up failed: {e}"),
+                        since: std::time::Instant::now(),
+                    });
                     return;
                 }
             };

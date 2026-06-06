@@ -852,6 +852,29 @@ EtherCAT reference connector
    blocking the transition even after traffic resumes, until
    explicitly acknowledged.
 
+.. req:: Bring-up failure is observable via health
+   :id: REQ_0842
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0858
+
+   When ``BusDriver::bring_up`` fails inside the gateway task spawned
+   by ``EthercatConnector::register_with``, the connector shall
+   transition health to terminal
+   ``Down { reason: "bring-up failed: …" }`` carrying the driver
+   error, so the failure is observable through the existing health
+   subscription.
+
+   **Rationale.** The spawned task is the only owner of the bring-up
+   error; dropping it leaves the connector in ``Connecting``
+   indefinitely, indistinguishable from a slow startup. Every
+   bring-up defect then presents as a silent hang (missing
+   ``CAP_NET_RAW``, SM-watchdog OP refusal, and PDO-mapping faults
+   all did, on real hardware) and must be re-diagnosed with local
+   instrumentation. The health channel is the connector's
+   architecturally designated observability surface (ARCH_0012);
+   structured logging remains a separate, future concern.
+
 Host wiring
 ~~~~~~~~~~~
 
