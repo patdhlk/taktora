@@ -1,6 +1,6 @@
 //! `REQ_0850` — MDP `<Modules>` catalog and `<Slots>` constraints captured
 //! faithfully; the parser never resolves a plugged configuration.
-use taktora_ethercat_esi::parse;
+use taktora_ethercat_esi::{EsiError, parse};
 
 const MODULAR: &str = include_str!("fixtures/modular_coupler.xml");
 
@@ -47,6 +47,7 @@ fn slot_constraints_are_captured() {
     let end = &slots.slots[1];
     assert_eq!(end.min_instances, Some(1));
     assert_eq!(end.max_instances, Some(1));
+    assert_eq!(end.name.as_deref(), Some("End"));
 }
 
 #[test]
@@ -77,4 +78,41 @@ fn modules_only_file_parses_with_empty_devices() {
     assert!(file.devices.is_empty());
     assert_eq!(file.modules.len(), 1);
     assert_eq!(file.modules[0].ident, Some(1));
+}
+
+#[test]
+fn bad_slot_module_ident_is_a_number_error() {
+    let xml = r##"<?xml version="1.0"?>
+<EtherCATInfo><Vendor><Id>#x21</Id></Vendor><Descriptions><Devices>
+<Device><Type ProductCode="#x1" RevisionNo="#x1">C</Type>
+  <Slots><Slot><ModuleIdent>GARBAGE</ModuleIdent></Slot></Slots>
+</Device>
+</Devices></Descriptions></EtherCATInfo>"##;
+    let err = parse(xml).expect_err("non-hex ModuleIdent in Slot must error");
+    match err {
+        EsiError::Number { path, raw } => {
+            assert_eq!(raw, "GARBAGE");
+            assert_eq!(path, "Slot.ModuleIdent", "path names the field: {path}");
+        }
+        other => panic!("expected Number error, got {other:?}"),
+    }
+}
+
+#[test]
+fn bad_module_type_ident_is_a_number_error() {
+    let xml = r#"<?xml version="1.0"?>
+<EtherCATInfo><Vendor><Id>#x21</Id></Vendor><Descriptions><Modules>
+<Module><Type ModuleIdent="NaN">M</Type></Module>
+</Modules></Descriptions></EtherCATInfo>"#;
+    let err = parse(xml).expect_err("non-hex ModuleIdent on Module.Type must error");
+    match err {
+        EsiError::Number { path, raw } => {
+            assert_eq!(raw, "NaN");
+            assert_eq!(
+                path, "Module.Type.ModuleIdent",
+                "path names the field: {path}"
+            );
+        }
+        other => panic!("expected Number error, got {other:?}"),
+    }
 }
