@@ -114,6 +114,8 @@ struct DeviceDto {
     names: Vec<NameDto>,
     #[serde(rename = "GroupType", default)]
     group_type: Option<String>,
+    #[serde(rename = "Fmmu", default)]
+    fmmu: Vec<FmmuDto>,
     #[serde(rename = "Sm", default)]
     sm: Vec<SmDto>,
     #[serde(rename = "TxPdo", default)]
@@ -144,6 +146,14 @@ struct TypeDto {
     product_code: Option<String>,
     #[serde(rename = "@RevisionNo", default)]
     revision_no: Option<String>,
+    #[serde(rename = "$text", default)]
+    text: Option<String>,
+}
+
+// ── FMMU DTO ─────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct FmmuDto {
     #[serde(rename = "$text", default)]
     text: Option<String>,
 }
@@ -410,6 +420,26 @@ fn sync_managers_from_dtos(dtos: Vec<SmDto>) -> Result<Vec<crate::model::SyncMan
         });
     }
     Ok(out)
+}
+
+// ── FMMU conversion ───────────────────────────────────────────────────────────
+
+/// Convert `<Fmmu>` text into [`FmmuUsage`]. Unknown strings are preserved as
+/// [`FmmuUsage::Other`] — the parser never hard-fails on an unrecognised usage.
+fn fmmus_from_dtos(dtos: Vec<FmmuDto>) -> Vec<crate::model::Fmmu> {
+    use crate::model::{Fmmu, FmmuUsage};
+    dtos.into_iter()
+        .map(|f| {
+            let text = f.text.as_deref().map(str::trim).unwrap_or_default();
+            let usage = match text {
+                "Inputs" => FmmuUsage::Inputs,
+                "Outputs" => FmmuUsage::Outputs,
+                "MBoxState" => FmmuUsage::MBoxState,
+                other => FmmuUsage::Other(other.to_owned()),
+            };
+            Fmmu { usage }
+        })
+        .collect()
 }
 
 // ── PDO conversion ────────────────────────────────────────────────────────────
@@ -710,6 +740,7 @@ impl EtherCatInfo {
                 name: pick_name(&dev.names),
                 product_type: dev.ty.text,
                 group_type: dev.group_type,
+                fmmus: fmmus_from_dtos(dev.fmmu),
                 sync_managers: sync_managers_from_dtos(dev.sm)?,
                 tx_pdos,
                 rx_pdos,

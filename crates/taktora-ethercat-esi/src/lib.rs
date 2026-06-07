@@ -15,8 +15,8 @@ mod raw_xml;
 
 pub use error::{EsiError, Span};
 pub use model::{
-    CoeInfo, DcOpMode, DistributedClock, EsiDevice, EsiFile, InitCmd, Mailbox, Pdo, PdoEntry,
-    SmDirection, SyncManager, Transition, Vendor,
+    CoeInfo, DcOpMode, DistributedClock, EsiDevice, EsiFile, Fmmu, FmmuUsage, InitCmd, Mailbox,
+    Pdo, PdoEntry, SmDirection, SyncManager, Transition, Vendor,
 };
 pub use raw_xml::RawXml;
 pub use taktora_fieldbus_od_core::{Access, DataType, DictEntry, Identity};

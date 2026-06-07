@@ -37,6 +37,8 @@ pub struct EsiDevice {
     pub product_type: Option<String>,
     /// Device group type, when present.
     pub group_type: Option<String>,
+    /// `<Fmmu>` declarations in declaration order.
+    pub fmmus: Vec<Fmmu>,
     /// Sync managers in declaration order.
     pub sync_managers: Vec<SyncManager>,
     /// `TxPDOs` (`SubDevice` → master), each preserved structurally.
@@ -87,6 +89,26 @@ pub struct SyncManager {
     /// declare (verified against vendor files); the timeout is master-side
     /// configuration (`REQ_0846` territory), not part of this faithful IR.
     pub watchdog_trigger_enable: bool,
+}
+
+/// What an `<Fmmu>` declaration is used for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FmmuUsage {
+    /// Maps input process data (`SubDevice` → master).
+    Inputs,
+    /// Maps output process data (master → `SubDevice`).
+    Outputs,
+    /// Maps the mailbox-state bit.
+    MBoxState,
+    /// An unrecognised usage string, preserved verbatim.
+    Other(String),
+}
+
+/// One `<Fmmu>` declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fmmu {
+    /// Declared usage.
+    pub usage: FmmuUsage,
 }
 
 /// One PDO (a `<TxPdo>` or `<RxPdo>` element), preserved structurally.

@@ -272,6 +272,7 @@ mod tests {
             name: name.map(ToOwned::to_owned),
             product_type: product_type.map(ToOwned::to_owned),
             group_type: None,
+            fmmus: Vec::new(),
             sync_managers: Vec::new(),
             tx_pdos: Vec::new(),
             rx_pdos: Vec::new(),
