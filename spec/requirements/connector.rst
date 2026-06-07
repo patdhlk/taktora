@@ -784,7 +784,7 @@ EtherCAT reference connector
    :id: REQ_0331
    :status: implemented
    :satisfies: FEAT_0041
-   :links: IMPL_0050, TEST_0225, TEST_0227
+   :links: IMPL_0050, TEST_0225, TEST_0227, TEST_0863
 
    When ``BusDriver::cycle`` returns ``Err``, the cycle runner shall
    transition health to ``Degraded { reason: "cycle failed: …" }`` and
@@ -798,6 +798,17 @@ EtherCAT reference connector
    ``recover`` call shall not consume a new ``PduStorage`` split.
    NIC-level failure (the ``tx_rx_task`` future itself returning
    ``Err``) is terminal and outside this scope.
+
+   A **failed** ``recover`` attempt shall leave the driver
+   recoverable: the ``MainDevice`` and ``tx_rx_task`` survive the
+   failure so the next policy-driven attempt retries the full walk.
+   (Because the ``PduStorage`` split is one-shot, dropping the
+   ``MainDevice`` on a failed attempt makes every further recovery
+   structurally impossible — observed live on the WAGO 750-354 rig,
+   where the first attempt fires while the cable is still unplugged
+   and fails with a PDU timeout; a destructive state-take bricked the
+   driver into "recover called before bring_up" until process
+   restart.)
 
 .. req:: Reconnect policy factory in connector options
    :id: REQ_0332
@@ -879,7 +890,7 @@ EtherCAT reference connector
    :id: REQ_0846
    :status: implemented
    :satisfies: FEAT_0041
-   :links: IMPL_0050, TEST_0862
+   :links: IMPL_0050, TEST_0862, TEST_0863
 
    For every ``SubDeviceMap`` carrying ``sm_watchdog: Some(wd)``, the
    gateway shall, during both bring-up and recovery and before the OP

@@ -62,6 +62,23 @@ enum State<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> {
     NotInitialised,
     /// Post-bring-up. `tx_rx_task` is spawned and the group is in OP.
     Operational(Box<OperationalState<MAX_SUBDEVICES, MAX_PDI>>),
+    /// Between a failed recovery attempt and the next one: the bus
+    /// group is gone, but the `MainDevice` and `tx_rx_task` MUST
+    /// survive — `PduStorage::try_split` is one-shot, so dropping the
+    /// `MainDevice` here would make every further recovery
+    /// structurally impossible (`REQ_0331`). Found live on the WAGO
+    /// rig: the first recover attempt fires while the cable is still
+    /// out, fails with a PDU timeout, and a destructive take would
+    /// brick the driver into "recover called before bring_up" forever.
+    Recovering(Box<RecoveringState>),
+}
+
+/// The pieces that must outlive a failed recovery attempt.
+struct RecoveringState {
+    /// MainDevice owns the `PduLoop` from the one-shot storage split.
+    maindevice: MainDevice<'static>,
+    /// JoinHandle for the `tx_rx_task`. Aborted on `Drop`.
+    tx_rx_task: tokio::task::JoinHandle<()>,
 }
 
 struct OperationalState<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> {
@@ -112,8 +129,10 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> Drop
     for EthercrabBusDriver<MAX_SUBDEVICES, MAX_PDI>
 {
     fn drop(&mut self) {
-        if let State::Operational(op) = std::mem::replace(&mut self.state, State::NotInitialised) {
-            op.tx_rx_task.abort();
+        match std::mem::replace(&mut self.state, State::NotInitialised) {
+            State::Operational(op) => op.tx_rx_task.abort(),
+            State::Recovering(rec) => rec.tx_rx_task.abort(),
+            State::NotInitialised => {}
         }
     }
 }
@@ -122,7 +141,7 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
     for EthercrabBusDriver<MAX_SUBDEVICES, MAX_PDI>
 {
     async fn bring_up(&mut self) -> Result<BringUp, ConnectorError> {
-        if matches!(self.state, State::Operational(_)) {
+        if !matches!(self.state, State::NotInitialised) {
             return Err(ConnectorError::Configuration(
                 "EthercrabBusDriver::bring_up called twice".into(),
             ));
@@ -217,61 +236,71 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
     }
 
     async fn recover(&mut self) -> Result<BringUp, ConnectorError> {
-        let State::Operational(op_box) = std::mem::replace(&mut self.state, State::NotInitialised)
-        else {
-            return Err(ConnectorError::Configuration(
-                "EthercrabBusDriver::recover called before bring_up".into(),
-            ));
-        };
+        // Preserve MainDevice + tx_rx_task across the call — and across
+        // FAILED calls. PduStorage is NOT re-split: its single split
+        // happened in `bring_up` and the resulting PduLoop is owned by
+        // `maindevice` for the driver's lifetime, so a failed attempt
+        // must park both in `State::Recovering` for the next
+        // policy-driven retry (`REQ_0331`) instead of dropping them.
+        let (maindevice, tx_rx_task) =
+            match std::mem::replace(&mut self.state, State::NotInitialised) {
+                State::Operational(op_box) => {
+                    let OperationalState {
+                        maindevice,
+                        tx_rx_task,
+                        group: _dropped,
+                    } = *op_box;
+                    (maindevice, tx_rx_task)
+                }
+                State::Recovering(rec_box) => {
+                    let RecoveringState {
+                        maindevice,
+                        tx_rx_task,
+                    } = *rec_box;
+                    (maindevice, tx_rx_task)
+                }
+                State::NotInitialised => {
+                    return Err(ConnectorError::Configuration(
+                        "EthercrabBusDriver::recover called before bring_up".into(),
+                    ));
+                }
+            };
 
-        // Preserve MainDevice + tx_rx_task across the call. PduStorage
-        // is NOT re-split — its single split happened in `bring_up`
-        // and the resulting PduLoop is owned by `maindevice` for the
-        // driver's lifetime.
-        let OperationalState {
-            maindevice,
-            tx_rx_task,
-            group: _dropped,
-        } = *op_box;
+        match rewalk_into_op::<MAX_SUBDEVICES, MAX_PDI>(&maindevice, &self.options).await {
+            Ok(group) => {
+                let subdevice_count = group.len();
+                let expected_wkc = crate::wkc::expected_wkc_from_map(&self.options);
 
-        // Walk PRE-OP again. SubDevice topology may have shifted (slave
-        // dropped and came back with a different configured address);
-        // we accept whatever ethercrab reports.
-        let group = maindevice
-            .init_single_group::<MAX_SUBDEVICES, MAX_PDI>(ethercat_now)
-            .await
-            .map_err(map_ec_error)?;
+                self.state = State::Operational(Box::new(OperationalState {
+                    maindevice,
+                    group,
+                    tx_rx_task,
+                }));
 
-        for map in self.options.pdo_map() {
-            apply_pdo_mapping_for_subdevice(&maindevice, &group, *map).await?;
+                Ok(BringUp {
+                    expected_wkc,
+                    subdevice_count,
+                })
+            }
+            Err(e) => {
+                self.state = State::Recovering(Box::new(RecoveringState {
+                    maindevice,
+                    tx_rx_task,
+                }));
+                Err(e)
+            }
         }
-
-        // Re-program SM-watchdog registers on recovery (REQ_0846 /
-        // AOU_0016): a slave that dropped and rejoined powers up with
-        // the ESC default 100 ms window, which violates FTTI/2.
-        program_sm_watchdogs(&maindevice, &group, self.options.pdo_map()).await?;
-
-        let group = walk_into_op(group, &maindevice).await?;
-
-        let subdevice_count = group.len();
-        let expected_wkc = crate::wkc::expected_wkc_from_map(&self.options);
-
-        self.state = State::Operational(Box::new(OperationalState {
-            maindevice,
-            group,
-            tx_rx_task,
-        }));
-
-        Ok(BringUp {
-            expected_wkc,
-            subdevice_count,
-        })
     }
 
     async fn cycle(&mut self) -> Result<u16, ConnectorError> {
         let State::Operational(op) = &self.state else {
+            let reason = if matches!(self.state, State::Recovering(_)) {
+                "bus not operational: recovery in progress"
+            } else {
+                "EthercrabBusDriver::cycle called before bring_up"
+            };
             return Err(ConnectorError::Down {
-                reason: "EthercrabBusDriver::cycle called before bring_up".into(),
+                reason: reason.into(),
             });
         };
         let response = op.group.tx_rx(&op.maindevice).await.map_err(map_ec_error)?;
@@ -461,6 +490,37 @@ async fn write_and_verify_register(
         ))));
     }
     Ok(())
+}
+
+/// The fallible body of [`BusDriver::recover`]: re-init the group,
+/// re-apply PDO mapping, re-program SM watchdogs (`REQ_0846` — a slave
+/// that dropped and rejoined powers up with the ESC default 100 ms
+/// window, which violates FTTI/2), and walk back into OP.
+///
+/// Extracted so `recover` can match on the result and restore the
+/// driver state on EITHER branch — an early `?` return in `recover`
+/// itself is exactly the bug that bricked recovery on the WAGO rig
+/// (failed first attempt dropped the one-shot-split `MainDevice`).
+///
+/// SubDevice topology may have shifted (slave dropped and came back
+/// with a different configured address); we accept whatever ethercrab
+/// reports.
+async fn rewalk_into_op<const MAX_SUBDEVICES: usize, const MAX_PDI: usize>(
+    maindevice: &MainDevice<'static>,
+    options: &EthercatConnectorOptions,
+) -> Result<SubDeviceGroup<MAX_SUBDEVICES, MAX_PDI, DefaultLock, Op>, ConnectorError> {
+    let group = maindevice
+        .init_single_group::<MAX_SUBDEVICES, MAX_PDI>(ethercat_now)
+        .await
+        .map_err(map_ec_error)?;
+
+    for map in options.pdo_map() {
+        apply_pdo_mapping_for_subdevice(maindevice, &group, *map).await?;
+    }
+
+    program_sm_watchdogs(maindevice, &group, options.pdo_map()).await?;
+
+    walk_into_op(group, maindevice).await
 }
 
 /// Walk a PRE-OP group into OP under cyclic process-data exchange

@@ -686,6 +686,29 @@ exercised without hardware. Bench tests run only when invoked as
    that the registers stuck, since a read-back mismatch fails
    bring-up.
 
+.. test:: SM-watchdog safe-state drill on real WAGO hardware
+   :id: TEST_0863
+   :status: open
+   :verifies: REQ_0846, REQ_0331
+
+   Manual hardware drill against the WAGO 750-354 + 750-602 + 750-430
+   + 750-530 rig, executed 2026-06-07 via
+   ``examples/ethercat-wago-coupler --mode drill``; full stderr/stdout
+   capture archived as
+   ``docs/superpowers/specs/2026-06-07-wago-sm-watchdog-drill.log``.
+   Observed end to end: bring-up reaches ``Up`` with the 50 ms window
+   programmed and read-back-verified (a mismatch hard-fails, so
+   ``Up`` is the register evidence); on cable unplug with a 24 V
+   input held, the mirrored 750-530 output drops to safe state (SM
+   watchdog fires) while the input stays high; the recovery loop
+   retries with honest per-attempt reasons across seven failed
+   attempts — the ``MainDevice`` surviving every failure per
+   :need:`REQ_0331`'s retryability clause; on replug, recovery
+   re-programs and re-verifies the watchdog and returns to ``Up``;
+   the application re-commands its outputs on observing the ``Up``
+   transition (one scan later). Drill verdict:
+   ``saw_degraded=true saw_recover_up=true``.
+
 ----
 
 Workspace end-to-end tests
