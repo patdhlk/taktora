@@ -891,6 +891,71 @@ fn dictionary_from_profile(
     Ok(out)
 }
 
+// ── device conversion ─────────────────────────────────────────────────────────
+
+/// Convert one [`DeviceDto`] into an [`EsiDevice`], stamping the file-level
+/// `vendor_id` onto its [`Identity`]. A `<Type>` lacking `ProductCode`/`RevisionNo`
+/// defaults those identity fields to 0 (see [`TypeDto`]). `vendor_extensions` is
+/// left empty here; the raw-xml pass in [`crate::parse`] fills it.
+fn device_from_dto(dev: DeviceDto, vendor_id: u32) -> Result<EsiDevice, EsiError> {
+    let identity = Identity {
+        vendor_id,
+        product_code: match dev.ty.product_code.as_deref() {
+            Some(pc) => parse_esi_uint(pc, "Device.Type.ProductCode")?,
+            None => 0,
+        },
+        revision: match dev.ty.revision_no.as_deref() {
+            Some(rev) => parse_esi_uint(rev, "Device.Type.RevisionNo")?,
+            None => 0,
+        },
+    };
+
+    let mut tx_pdos = Vec::with_capacity(dev.tx_pdo.len());
+    for p in dev.tx_pdo {
+        tx_pdos.push(pdo_from_dto(p)?);
+    }
+    let mut rx_pdos = Vec::with_capacity(dev.rx_pdo.len());
+    for p in dev.rx_pdo {
+        rx_pdos.push(pdo_from_dto(p)?);
+    }
+
+    // IMPORTANT: pass &dev.profile (borrow) — the dictionary pass also reads it.
+    let mailbox = mailbox_from_dtos(dev.mailbox, dev.profile.as_ref())?;
+    let dc = dev.dc.map(dc_from_dto).transpose()?;
+
+    Ok(EsiDevice {
+        identity,
+        name: pick_name(&dev.names),
+        product_type: dev.ty.text,
+        group_type: dev.group_type,
+        fmmus: fmmus_from_dtos(dev.fmmu),
+        sync_managers: sync_managers_from_dtos(dev.sm)?,
+        tx_pdos,
+        rx_pdos,
+        mailbox,
+        dc,
+        dictionary: dictionary_from_profile(dev.profile.as_ref())?,
+        eeprom: dev.eeprom.as_ref().map(eeprom_from_dto).transpose()?,
+        slots: dev.slots.map(slots_from_dto).transpose()?,
+        vendor_extensions: Vec::new(),
+    })
+}
+
+// ── MDP module catalog conversion ─────────────────────────────────────────────
+
+/// Convert the optional top-level `<Descriptions><Modules>` catalog into a flat
+/// list of [`Module`]s. Returns an empty vec when no `<Modules>` section exists.
+fn modules_from_dto(modules: Option<ModulesDto>) -> Result<Vec<Module>, EsiError> {
+    let Some(m) = modules else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::with_capacity(m.module.len());
+    for dto in m.module {
+        out.push(module_from_dto(dto)?);
+    }
+    Ok(out)
+}
+
 // ── top-level conversion ──────────────────────────────────────────────────────
 
 impl EtherCatInfo {
@@ -908,56 +973,10 @@ impl EtherCatInfo {
             .unwrap_or_default();
         let mut devices = Vec::with_capacity(device_dtos.len());
         for dev in device_dtos {
-            let identity = Identity {
-                vendor_id,
-                product_code: match dev.ty.product_code.as_deref() {
-                    Some(pc) => parse_esi_uint(pc, "Device.Type.ProductCode")?,
-                    None => 0,
-                },
-                revision: match dev.ty.revision_no.as_deref() {
-                    Some(rev) => parse_esi_uint(rev, "Device.Type.RevisionNo")?,
-                    None => 0,
-                },
-            };
-
-            let mut tx_pdos = Vec::with_capacity(dev.tx_pdo.len());
-            for p in dev.tx_pdo {
-                tx_pdos.push(pdo_from_dto(p)?);
-            }
-            let mut rx_pdos = Vec::with_capacity(dev.rx_pdo.len());
-            for p in dev.rx_pdo {
-                rx_pdos.push(pdo_from_dto(p)?);
-            }
-
-            // IMPORTANT: pass &dev.profile (borrow) — Task 11 also reads it.
-            let mailbox = mailbox_from_dtos(dev.mailbox, dev.profile.as_ref())?;
-            let dc = dev.dc.map(dc_from_dto).transpose()?;
-
-            devices.push(EsiDevice {
-                identity,
-                name: pick_name(&dev.names),
-                product_type: dev.ty.text,
-                group_type: dev.group_type,
-                fmmus: fmmus_from_dtos(dev.fmmu),
-                sync_managers: sync_managers_from_dtos(dev.sm)?,
-                tx_pdos,
-                rx_pdos,
-                mailbox,
-                dc,
-                dictionary: dictionary_from_profile(dev.profile.as_ref())?,
-                eeprom: dev.eeprom.as_ref().map(eeprom_from_dto).transpose()?,
-                slots: dev.slots.map(slots_from_dto).transpose()?,
-                vendor_extensions: Vec::new(),
-            });
+            devices.push(device_from_dto(dev, vendor_id)?);
         }
 
-        let mut modules = Vec::new();
-        if let Some(m) = self.descriptions.modules {
-            modules.reserve(m.module.len());
-            for dto in m.module {
-                modules.push(module_from_dto(dto)?);
-            }
-        }
+        let modules = modules_from_dto(self.descriptions.modules)?;
 
         Ok(EsiFile {
             vendor,
