@@ -61,8 +61,9 @@ struct IfaceState {
 #[derive(Debug)]
 pub struct CanHealthMonitor {
     inner: Mutex<Inner>,
-    tx: Sender<HealthEvent>,
-    rx: Receiver<HealthEvent>,
+    /// One sender per live subscription (`REQ_0847`). Dead
+    /// subscribers (dropped receivers) are pruned on each broadcast.
+    subscribers: Mutex<Vec<Sender<HealthEvent>>>,
     degraded_due_to_drops: AtomicBool,
 }
 
@@ -87,16 +88,24 @@ impl CanHealthMonitor {
                 },
             );
         }
-        let (tx, rx) = unbounded();
         Self {
             inner: Mutex::new(Inner {
                 aggregate: HealthMonitor::new(),
                 ifaces: map,
             }),
-            tx,
-            rx,
+            subscribers: Mutex::new(Vec::new()),
             degraded_due_to_drops: AtomicBool::new(false),
         }
+    }
+
+    /// Broadcast `event` to every live subscriber, pruning
+    /// subscriptions whose receiver has been dropped.
+    fn broadcast(&self, event: &HealthEvent) {
+        let mut subs = self
+            .subscribers
+            .lock()
+            .expect("can health subscriber list lock not poisoned");
+        subs.retain(|tx| tx.send(event.clone()).is_ok());
     }
 
     /// Snapshot the externally-visible aggregated state.
@@ -124,11 +133,25 @@ impl CanHealthMonitor {
             .map(|s| s.kind)
     }
 
-    /// Subscriber-side receiver. Each `Clone` of the returned handle
-    /// observes the same stream — `crossbeam_channel` is MPMC.
+    /// Open an independent subscription (`REQ_0847`): the returned
+    /// receiver observes every transition emitted AFTER this call.
+    /// Multiple subscriptions never compete for events.
+    ///
+    /// Caveat: `Clone`-ing the returned receiver yields competing
+    /// consumers on the SAME stream (`crossbeam_channel` is MPMC) —
+    /// call `subscribe` again for an independent stream instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the subscriber-list mutex was poisoned.
     #[must_use]
     pub fn subscribe(&self) -> Receiver<HealthEvent> {
-        self.rx.clone()
+        let (tx, rx) = unbounded();
+        self.subscribers
+            .lock()
+            .expect("can health subscriber list lock not poisoned")
+            .push(tx);
+        rx
     }
 
     /// Set one iface's sub-state and recompute the aggregate. Emits a
@@ -171,10 +194,7 @@ impl CanHealthMonitor {
         if evt.to.kind() == ConnectorHealthKind::Up {
             self.degraded_due_to_drops.store(false, Ordering::Release);
         }
-        // Broadcast — failure means no subscribers, which is fine; we
-        // hold an internal Receiver so this is impossible by
-        // construction.
-        let _ = self.tx.send(evt.clone());
+        self.broadcast(&evt);
         Ok(Some(evt))
     }
 
@@ -208,7 +228,7 @@ impl CanHealthMonitor {
         };
         let evt = guard.aggregate.try_transition_to(target).ok()?;
         self.degraded_due_to_drops.store(true, Ordering::Release);
-        let _ = self.tx.send(evt.clone());
+        self.broadcast(&evt);
         Some(evt)
     }
 

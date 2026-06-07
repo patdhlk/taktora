@@ -1976,7 +1976,7 @@ spec text that needed amendment during implementation.
    :id: IMPL_0040
    :status: open
    :implements: BB_0005
-   :refines: REQ_0220, REQ_0223, REQ_0231, REQ_0270, REQ_0271, REQ_0272, REQ_0273
+   :refines: REQ_0220, REQ_0223, REQ_0231, REQ_0270, REQ_0271, REQ_0272, REQ_0273, REQ_0847
 
    **Crate.** ``crates/taktora-connector-host``. Depends on
    ``taktora-connector-core``, ``taktora-connector-transport-iox``,
@@ -2027,7 +2027,7 @@ spec text that needed amendment during implementation.
    :id: IMPL_0050
    :status: open
    :implements: BB_0030
-   :refines: REQ_0310, REQ_0311, REQ_0312, REQ_0313, REQ_0314, REQ_0315, REQ_0316, REQ_0317, REQ_0318, REQ_0319, REQ_0320, REQ_0321, REQ_0322, REQ_0323, REQ_0324, REQ_0325, REQ_0326, REQ_0327, REQ_0328, REQ_0329, REQ_0330, REQ_0331, REQ_0332, REQ_0333, REQ_0841, REQ_0842, REQ_0846
+   :refines: REQ_0310, REQ_0311, REQ_0312, REQ_0313, REQ_0314, REQ_0315, REQ_0316, REQ_0317, REQ_0318, REQ_0319, REQ_0320, REQ_0321, REQ_0322, REQ_0323, REQ_0324, REQ_0325, REQ_0326, REQ_0327, REQ_0328, REQ_0329, REQ_0330, REQ_0331, REQ_0332, REQ_0333, REQ_0841, REQ_0842, REQ_0846, REQ_0847
 
    **Crate.** ``crates/taktora-connector-ethercat``. Default deps:
    ``taktora-connector-core``, ``taktora-connector-transport-iox``,
@@ -2212,7 +2212,7 @@ spec text that needed amendment during implementation.
    :id: IMPL_0060
    :status: draft
    :implements: BB_0040
-   :refines: REQ_0400, REQ_0401, REQ_0402, REQ_0403, REQ_0404, REQ_0405, REQ_0406, REQ_0407, REQ_0408, REQ_0420, REQ_0421, REQ_0422, REQ_0423, REQ_0424, REQ_0425, REQ_0426, REQ_0427, REQ_0428, REQ_0440, REQ_0442, REQ_0443, REQ_0444, REQ_0445, REQ_0446
+   :refines: REQ_0400, REQ_0401, REQ_0402, REQ_0403, REQ_0404, REQ_0405, REQ_0406, REQ_0407, REQ_0408, REQ_0420, REQ_0421, REQ_0422, REQ_0423, REQ_0424, REQ_0425, REQ_0426, REQ_0427, REQ_0428, REQ_0440, REQ_0442, REQ_0443, REQ_0444, REQ_0445, REQ_0446, REQ_0847
 
    **Crate.** ``crates/taktora-connector-zenoh`` (planned; not yet
    scaffolded). Default deps: ``taktora-connector-core``,
@@ -2349,7 +2349,7 @@ spec text that needed amendment during implementation.
    :id: IMPL_0080
    :status: open
    :implements: BB_0070
-   :refines: REQ_0600, REQ_0601, REQ_0602, REQ_0603, REQ_0604, REQ_0605, REQ_0606, REQ_0607, REQ_0608, REQ_0610, REQ_0611, REQ_0612, REQ_0613, REQ_0614, REQ_0615, REQ_0620, REQ_0621, REQ_0622, REQ_0623, REQ_0624, REQ_0625, REQ_0630, REQ_0631, REQ_0632, REQ_0633, REQ_0634, REQ_0635, REQ_0636
+   :refines: REQ_0600, REQ_0601, REQ_0602, REQ_0603, REQ_0604, REQ_0605, REQ_0606, REQ_0607, REQ_0608, REQ_0610, REQ_0611, REQ_0612, REQ_0613, REQ_0614, REQ_0615, REQ_0620, REQ_0621, REQ_0622, REQ_0623, REQ_0624, REQ_0625, REQ_0630, REQ_0631, REQ_0632, REQ_0633, REQ_0634, REQ_0635, REQ_0636, REQ_0847
 
    **Crate.** ``crates/taktora-connector-can`` (layer-1 landed;
    real ``socketcan::tokio::*`` integration deferred to layer-2).

@@ -16,8 +16,12 @@ use taktora_connector_core::HealthEvent;
 
 /// Receive-only handle over a connector's [`HealthEvent`] stream.
 ///
-/// Cloneable: each clone observes the same backing channel, so
-/// fan-out is supported.
+/// Cloning yields **competing consumers** on the SAME backing
+/// channel: each event is delivered to exactly one clone
+/// (`crossbeam_channel` is MPMC, not broadcast). For independent
+/// streams that each observe every event, call
+/// `Connector::subscribe_health` once per consumer — every call opens
+/// its own channel (`REQ_0847`).
 #[derive(Clone, Debug)]
 pub struct HealthSubscription {
     rx: Receiver<HealthEvent>,
