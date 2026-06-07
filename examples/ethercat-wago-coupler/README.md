@@ -52,6 +52,35 @@ shift; confirm yours by reading the PDO assignment (`0x1C12` /
 The `SUBDEV`, `DI_BIT_OFFSET`, and `DO_BIT_OFFSET` constants in
 `src/main.rs` make a differing layout a one-line edit.
 
+### SM watchdog and working counter (AOU_0016)
+
+The example declares a `PDO_MAP` for the coupler with two effects:
+
+- **`expected_wkc = 3`** — the LRW datagram both reads and writes the
+  single SubDevice (+1 read, +2 write). Without this the connector's
+  expected working counter is 0 and a dead bus still reads as
+  healthy.
+- **`.with_sm_watchdog(SmWatchdog::from_timeout_us(50_000))`** — the
+  750-530 is an OUTPUT module, so per AOU_0016 the coupler's SM
+  watchdog must be enabled with a timeout ≤ FTTI/2 (50 ms at the
+  default 100 ms FTTI). The driver programs registers
+  `0x0400`/`0x0420` during **every bring-up and recovery** and
+  read-back-verifies them (REQ_0846); a mismatch hard-fails, so
+  reaching `Up` is itself the evidence that the device runs the 50 ms
+  window rather than its 100 ms ESC power-on default. When the master
+  stops emitting frames (unplug, process abort), the 750-530 drops
+  its outputs to the configured safe state within that window — the
+  sole safe-state mechanism in the framework's fail-fast model
+  (ADR_0065).
+
+After a recovery the framework deliberately does **not** re-apply
+stale output commands — the watchdog already drove the slave to safe
+state, and re-commanding is the application's decision. This example
+re-commands by clearing the mirror's change-detection cache when the
+health pump observes `-> Up` (a shared flag: health subscriptions are
+competing consumers, so exactly one item drains the subscription —
+see issue #60).
+
 ### The address DIP switch does not affect this example
 
 The 750-354 carries an 8-position DIP switch for setting an address
@@ -201,6 +230,17 @@ appears until you touch 24 V to one of the input channels.
   doesn't provide it. See "The ECO coupler provides no field power"
   above; you need a 24 V DC potential supply module (e.g. 750-602)
   ahead of the I/O modules.
+- **After replug, every retry prints `recover failed: … recover called
+  before bring_up`.** Connector ≤ 0.3.0 had a recover-brick bug: the
+  first failed attempt (which fires while the cable is still out)
+  destroyed the driver state, so recovery could never succeed. Fixed
+  in 0.3.1 (`REQ_0331` retryability) — update the dependency.
+- **Health returns to `Up` after replug but the output LED stays
+  dark.** Expected with an application that doesn't re-command: the
+  watchdog drove the outputs to safe state and the framework does not
+  re-apply stale commands. This example re-commands on `-> Up` (see
+  "SM watchdog and working counter" above); if you removed that
+  resync, toggle the input once to refresh the mirror.
 - **Inputs read but outputs don't follow (or vice versa).** The process
   image offsets don't match your module order. The 750-430 inputs and
   750-530 outputs are placed in K-bus (left-to-right) order; if you
@@ -256,9 +296,16 @@ Same three modes as `ethercat-real-bus`, adapted to the mirror rig.
    ```bash
    ./target/release/ethercat-wago-coupler --nic eth0 --mode drill --window 60
    ```
-   Pass criterion: the drill summary reports `saw_degraded=true
+   Pass criteria: the drill summary reports `saw_degraded=true
    saw_recover_up=true`; the printed health transitions match
-   `Up -> Degraded -> Connecting -> Up` for each event.
+   `Up -> Degraded -> Connecting -> Up` for each event, with
+   `Degraded` lines carrying the real per-attempt reason
+   (`cycle failed: …`, `recover failed: …`). With a 24 V input held
+   through the unplug: the mirrored 750-530 output LED drops at
+   unplug (the 50 ms SM watchdog firing) **while the input stays
+   high**, and returns by itself one scan after the post-replug
+   `-> Up` (the resync pattern re-commanding). Executed against real
+   hardware on 2026-06-07 — see `TEST_0863` in the spec.
 
 3. **Endurance run.** Run for 1 h.
    ```bash
@@ -279,3 +326,11 @@ Same three modes as `ethercat-real-bus`, adapted to the mirror rig.
 - A minimal `RawByteCodec` defined inline because `JsonCodec` can't
   decode the WAGO raw PDI byte. Purpose-built for this example and
   intentionally not promoted to `taktora-connector-codec`.
+- **AOU_0016 enforced on real silicon** — `SubDeviceMap` declaring
+  `expected_wkc` and a 50 ms SM watchdog, programmed and
+  read-back-verified by the driver at bring-up and recovery
+  (REQ_0846), with the safe-state drop observable at the 750-530's
+  LEDs.
+- **The post-recovery re-command pattern** — the application, not the
+  framework, restores outputs after an outage, triggered by the
+  health pump observing `-> Up` (single-subscriber pattern, #60).
