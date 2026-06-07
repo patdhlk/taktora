@@ -280,6 +280,7 @@ mod tests {
             dc: None,
             dictionary: Vec::new(),
             eeprom: None,
+            slots: None,
             vendor_extensions: Vec::new(),
         }
     }

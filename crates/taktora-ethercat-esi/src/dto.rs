@@ -7,8 +7,8 @@ use taktora_fieldbus_od_core::{DataType, Identity};
 
 use crate::error::EsiError;
 use crate::model::{
-    CoeInfo, DcOpMode, DistributedClock, EsiDevice, EsiFile, InitCmd, Mailbox, Pdo, PdoEntry,
-    Transition, Vendor,
+    CoeInfo, DcOpMode, DistributedClock, EsiDevice, EsiFile, InitCmd, Mailbox, Module, Pdo,
+    PdoEntry, Slot, SlotModuleIdent, Slots, Transition, Vendor,
 };
 
 // ── integer / bool helpers ────────────────────────────────────────────────────
@@ -96,8 +96,10 @@ struct VendorDto {
 
 #[derive(Deserialize)]
 struct Descriptions {
-    #[serde(rename = "Devices")]
-    devices: Devices,
+    #[serde(rename = "Devices", default)]
+    devices: Option<Devices>,
+    #[serde(rename = "Modules", default)]
+    modules: Option<ModulesDto>,
 }
 
 #[derive(Deserialize)]
@@ -130,6 +132,8 @@ struct DeviceDto {
     dc: Option<DcDto>,
     #[serde(rename = "Eeprom", default)]
     eeprom: Option<EepromDto>,
+    #[serde(rename = "Slots", default)]
+    slots: Option<SlotsDto>,
 }
 
 #[derive(Deserialize)]
@@ -357,6 +361,64 @@ struct EepromDto {
     boot_strap: Option<String>,
 }
 
+// ── MDP module / slot DTOs ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ModulesDto {
+    #[serde(rename = "Module", default)]
+    module: Vec<ModuleDto>,
+}
+
+#[derive(Deserialize)]
+struct ModuleDto {
+    #[serde(rename = "Type")]
+    ty: ModuleTypeDto,
+    #[serde(rename = "Name", default)]
+    names: Vec<NameDto>,
+    #[serde(rename = "TxPdo", default)]
+    tx_pdo: Vec<PdoDto>,
+    #[serde(rename = "RxPdo", default)]
+    rx_pdo: Vec<PdoDto>,
+}
+
+#[derive(Deserialize)]
+struct ModuleTypeDto {
+    #[serde(rename = "@ModuleIdent", default)]
+    module_ident: Option<String>,
+    #[serde(rename = "$text", default)]
+    text: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SlotsDto {
+    #[serde(rename = "@SlotPdoIncrement", default)]
+    slot_pdo_increment: Option<String>,
+    #[serde(rename = "@SlotIndexIncrement", default)]
+    slot_index_increment: Option<String>,
+    #[serde(rename = "Slot", default)]
+    slot: Vec<SlotDto>,
+}
+
+#[derive(Deserialize)]
+struct SlotDto {
+    #[serde(rename = "@MinInstances", default)]
+    min_instances: Option<String>,
+    #[serde(rename = "@MaxInstances", default)]
+    max_instances: Option<String>,
+    #[serde(rename = "Name", default)]
+    names: Vec<NameDto>,
+    #[serde(rename = "ModuleIdent", default)]
+    module_ident: Vec<ModuleIdentDto>,
+}
+
+#[derive(Deserialize)]
+struct ModuleIdentDto {
+    #[serde(rename = "@Default", default)]
+    default: Option<String>,
+    #[serde(rename = "$text", default)]
+    text: Option<String>,
+}
+
 // ── distributed clock DTOs ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -570,6 +632,72 @@ fn eeprom_from_dto(dto: &EepromDto) -> Result<crate::model::Eeprom, EsiError> {
     })
 }
 
+// ── MDP module / slot conversion ──────────────────────────────────────────────
+
+fn module_from_dto(dto: ModuleDto) -> Result<Module, EsiError> {
+    let mut tx_pdos = Vec::with_capacity(dto.tx_pdo.len());
+    for p in dto.tx_pdo {
+        tx_pdos.push(pdo_from_dto(p)?);
+    }
+    let mut rx_pdos = Vec::with_capacity(dto.rx_pdo.len());
+    for p in dto.rx_pdo {
+        rx_pdos.push(pdo_from_dto(p)?);
+    }
+    Ok(Module {
+        ident: dto
+            .ty
+            .module_ident
+            .as_deref()
+            .map(|s| parse_esi_uint(s, "Module.Type.ModuleIdent"))
+            .transpose()?,
+        product_type: dto.ty.text,
+        name: pick_name(&dto.names),
+        tx_pdos,
+        rx_pdos,
+    })
+}
+
+fn slots_from_dto(dto: SlotsDto) -> Result<Slots, EsiError> {
+    let mut slots = Vec::with_capacity(dto.slot.len());
+    for s in dto.slot {
+        let mut module_idents = Vec::with_capacity(s.module_ident.len());
+        for mi in &s.module_ident {
+            let raw = mi.text.as_deref().unwrap_or_default();
+            module_idents.push(SlotModuleIdent {
+                ident: parse_esi_uint(raw, "Slot.ModuleIdent")?,
+                default: parse_esi_bool(mi.default.as_ref()),
+            });
+        }
+        slots.push(Slot {
+            name: pick_name(&s.names),
+            min_instances: s
+                .min_instances
+                .as_deref()
+                .map(|v| parse_esi_uint(v, "Slot.MinInstances"))
+                .transpose()?,
+            max_instances: s
+                .max_instances
+                .as_deref()
+                .map(|v| parse_esi_uint(v, "Slot.MaxInstances"))
+                .transpose()?,
+            module_idents,
+        });
+    }
+    Ok(Slots {
+        slot_pdo_increment: dto
+            .slot_pdo_increment
+            .as_deref()
+            .map(|v| parse_esi_uint(v, "Slots.SlotPdoIncrement"))
+            .transpose()?,
+        slot_index_increment: dto
+            .slot_index_increment
+            .as_deref()
+            .map(|v| parse_esi_uint(v, "Slots.SlotIndexIncrement"))
+            .transpose()?,
+        slots,
+    })
+}
+
 fn mailbox_from_dtos(
     mb: Option<MailboxDto>,
     profile: Option<&ProfileDto>,
@@ -773,8 +901,13 @@ impl EtherCatInfo {
             name: pick_name(&self.vendor.names),
         };
 
-        let mut devices = Vec::with_capacity(self.descriptions.devices.device.len());
-        for dev in self.descriptions.devices.device {
+        let device_dtos = self
+            .descriptions
+            .devices
+            .map(|d| d.device)
+            .unwrap_or_default();
+        let mut devices = Vec::with_capacity(device_dtos.len());
+        for dev in device_dtos {
             let identity = Identity {
                 vendor_id,
                 product_code: match dev.ty.product_code.as_deref() {
@@ -813,9 +946,23 @@ impl EtherCatInfo {
                 dc,
                 dictionary: dictionary_from_profile(dev.profile.as_ref())?,
                 eeprom: dev.eeprom.as_ref().map(eeprom_from_dto).transpose()?,
+                slots: dev.slots.map(slots_from_dto).transpose()?,
                 vendor_extensions: Vec::new(),
             });
         }
-        Ok(EsiFile { vendor, devices })
+
+        let mut modules = Vec::new();
+        if let Some(m) = self.descriptions.modules {
+            modules.reserve(m.module.len());
+            for dto in m.module {
+                modules.push(module_from_dto(dto)?);
+            }
+        }
+
+        Ok(EsiFile {
+            vendor,
+            devices,
+            modules,
+        })
     }
 }

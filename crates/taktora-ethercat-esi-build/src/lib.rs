@@ -283,6 +283,7 @@ impl<B: CodegenBackend> Builder<B> {
         Ok(EsiFile {
             vendor: vendor.unwrap_or(Vendor { id: 0, name: None }),
             devices,
+            modules: Vec::new(),
         })
     }
 }

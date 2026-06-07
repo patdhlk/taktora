@@ -45,6 +45,7 @@ const KNOWN_DEVICE_CHILDREN: &[&str] = &[
     "Fmmu",
     "Su",
     "Eeprom",
+    "Slots",
 ];
 
 /// Direct `<Eeprom>` children that the typed schema consumes and are therefore

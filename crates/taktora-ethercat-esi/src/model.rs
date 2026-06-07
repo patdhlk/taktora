@@ -15,6 +15,9 @@ pub struct EsiFile {
     pub vendor: Vendor,
     /// Devices described by the ESI file, in document order.
     pub devices: Vec<EsiDevice>,
+    /// MDP module catalog (`<Descriptions><Modules>`), in document order.
+    /// Empty for non-modular files.
+    pub modules: Vec<Module>,
 }
 
 /// The vendor block of an ESI file.
@@ -53,6 +56,8 @@ pub struct EsiDevice {
     pub dictionary: Vec<DictEntry>,
     /// `<Eeprom>` SII source data, when present.
     pub eeprom: Option<Eeprom>,
+    /// MDP slot constraints (`<Slots>`), when the device is modular.
+    pub slots: Option<Slots>,
     /// Unrecognised device-level vendor extension elements, captured verbatim.
     pub vendor_extensions: Vec<RawXml>,
 }
@@ -233,6 +238,60 @@ pub struct Eeprom {
     pub bootstrap: Option<Vec<u8>>,
     /// Unrecognised `<Eeprom>` children (e.g. `<Category>`), captured verbatim.
     pub categories: Vec<RawXml>,
+}
+
+/// One MDP module description (`<Module>`): a pluggable unit whose PDOs
+/// extend a modular device's process data.
+///
+/// This is the *catalog* entry only. Which modules are actually plugged —
+/// and the resulting process image — is configuration, resolved by
+/// consumers (network configurator / codegen), never by the parser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Module {
+    /// `ModuleIdent` of the module's `<Type>`, when declared. Slots
+    /// reference modules by this value.
+    pub ident: Option<u32>,
+    /// Raw `<Type>` text (order code), when present.
+    pub product_type: Option<String>,
+    /// Module display name, when present.
+    pub name: Option<String>,
+    /// `TxPDOs` contributed by this module, preserved structurally.
+    pub tx_pdos: Vec<Pdo>,
+    /// `RxPDOs` contributed by this module, preserved structurally.
+    pub rx_pdos: Vec<Pdo>,
+}
+
+/// MDP slot constraints of a modular device (`<Slots>`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Slots {
+    /// `SlotPdoIncrement` attribute, when present.
+    pub slot_pdo_increment: Option<u32>,
+    /// `SlotIndexIncrement` attribute, when present.
+    pub slot_index_increment: Option<u32>,
+    /// Declared slots, in document order.
+    pub slots: Vec<Slot>,
+}
+
+/// One `<Slot>`: a position that accepts a constrained set of modules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Slot {
+    /// Slot name, when present.
+    pub name: Option<String>,
+    /// Minimum instance count (`MinInstances`), when present.
+    pub min_instances: Option<u32>,
+    /// Maximum instance count (`MaxInstances`), when present.
+    pub max_instances: Option<u32>,
+    /// Modules this slot accepts, in document order.
+    pub module_idents: Vec<SlotModuleIdent>,
+}
+
+/// One `<ModuleIdent>` a slot accepts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlotModuleIdent {
+    /// Referenced module ident.
+    pub ident: u32,
+    /// `Default` attribute — the module pre-selected for this slot.
+    pub default: bool,
 }
 
 /// One distributed-clock operation mode.
