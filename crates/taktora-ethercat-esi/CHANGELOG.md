@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/patdhlk/taktora/compare/taktora-ethercat-esi-v0.3.1...taktora-ethercat-esi-v0.4.0) - 2026-06-07
+
+
+### Added
+
+- *(ethercat-esi)* [**breaking**] Full-schema slices — Fmmu, Eeprom, MDP Modules/Slots (REQ_0848–0850) ([#66](https://github.com/patdhlk/taktora/pull/66))
+
 ## [0.3.1](https://github.com/patdhlk/taktora/compare/taktora-ethercat-esi-v0.3.0...taktora-ethercat-esi-v0.3.1) - 2026-06-07
 
 

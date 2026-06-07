@@ -62,17 +62,17 @@ categories   = ["embedded", "concurrency", "network-programming"]
 [workspace.dependencies]
 # Internal crates — declared with both `path` (for local builds) and `version`
 # (so `cargo publish` strips the path and resolves against crates.io).
-taktora-ethercat-esi                     = { path = "crates/taktora-ethercat-esi", version = "0.3.1" }
-taktora-ethercat-esi-codegen             = { path = "crates/taktora-ethercat-esi-codegen", version = "0.1.4" }
-taktora-ethercat-esi-codegen-ethercrab   = { path = "crates/taktora-ethercat-esi-codegen-ethercrab", version = "0.1.4" }
+taktora-ethercat-esi                     = { path = "crates/taktora-ethercat-esi", version = "0.4.0" }
+taktora-ethercat-esi-codegen             = { path = "crates/taktora-ethercat-esi-codegen", version = "0.2.0" }
+taktora-ethercat-esi-codegen-ethercrab   = { path = "crates/taktora-ethercat-esi-codegen-ethercrab", version = "0.1.5" }
 taktora-ethercat-esi-codegen-ethercrab-tests = { path = "crates/taktora-ethercat-esi-codegen-ethercrab-tests", version = "0.1.0" }
-taktora-ethercat-esi-build               = { path = "crates/taktora-ethercat-esi-build", version = "0.1.4" }
+taktora-ethercat-esi-build               = { path = "crates/taktora-ethercat-esi-build", version = "0.2.0" }
 taktora-ethercat-esi-rt                  = { path = "crates/taktora-ethercat-esi-rt", version = "0.1.3" }
 taktora-fieldbus-od-core                 = { path = "crates/taktora-fieldbus-od-core", version = "0.1.3" }
-taktora-ethercat-netcfg                  = { path = "crates/taktora-ethercat-netcfg", version = "0.3.1" }
-taktora-ethercat-netcfg-build            = { path = "crates/taktora-ethercat-netcfg-build", version = "0.1.5" }
-taktora-ethercat-netcfg-cli              = { path = "crates/taktora-ethercat-netcfg-cli", version = "0.1.5" }
-taktora-ethercat-netcfg-codegen          = { path = "crates/taktora-ethercat-netcfg-codegen", version = "0.1.5" }
+taktora-ethercat-netcfg                  = { path = "crates/taktora-ethercat-netcfg", version = "0.3.2" }
+taktora-ethercat-netcfg-build            = { path = "crates/taktora-ethercat-netcfg-build", version = "0.1.6" }
+taktora-ethercat-netcfg-cli              = { path = "crates/taktora-ethercat-netcfg-cli", version = "0.1.6" }
+taktora-ethercat-netcfg-codegen          = { path = "crates/taktora-ethercat-netcfg-codegen", version = "0.1.6" }
 taktora-bounded-alloc            = { path = "crates/taktora-bounded-alloc", version = "0.1.6" }
 taktora-connector-can            = { path = "crates/taktora-connector-can", version = "0.1.9" }
 taktora-connector-codec          = { path = "crates/taktora-connector-codec", version = "0.1.8" }
@@ -84,7 +84,7 @@ taktora-connector-zenoh          = { path = "crates/taktora-connector-zenoh", ve
 taktora-executor                 = { path = "crates/taktora-executor", version = "0.2.1" }
 taktora-executor-tracing         = { path = "crates/taktora-executor-tracing", version = "0.1.8" }
 taktora-log                      = { path = "crates/taktora-log", version = "0.1.2" }
-taktora-log-dlt                  = { path = "crates/taktora-log-dlt", version = "0.1.4" }
+taktora-log-dlt                  = { path = "crates/taktora-log-dlt", version = "0.1.5" }
 taktora-motion-core              = { path = "crates/taktora-motion-core", version = "0.1.2" }
 taktora-cyclic-fieldbus          = { path = "crates/taktora-cyclic-fieldbus", version = "0.1.2" }
 taktora-cia402                   = { path = "crates/taktora-cia402", version = "0.1.2" }
