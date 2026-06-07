@@ -44,7 +44,13 @@ const KNOWN_DEVICE_CHILDREN: &[&str] = &[
     "ImageFile16x14",
     "Fmmu",
     "Su",
+    "Eeprom",
+    "Slots",
 ];
+
+/// Direct `<Eeprom>` children that the typed schema consumes and are therefore
+/// NOT captured as opaque category blobs.
+const KNOWN_EEPROM_CHILDREN: &[&str] = &["ByteSize", "ConfigData", "BootStrap"];
 
 /// Strip any namespace prefix from a qualified element name (`Beckhoff:Foo` ->
 /// `Foo`). Used only for the known-child membership test; the captured
@@ -176,10 +182,17 @@ fn handle_empty_event(
     Ok(())
 }
 
+/// Return `true` when `depth` is exactly one level below `parent_depth`, i.e.
+/// the current event is a direct child of the element opened at `parent_depth`.
+/// `None` (no open parent) is never a direct-child relationship.
+fn is_direct_child(parent_depth: Option<i32>, depth: i32) -> bool {
+    parent_depth.is_some_and(|d| depth == d + 1)
+}
+
 /// Return `true` when `depth` is exactly one level below the open `<Device>`,
 /// i.e. the current event is a direct child of that device element.
 fn is_direct_device_child(device_depth: Option<i32>, depth: i32) -> bool {
-    device_depth.is_some_and(|d| depth == d + 1)
+    is_direct_child(device_depth, depth)
 }
 
 fn is_known_child(qualified_name: &str) -> bool {
@@ -288,4 +301,132 @@ fn value_error(index: &LineIndex, byte_pos: u64, e: &dyn std::fmt::Display) -> E
         span: Some(index.span(offset)),
         reason: e.to_string(),
     }
+}
+
+/// Walk the document and, for each `<Device>` (in document order), collect the
+/// DIRECT children of its `<Eeprom>` element whose local name is not in
+/// [`KNOWN_EEPROM_CHILDREN`] (e.g. `<Category>` blocks), captured verbatim.
+/// Devices without an `<Eeprom>` yield an empty vec.
+pub fn capture_eeprom_categories(xml: &str) -> Result<Vec<Vec<RawXml>>, EsiError> {
+    let index = LineIndex::new(xml);
+    let mut reader = Reader::from_str(xml);
+    let mut per_device: Vec<Vec<RawXml>> = Vec::new();
+
+    // `depth` is the nesting level of the *next* event relative to the document
+    // root (root Start lands at depth 0). Convention mirrors `capture_device_extensions`:
+    // membership tests happen at the current `depth` (before increment), and
+    // `device_depth` / `eeprom_depth` record the depth of the opening Start tag.
+    let mut depth: i32 = 0;
+    let mut device_depth: Option<i32> = None;
+    let mut eeprom_depth: Option<i32> = None;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(start)) => {
+                let subtree_consumed = handle_eeprom_start_event(
+                    &start,
+                    &mut reader,
+                    &index,
+                    depth,
+                    &mut device_depth,
+                    &mut eeprom_depth,
+                    &mut per_device,
+                )?;
+                if !subtree_consumed {
+                    depth += 1;
+                }
+            }
+            Ok(Event::Empty(start)) => {
+                handle_eeprom_empty_event(
+                    &start,
+                    &reader,
+                    &index,
+                    depth,
+                    eeprom_depth,
+                    &mut per_device,
+                )?;
+                // Empty elements do not change depth.
+            }
+            Ok(Event::End(_)) => {
+                depth -= 1;
+                if eeprom_depth.is_some_and(|d| depth == d) {
+                    eeprom_depth = None;
+                }
+                if device_depth.is_some_and(|d| depth == d) {
+                    device_depth = None;
+                }
+            }
+            Ok(_) => {}
+            Err(e) => return Err(reader_error(&reader, &index, &e)),
+        }
+    }
+
+    Ok(per_device)
+}
+
+/// Handle a `Start` event in the eeprom-category walk.
+///
+/// Captures a direct, schema-unknown child of the open `<Eeprom>` as a verbatim
+/// subtree, otherwise tracks the depth of an opening `<Device>` / `<Eeprom>`.
+/// Returns `true` when the subtree was consumed (and depth must NOT be
+/// incremented by the caller), or `false` when the caller should increment depth
+/// as usual.
+fn handle_eeprom_start_event(
+    start: &quick_xml::events::BytesStart<'_>,
+    reader: &mut Reader<&[u8]>,
+    index: &LineIndex,
+    depth: i32,
+    device_depth: &mut Option<i32>,
+    eeprom_depth: &mut Option<i32>,
+    per_device: &mut Vec<Vec<RawXml>>,
+) -> Result<bool, EsiError> {
+    let name = decode_name(start, reader, index)?;
+    let local = local_name(&name);
+
+    // A direct child of `<Eeprom>` that is not schema-known → capture.
+    if is_direct_child(*eeprom_depth, depth) && !KNOWN_EEPROM_CHILDREN.contains(&local) {
+        let subtree = read_subtree(reader, index, start, &name)?;
+        if let Some(cats) = per_device.last_mut() {
+            cats.push(subtree);
+        }
+        // read_subtree consumed the matching End; depth is unchanged.
+        return Ok(true);
+    }
+
+    if local == "Device" && device_depth.is_none() {
+        *device_depth = Some(depth);
+        per_device.push(Vec::new());
+    } else if local == "Eeprom" && is_direct_child(*device_depth, depth) && eeprom_depth.is_none() {
+        *eeprom_depth = Some(depth);
+    }
+    Ok(false)
+}
+
+/// Handle an `Empty` event in the eeprom-category walk.
+///
+/// Captures a self-closing direct, schema-unknown child of the open `<Eeprom>`
+/// as a leaf [`RawXml`]. Empty elements do not change depth.
+fn handle_eeprom_empty_event(
+    start: &quick_xml::events::BytesStart<'_>,
+    reader: &Reader<&[u8]>,
+    index: &LineIndex,
+    depth: i32,
+    eeprom_depth: Option<i32>,
+    per_device: &mut [Vec<RawXml>],
+) -> Result<(), EsiError> {
+    let name = decode_name(start, reader, index)?;
+    let local = local_name(&name);
+    if is_direct_child(eeprom_depth, depth) && !KNOWN_EEPROM_CHILDREN.contains(&local) {
+        let attributes = decode_attributes(start, reader, index)?;
+        if let Some(cats) = per_device.last_mut() {
+            cats.push(RawXml {
+                name,
+                attributes,
+                text: None,
+                children: Vec::new(),
+            });
+        }
+    }
+    Ok(())
 }

@@ -7,8 +7,8 @@ use taktora_fieldbus_od_core::{DataType, Identity};
 
 use crate::error::EsiError;
 use crate::model::{
-    CoeInfo, DcOpMode, DistributedClock, EsiDevice, EsiFile, InitCmd, Mailbox, Pdo, PdoEntry,
-    Transition, Vendor,
+    CoeInfo, DcOpMode, DistributedClock, EsiDevice, EsiFile, InitCmd, Mailbox, Module, Pdo,
+    PdoEntry, Slot, SlotModuleIdent, Slots, Transition, Vendor,
 };
 
 // ── integer / bool helpers ────────────────────────────────────────────────────
@@ -96,8 +96,10 @@ struct VendorDto {
 
 #[derive(Deserialize)]
 struct Descriptions {
-    #[serde(rename = "Devices")]
-    devices: Devices,
+    #[serde(rename = "Devices", default)]
+    devices: Option<Devices>,
+    #[serde(rename = "Modules", default)]
+    modules: Option<ModulesDto>,
 }
 
 #[derive(Deserialize)]
@@ -114,6 +116,8 @@ struct DeviceDto {
     names: Vec<NameDto>,
     #[serde(rename = "GroupType", default)]
     group_type: Option<String>,
+    #[serde(rename = "Fmmu", default)]
+    fmmu: Vec<FmmuDto>,
     #[serde(rename = "Sm", default)]
     sm: Vec<SmDto>,
     #[serde(rename = "TxPdo", default)]
@@ -126,6 +130,10 @@ struct DeviceDto {
     profile: Option<ProfileDto>,
     #[serde(rename = "Dc", default)]
     dc: Option<DcDto>,
+    #[serde(rename = "Eeprom", default)]
+    eeprom: Option<EepromDto>,
+    #[serde(rename = "Slots", default)]
+    slots: Option<SlotsDto>,
 }
 
 #[derive(Deserialize)]
@@ -144,6 +152,18 @@ struct TypeDto {
     product_code: Option<String>,
     #[serde(rename = "@RevisionNo", default)]
     revision_no: Option<String>,
+    #[serde(rename = "$text", default)]
+    text: Option<String>,
+}
+
+// ── FMMU DTO ─────────────────────────────────────────────────────────────────
+
+/// An `<Fmmu>` element. Real ESI carries attributes on this element
+/// (e.g. `<Fmmu OpOnly="1">Outputs</Fmmu>` in Beckhoff EL2004); only the text
+/// content ("Outputs") is meaningful here, so the attributes are tolerated and
+/// ignored.
+#[derive(Deserialize)]
+struct FmmuDto {
     #[serde(rename = "$text", default)]
     text: Option<String>,
 }
@@ -329,6 +349,76 @@ struct FlagsDto {
     pdo_mapping: Option<String>,
 }
 
+// ── eeprom DTO ────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct EepromDto {
+    #[serde(rename = "ByteSize", default)]
+    byte_size: Option<String>,
+    #[serde(rename = "ConfigData", default)]
+    config_data: Option<String>,
+    #[serde(rename = "BootStrap", default)]
+    boot_strap: Option<String>,
+}
+
+// ── MDP module / slot DTOs ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ModulesDto {
+    #[serde(rename = "Module", default)]
+    module: Vec<ModuleDto>,
+}
+
+#[derive(Deserialize)]
+struct ModuleDto {
+    #[serde(rename = "Type")]
+    ty: ModuleTypeDto,
+    #[serde(rename = "Name", default)]
+    names: Vec<NameDto>,
+    #[serde(rename = "TxPdo", default)]
+    tx_pdo: Vec<PdoDto>,
+    #[serde(rename = "RxPdo", default)]
+    rx_pdo: Vec<PdoDto>,
+}
+
+#[derive(Deserialize)]
+struct ModuleTypeDto {
+    #[serde(rename = "@ModuleIdent", default)]
+    module_ident: Option<String>,
+    #[serde(rename = "$text", default)]
+    text: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SlotsDto {
+    #[serde(rename = "@SlotPdoIncrement", default)]
+    slot_pdo_increment: Option<String>,
+    #[serde(rename = "@SlotIndexIncrement", default)]
+    slot_index_increment: Option<String>,
+    #[serde(rename = "Slot", default)]
+    slot: Vec<SlotDto>,
+}
+
+#[derive(Deserialize)]
+struct SlotDto {
+    #[serde(rename = "@MinInstances", default)]
+    min_instances: Option<String>,
+    #[serde(rename = "@MaxInstances", default)]
+    max_instances: Option<String>,
+    #[serde(rename = "Name", default)]
+    names: Vec<NameDto>,
+    #[serde(rename = "ModuleIdent", default)]
+    module_ident: Vec<ModuleIdentDto>,
+}
+
+#[derive(Deserialize)]
+struct ModuleIdentDto {
+    #[serde(rename = "@Default", default)]
+    default: Option<String>,
+    #[serde(rename = "$text", default)]
+    text: Option<String>,
+}
+
 // ── distributed clock DTOs ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -412,6 +502,26 @@ fn sync_managers_from_dtos(dtos: Vec<SmDto>) -> Result<Vec<crate::model::SyncMan
     Ok(out)
 }
 
+// ── FMMU conversion ───────────────────────────────────────────────────────────
+
+/// Convert `<Fmmu>` text into [`FmmuUsage`]. Unknown strings are preserved as
+/// [`FmmuUsage::Other`] — the parser never hard-fails on an unrecognised usage.
+fn fmmus_from_dtos(dtos: Vec<FmmuDto>) -> Vec<crate::model::Fmmu> {
+    use crate::model::{Fmmu, FmmuUsage};
+    dtos.into_iter()
+        .map(|f| {
+            let text = f.text.as_deref().map(str::trim).unwrap_or_default();
+            let usage = match text {
+                "Inputs" => FmmuUsage::Inputs,
+                "Outputs" => FmmuUsage::Outputs,
+                "MBoxState" => FmmuUsage::MBoxState,
+                other => FmmuUsage::Other(other.to_owned()),
+            };
+            Fmmu { usage }
+        })
+        .collect()
+}
+
 // ── PDO conversion ────────────────────────────────────────────────────────────
 
 fn pdo_from_dto(dto: PdoDto) -> Result<Pdo, EsiError> {
@@ -473,6 +583,119 @@ fn parse_hex_payload(s: &str) -> Vec<u8> {
             u8::try_from((hi << 4) | lo).ok()
         })
         .collect()
+}
+
+/// Parse a strict hex-byte string (`"0401AB"`) into bytes. Unlike
+/// [`parse_hex_payload`] (lenient, for init-cmd payloads), a non-hex digit or
+/// odd digit count is a semantic error carrying the element path.
+fn parse_hex_bytes(raw: &str, path: &str) -> Result<Vec<u8>, EsiError> {
+    let t = raw.trim();
+    if t.len() % 2 != 0 || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(EsiError::Value {
+            path: path.to_owned(),
+            span: None,
+            reason: format!("invalid hex byte string `{t}`"),
+        });
+    }
+    Ok(t.as_bytes()
+        .chunks(2)
+        .map(|pair| {
+            let s = std::str::from_utf8(pair).expect("ascii hex digits");
+            u8::from_str_radix(s, 16).expect("validated hex digits")
+        })
+        .collect())
+}
+
+// ── eeprom conversion ─────────────────────────────────────────────────────────
+
+/// Convert an [`EepromDto`]. `categories` is left empty here; the raw-xml
+/// pass in [`crate::parse`] fills it (serde cannot capture unknown children).
+fn eeprom_from_dto(dto: &EepromDto) -> Result<crate::model::Eeprom, EsiError> {
+    Ok(crate::model::Eeprom {
+        byte_size: dto
+            .byte_size
+            .as_deref()
+            .map(|s| parse_esi_uint(s, "Eeprom.ByteSize"))
+            .transpose()?,
+        config_data: dto
+            .config_data
+            .as_deref()
+            .map(|s| parse_hex_bytes(s, "Eeprom.ConfigData"))
+            .transpose()?
+            .unwrap_or_default(),
+        bootstrap: dto
+            .boot_strap
+            .as_deref()
+            .map(|s| parse_hex_bytes(s, "Eeprom.BootStrap"))
+            .transpose()?,
+        categories: Vec::new(),
+    })
+}
+
+// ── MDP module / slot conversion ──────────────────────────────────────────────
+
+fn module_from_dto(dto: ModuleDto) -> Result<Module, EsiError> {
+    let mut tx_pdos = Vec::with_capacity(dto.tx_pdo.len());
+    for p in dto.tx_pdo {
+        tx_pdos.push(pdo_from_dto(p)?);
+    }
+    let mut rx_pdos = Vec::with_capacity(dto.rx_pdo.len());
+    for p in dto.rx_pdo {
+        rx_pdos.push(pdo_from_dto(p)?);
+    }
+    Ok(Module {
+        ident: dto
+            .ty
+            .module_ident
+            .as_deref()
+            .map(|s| parse_esi_uint(s, "Module.Type.ModuleIdent"))
+            .transpose()?,
+        product_type: dto.ty.text,
+        name: pick_name(&dto.names),
+        tx_pdos,
+        rx_pdos,
+    })
+}
+
+fn slots_from_dto(dto: SlotsDto) -> Result<Slots, EsiError> {
+    let mut slots = Vec::with_capacity(dto.slot.len());
+    for s in dto.slot {
+        let mut module_idents = Vec::with_capacity(s.module_ident.len());
+        for mi in &s.module_ident {
+            let raw = mi.text.as_deref().unwrap_or_default();
+            module_idents.push(SlotModuleIdent {
+                ident: parse_esi_uint(raw, "Slot.ModuleIdent")?,
+                default: parse_esi_bool(mi.default.as_ref()),
+            });
+        }
+        slots.push(Slot {
+            name: pick_name(&s.names),
+            min_instances: s
+                .min_instances
+                .as_deref()
+                .map(|v| parse_esi_uint(v, "Slot.MinInstances"))
+                .transpose()?,
+            max_instances: s
+                .max_instances
+                .as_deref()
+                .map(|v| parse_esi_uint(v, "Slot.MaxInstances"))
+                .transpose()?,
+            module_idents,
+        });
+    }
+    Ok(Slots {
+        slot_pdo_increment: dto
+            .slot_pdo_increment
+            .as_deref()
+            .map(|v| parse_esi_uint(v, "Slots.SlotPdoIncrement"))
+            .transpose()?,
+        slot_index_increment: dto
+            .slot_index_increment
+            .as_deref()
+            .map(|v| parse_esi_uint(v, "Slots.SlotIndexIncrement"))
+            .transpose()?,
+        slots,
+    })
 }
 
 fn mailbox_from_dtos(
@@ -668,6 +891,71 @@ fn dictionary_from_profile(
     Ok(out)
 }
 
+// ── device conversion ─────────────────────────────────────────────────────────
+
+/// Convert one [`DeviceDto`] into an [`EsiDevice`], stamping the file-level
+/// `vendor_id` onto its [`Identity`]. A `<Type>` lacking `ProductCode`/`RevisionNo`
+/// defaults those identity fields to 0 (see [`TypeDto`]). `vendor_extensions` is
+/// left empty here; the raw-xml pass in [`crate::parse`] fills it.
+fn device_from_dto(dev: DeviceDto, vendor_id: u32) -> Result<EsiDevice, EsiError> {
+    let identity = Identity {
+        vendor_id,
+        product_code: match dev.ty.product_code.as_deref() {
+            Some(pc) => parse_esi_uint(pc, "Device.Type.ProductCode")?,
+            None => 0,
+        },
+        revision: match dev.ty.revision_no.as_deref() {
+            Some(rev) => parse_esi_uint(rev, "Device.Type.RevisionNo")?,
+            None => 0,
+        },
+    };
+
+    let mut tx_pdos = Vec::with_capacity(dev.tx_pdo.len());
+    for p in dev.tx_pdo {
+        tx_pdos.push(pdo_from_dto(p)?);
+    }
+    let mut rx_pdos = Vec::with_capacity(dev.rx_pdo.len());
+    for p in dev.rx_pdo {
+        rx_pdos.push(pdo_from_dto(p)?);
+    }
+
+    // IMPORTANT: pass &dev.profile (borrow) — the dictionary pass also reads it.
+    let mailbox = mailbox_from_dtos(dev.mailbox, dev.profile.as_ref())?;
+    let dc = dev.dc.map(dc_from_dto).transpose()?;
+
+    Ok(EsiDevice {
+        identity,
+        name: pick_name(&dev.names),
+        product_type: dev.ty.text,
+        group_type: dev.group_type,
+        fmmus: fmmus_from_dtos(dev.fmmu),
+        sync_managers: sync_managers_from_dtos(dev.sm)?,
+        tx_pdos,
+        rx_pdos,
+        mailbox,
+        dc,
+        dictionary: dictionary_from_profile(dev.profile.as_ref())?,
+        eeprom: dev.eeprom.as_ref().map(eeprom_from_dto).transpose()?,
+        slots: dev.slots.map(slots_from_dto).transpose()?,
+        vendor_extensions: Vec::new(),
+    })
+}
+
+// ── MDP module catalog conversion ─────────────────────────────────────────────
+
+/// Convert the optional top-level `<Descriptions><Modules>` catalog into a flat
+/// list of [`Module`]s. Returns an empty vec when no `<Modules>` section exists.
+fn modules_from_dto(modules: Option<ModulesDto>) -> Result<Vec<Module>, EsiError> {
+    let Some(m) = modules else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::with_capacity(m.module.len());
+    for dto in m.module {
+        out.push(module_from_dto(dto)?);
+    }
+    Ok(out)
+}
+
 // ── top-level conversion ──────────────────────────────────────────────────────
 
 impl EtherCatInfo {
@@ -678,47 +966,22 @@ impl EtherCatInfo {
             name: pick_name(&self.vendor.names),
         };
 
-        let mut devices = Vec::with_capacity(self.descriptions.devices.device.len());
-        for dev in self.descriptions.devices.device {
-            let identity = Identity {
-                vendor_id,
-                product_code: match dev.ty.product_code.as_deref() {
-                    Some(pc) => parse_esi_uint(pc, "Device.Type.ProductCode")?,
-                    None => 0,
-                },
-                revision: match dev.ty.revision_no.as_deref() {
-                    Some(rev) => parse_esi_uint(rev, "Device.Type.RevisionNo")?,
-                    None => 0,
-                },
-            };
-
-            let mut tx_pdos = Vec::with_capacity(dev.tx_pdo.len());
-            for p in dev.tx_pdo {
-                tx_pdos.push(pdo_from_dto(p)?);
-            }
-            let mut rx_pdos = Vec::with_capacity(dev.rx_pdo.len());
-            for p in dev.rx_pdo {
-                rx_pdos.push(pdo_from_dto(p)?);
-            }
-
-            // IMPORTANT: pass &dev.profile (borrow) — Task 11 also reads it.
-            let mailbox = mailbox_from_dtos(dev.mailbox, dev.profile.as_ref())?;
-            let dc = dev.dc.map(dc_from_dto).transpose()?;
-
-            devices.push(EsiDevice {
-                identity,
-                name: pick_name(&dev.names),
-                product_type: dev.ty.text,
-                group_type: dev.group_type,
-                sync_managers: sync_managers_from_dtos(dev.sm)?,
-                tx_pdos,
-                rx_pdos,
-                mailbox,
-                dc,
-                dictionary: dictionary_from_profile(dev.profile.as_ref())?,
-                vendor_extensions: Vec::new(),
-            });
+        let device_dtos = self
+            .descriptions
+            .devices
+            .map(|d| d.device)
+            .unwrap_or_default();
+        let mut devices = Vec::with_capacity(device_dtos.len());
+        for dev in device_dtos {
+            devices.push(device_from_dto(dev, vendor_id)?);
         }
-        Ok(EsiFile { vendor, devices })
+
+        let modules = modules_from_dto(self.descriptions.modules)?;
+
+        Ok(EsiFile {
+            vendor,
+            devices,
+            modules,
+        })
     }
 }

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<EtherCATInfo>
+  <Vendor>
+    <Id>#x21</Id>
+    <Name>Synthetic Modular GmbH</Name>
+  </Vendor>
+  <Descriptions>
+    <Devices>
+      <Device Physics="YY">
+        <Type ProductCode="#x07500354" RevisionNo="#x00010000">COUPLER-1</Type>
+        <Name LcId="1033">Synthetic modular coupler</Name>
+        <Sm StartAddress="#x1000" ControlByte="#x26" Enable="1">MBoxOut</Sm>
+        <Sm StartAddress="#x1080" ControlByte="#x22" Enable="1">MBoxIn</Sm>
+        <Sm StartAddress="#x1100" ControlByte="#x64" Enable="1">Outputs</Sm>
+        <Sm StartAddress="#x1180" ControlByte="#x00" Enable="1">Inputs</Sm>
+        <Slots SlotPdoIncrement="16" SlotIndexIncrement="#x10">
+          <Slot MinInstances="0" MaxInstances="64">
+            <Name>KBus</Name>
+            <ModuleIdent Default="1">#x044D2F52</ModuleIdent>
+            <ModuleIdent>#x04562F52</ModuleIdent>
+          </Slot>
+          <Slot MinInstances="1" MaxInstances="1">
+            <Name>End</Name>
+            <ModuleIdent Default="1">#x06EA2F52</ModuleIdent>
+          </Slot>
+        </Slots>
+        <Eeprom>
+          <ByteSize>2048</ByteSize>
+          <ConfigData>0401000000000000</ConfigData>
+        </Eeprom>
+      </Device>
+    </Devices>
+    <Modules>
+      <Module>
+        <Type ModuleIdent="#x044D2F52">DI-8</Type>
+        <Name LcId="1033">8-channel digital input</Name>
+        <TxPdo Fixed="1" Mandatory="1">
+          <Index>#x1A00</Index>
+          <Name>DI Inputs</Name>
+          <Entry>
+            <Index>#x6000</Index>
+            <SubIndex>1</SubIndex>
+            <BitLen>8</BitLen>
+            <Name>Inputs</Name>
+            <DataType>USINT</DataType>
+          </Entry>
+        </TxPdo>
+      </Module>
+      <Module>
+        <Type ModuleIdent="#x04562F52">DO-8</Type>
+        <Name LcId="1033">8-channel digital output</Name>
+        <RxPdo Fixed="1" Mandatory="1">
+          <Index>#x1600</Index>
+          <Name>DO Outputs</Name>
+          <Entry>
+            <Index>#x7000</Index>
+            <SubIndex>1</SubIndex>
+            <BitLen>8</BitLen>
+            <Name>Outputs</Name>
+            <DataType>USINT</DataType>
+          </Entry>
+        </RxPdo>
+      </Module>
+      <Module>
+        <Type ModuleIdent="#x06EA2F52">END</Type>
+        <Name LcId="1033">Bus end module</Name>
+      </Module>
+    </Modules>
+  </Descriptions>
+</EtherCATInfo>

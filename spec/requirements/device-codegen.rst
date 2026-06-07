@@ -188,6 +188,79 @@ ESI parser
    ``crates/taktora-ethercat-esi/src/model.rs`` and
    ``src/dto.rs``; verified by ``tests/sm_watchdog.rs``.
 
+.. req:: FMMU declarations captured in the IR
+   :id: REQ_0848
+   :status: implemented
+   :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0865
+
+   The IR shall expose, per device, the ``<Fmmu>`` declarations in
+   declaration order as ``Vec<Fmmu>``. The declared usage shall be
+   decoded to ``FmmuUsage`` (``Inputs`` / ``Outputs`` / ``MBoxState``);
+   an unrecognised usage string shall be preserved verbatim as
+   ``FmmuUsage::Other`` — the parser shall not fail on it.
+
+   **Rationale.** FMMU declarations pair with the sync managers of
+   :need:`REQ_0504`; a network configurator needs them to sanity-check
+   SM/FMMU pairing. The tolerate-unknown posture matches
+   :need:`REQ_0505`. Implemented in
+   ``crates/taktora-ethercat-esi/src/model.rs`` and ``src/dto.rs``;
+   verified by ``tests/fmmu.rs``.
+
+.. req:: EEPROM (SII source) data captured without interpretation
+   :id: REQ_0849
+   :status: implemented
+   :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0866
+
+   The IR shall expose, per device, the ``<Eeprom>`` content as
+   ``Option<Eeprom>``: ``ByteSize``, the ``ConfigData`` payload, and the
+   optional ``BootStrap`` payload. Hex payloads shall be decoded to raw
+   bytes; a malformed hex string shall raise a semantic error carrying
+   the offending element path (:need:`REQ_0506`). Unrecognised
+   ``<Eeprom>`` children (e.g. ``<Category>`` blocks) shall be retained
+   verbatim as ``RawXml``.
+
+   The parser shall perform **no SII interpretation**: PDI fields,
+   checksums, and SII image assembly are consumer work
+   (:need:`FEAT_0057`, :need:`ADR_0102`).
+
+   **Rationale.** EEPROM-image verification (:need:`FEAT_0057`) needs
+   the declared SII source data; decoding hex to bytes is a lossless
+   re-representation, while interpreting it would bake verifier policy
+   into the parser. Implemented in
+   ``crates/taktora-ethercat-esi/src/model.rs``, ``src/dto.rs``, and
+   ``src/raw_xml.rs``; verified by ``tests/eeprom.rs``.
+
+.. req:: MDP module catalog and slot constraints captured, never resolved
+   :id: REQ_0850
+   :status: implemented
+   :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0867
+
+   For modular devices (MDP), the IR shall expose the file-level
+   ``<Modules>`` catalog as ``Vec<Module>`` — each module carrying its
+   ``ModuleIdent``, type string, name, and per-module ``TxPdo`` /
+   ``RxPdo`` lists (reusing the :need:`REQ_0504` PDO representation) —
+   and, per device, the ``<Slots>`` constraints as ``Option<Slots>``:
+   slot increments, per-slot min/max instance counts, and the accepted
+   ``ModuleIdent`` references with their ``Default`` markers. A file
+   whose ``<Descriptions>`` carries modules but no devices shall parse.
+
+   The parser shall **not** resolve a plugged module lineup into an
+   effective PDO list or process image — slot expansion and increment
+   arithmetic are consumer work (:need:`ADR_0102`), exactly as PDO
+   assignment alternatives are captured unresolved per
+   :need:`REQ_0504`.
+
+   **Rationale.** Couplers such as the WAGO 750-354 describe their
+   pluggable terminals via MDP; without the catalog and constraints a
+   network configurator cannot model the device at all, but *which*
+   modules are plugged is per-installation configuration the ESI cannot
+   know. Implemented in ``crates/taktora-ethercat-esi/src/model.rs``
+   and ``src/dto.rs``; verified by ``tests/modules.rs`` and the gated
+   real-file test ``tests/wago_real.rs``.
+
 .. req:: Vendor-specific extensions captured as opaque blobs
    :id: REQ_0505
    :status: implemented

@@ -15,8 +15,9 @@ mod raw_xml;
 
 pub use error::{EsiError, Span};
 pub use model::{
-    CoeInfo, DcOpMode, DistributedClock, EsiDevice, EsiFile, InitCmd, Mailbox, Pdo, PdoEntry,
-    SmDirection, SyncManager, Transition, Vendor,
+    CoeInfo, DcOpMode, DistributedClock, Eeprom, EsiDevice, EsiFile, Fmmu, FmmuUsage, InitCmd,
+    Mailbox, Module, Pdo, PdoEntry, Slot, SlotModuleIdent, Slots, SmDirection, SyncManager,
+    Transition, Vendor,
 };
 pub use raw_xml::RawXml;
 pub use taktora_fieldbus_od_core::{Access, DataType, DictEntry, Identity};
@@ -41,6 +42,12 @@ pub fn parse(xml: &str) -> Result<EsiFile, EsiError> {
     let exts = raw_xml::capture_device_extensions(xml)?;
     for (dev, ext) in file.devices.iter_mut().zip(exts) {
         dev.vendor_extensions = ext;
+    }
+    let cats = raw_xml::capture_eeprom_categories(xml)?;
+    for (dev, cats) in file.devices.iter_mut().zip(cats) {
+        if let Some(eeprom) = dev.eeprom.as_mut() {
+            eeprom.categories = cats;
+        }
     }
     Ok(file)
 }

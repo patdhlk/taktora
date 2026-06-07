@@ -11,9 +11,16 @@ use taktora_ethercat_esi::parse;
 fn parses_real_beckhoff_el3001_if_present() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vendor/Beckhoff_EL3001.xml");
-    let Ok(xml) = std::fs::read_to_string(&path) else {
-        eprintln!("skipping: {} not present", path.display());
-        return;
+    let xml = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) if !path.exists() => {
+            eprintln!("skipping: {} not present", path.display());
+            return;
+        }
+        Err(e) => panic!(
+            "vendor file present but unreadable: {} — {e}",
+            path.display()
+        ),
     };
     let file = parse(&xml).expect("real Beckhoff EL3001 ESI parses");
     assert_eq!(file.vendor.id, 0x0000_0002, "Beckhoff vendor id");

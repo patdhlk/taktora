@@ -255,7 +255,8 @@ impl<B: CodegenBackend> Builder<B> {
     /// `Identity` (`taktora_ethercat_esi_codegen::Identity`) carries its own
     /// vendor/product/revision. Globbing ESI files from multiple vendors is
     /// therefore permitted and harmless. An empty input set yields a default
-    /// vendor with no devices (a valid empty module).
+    /// vendor with no devices (a valid empty module). Per-file module catalogs
+    /// are not merged yet; codegen only consumes devices at this stage.
     fn merge(inputs: &[PathBuf]) -> Result<EsiFile, BuildError> {
         let mut vendor: Option<Vendor> = None;
         let mut devices = Vec::new();
@@ -283,6 +284,9 @@ impl<B: CodegenBackend> Builder<B> {
         Ok(EsiFile {
             vendor: vendor.unwrap_or(Vendor { id: 0, name: None }),
             devices,
+            // Deliberate deferral: module catalogs are not yet consumed by
+            // codegen; the merge collects devices only.
+            modules: Vec::new(),
         })
     }
 }

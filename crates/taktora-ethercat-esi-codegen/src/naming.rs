@@ -272,12 +272,15 @@ mod tests {
             name: name.map(ToOwned::to_owned),
             product_type: product_type.map(ToOwned::to_owned),
             group_type: None,
+            fmmus: Vec::new(),
             sync_managers: Vec::new(),
             tx_pdos: Vec::new(),
             rx_pdos: Vec::new(),
             mailbox: None,
             dc: None,
             dictionary: Vec::new(),
+            eeprom: None,
+            slots: None,
             vendor_extensions: Vec::new(),
         }
     }
