@@ -24,7 +24,7 @@ taktora-connector-core          = "0.2"
 taktora-connector-host          = "0.1"
 taktora-connector-transport-iox = "0.1"
 taktora-connector-codec         = "0.1"
-taktora-connector-ethercat      = "0.2"
+taktora-connector-ethercat      = "0.3"
 
 clap        = { version = "4", features = ["derive"] }
 serde       = { version = "1", features = ["derive"] }

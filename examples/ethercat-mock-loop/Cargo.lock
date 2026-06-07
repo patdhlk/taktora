@@ -850,9 +850,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-ethercat"
-version = "0.2.5"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c050dd20ee64c3a3d342e63759cbbaeafe5975c01320cb0ab33c674480bd514"
+checksum = "544ae03cc5413e6969d855be857fd7d2996105823455c471d620fc2a436a0253"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",

@@ -18,7 +18,7 @@ use clap::Parser;
 use taktora_connector_core::{ChannelDescriptor, ConnectorError, PayloadCodec};
 use taktora_connector_ethercat::{
     EthercatConnector, EthercatConnectorOptions, EthercatRouting, EthercrabBusDriver, PdoDirection,
-    SubDeviceMap, connector::EthercatState, declare_pdu_storage,
+    SmWatchdog, SubDeviceMap, connector::EthercatState, declare_pdu_storage,
 };
 use taktora_connector_host::Connector;
 use taktora_ethercat_esi_rt::{EsiDevice, Lsb0};
@@ -76,18 +76,15 @@ const ROUTING_BITS_EL2004: u16 = 4;
 /// map the connector's expected WKC is 0 and a dead bus would still
 /// read as healthy.
 static PDO_MAP: &[SubDeviceMap] = &[
-    SubDeviceMap {
-        address: SUBDEV,
-        rx_pdos: &[],
-        tx_pdos: &[],
-        expected_wkc: 2,
-    },
-    SubDeviceMap {
-        address: SUBDEV_EL2004,
-        rx_pdos: &[],
-        tx_pdos: &[],
-        expected_wkc: 1,
-    },
+    SubDeviceMap::new(SUBDEV, &[], &[], 2),
+    // The EL2004 is an OUTPUT slave: per AOU_0016 its SM watchdog must
+    // be enabled with a timeout ≤ FTTI/2 (50 ms at the default 100 ms
+    // FTTI). The driver programs + read-back-verifies registers
+    // 0x0400/0x0420 during bring-up (REQ_0846); on a master stop the
+    // EL2004 drops its outputs to safe state within this window —
+    // observable in the drill by unplugging mid-run.
+    SubDeviceMap::new(SUBDEV_EL2004, &[], &[], 1)
+        .with_sm_watchdog(SmWatchdog::from_timeout_us(50_000)),
 ];
 
 /// Toggle cadence for the output bit during normal and drill modes.
