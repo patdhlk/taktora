@@ -206,8 +206,20 @@ carries the responsibility as AoUs rather than as TSRs.
    mechanism that drives outputs to their configured safe state. If the
    watchdog is disabled the outputs hold their last commanded value
    indefinitely; if its timeout exceeds FTTI/2 the safe-state transition
-   misses budget. Taktora does not model or program the SM watchdog
-   today; enforcing this bound at config time is tracked separately (see
-   :need:`ADR_0065`).
+   misses budget.
+
+   **Enforcement status (2026-06-07).** The bound is now validated and
+   programmed rather than merely assumed: the per-SM enable bit is
+   decoded from the ESI (:need:`REQ_0843`) and statically rejected at
+   network-config time when disabled on an output slave
+   (:need:`REQ_0845`, with an explicit per-device attestation required
+   for inline-described devices that have no ESI); the timeout is
+   resolved (default FTTI/2, override validated against the quantized
+   effective value, :need:`REQ_0844`) and programmed into the device
+   watchdog registers (``0x0400``/``0x0420``) during every bring-up and
+   recovery, read-back-verified, hard-failing on mismatch
+   (:need:`REQ_0846`). The **residual** assumption carried by this AOU
+   shrinks to: the device honours its SM watchdog per ETG1000.4, and
+   its configured safe-state output values are themselves correct.
 
    :Validates: :need:`AFSR_0004`, :need:`REQ_0123`
