@@ -1,7 +1,9 @@
 # Vendor ESI fixtures
 
-Real, publicly-downloadable vendor ESI XML files used by `vendor_real.rs`
-(TEST_0400 — "parse() accepts a representative Beckhoff EL3001 ESI").
+Real, publicly-downloadable vendor ESI XML files used by the real-vendor
+integration tests: `vendor_real.rs` (TEST_0400 — "parse() accepts a
+representative Beckhoff EL3001 ESI") and `wago_real.rs` (TEST_0867 —
+"parse() accepts a real WAGO 750-354 modular-coupler ESI").
 
 These files are vendor copyright; they are NOT redistributed as part of the
 crate's published package (see `Cargo.toml` `exclude`). To run the real-file

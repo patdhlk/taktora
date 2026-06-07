@@ -10,9 +10,16 @@ use taktora_ethercat_esi::parse;
 #[test]
 fn parses_real_wago_750_354_if_present() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vendor/WAGO_750-354.xml");
-    let Ok(xml) = std::fs::read_to_string(&path) else {
-        eprintln!("skipping: {} not present", path.display());
-        return;
+    let xml = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) if !path.exists() => {
+            eprintln!("skipping: {} not present", path.display());
+            return;
+        }
+        Err(e) => panic!(
+            "vendor file present but unreadable: {} — {e}",
+            path.display()
+        ),
     };
     let file = parse(&xml).expect("real WAGO 750-354 ESI parses");
     assert_eq!(file.vendor.id, 0x0000_0021, "WAGO vendor id");
