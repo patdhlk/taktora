@@ -19,12 +19,7 @@ static TX_ENTRIES: &[PdoEntry] = &[PdoEntry {
     bit_offset: 0,
     bit_length: 16,
 }];
-static PDO_MAP: &[SubDeviceMap] = &[SubDeviceMap {
-    address: 0x0001,
-    rx_pdos: RX_ENTRIES,
-    tx_pdos: TX_ENTRIES,
-    expected_wkc: 3,
-}];
+static PDO_MAP: &[SubDeviceMap] = &[SubDeviceMap::new(0x0001, RX_ENTRIES, TX_ENTRIES, 3)];
 
 #[test]
 fn default_options_match_spec() {
@@ -109,11 +104,7 @@ fn network_interface_round_trips() {
 
 #[test]
 fn subdevice_map_carries_expected_wkc() {
-    let map = SubDeviceMap {
-        address: 0x1001,
-        rx_pdos: &[],
-        tx_pdos: &[],
-        expected_wkc: 2,
-    };
+    let map = SubDeviceMap::new(0x1001, &[], &[], 2);
     assert_eq!(map.expected_wkc, 2);
+    assert_eq!(map.sm_watchdog, None, "new() leaves the watchdog untouched");
 }

@@ -188,6 +188,12 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
             apply_pdo_mapping_for_subdevice(&maindevice, &group, *map).await?;
         }
 
+        // Program SM-watchdog registers while the group is still in
+        // PRE-OP (REQ_0846 / AOU_0016). Must precede the OP transition:
+        // the watchdog window has to be in place before output process
+        // data starts flowing.
+        program_sm_watchdogs(&maindevice, &group, self.options.pdo_map()).await?;
+
         // PRE-OP → SAFE-OP → OP under cyclic process data
         // (REQ_0313 / REQ_0841).
         let group = walk_into_op(group, &maindevice).await?;
@@ -239,6 +245,11 @@ impl<const MAX_SUBDEVICES: usize, const MAX_PDI: usize> BusDriver
         for map in self.options.pdo_map() {
             apply_pdo_mapping_for_subdevice(&maindevice, &group, *map).await?;
         }
+
+        // Re-program SM-watchdog registers on recovery (REQ_0846 /
+        // AOU_0016): a slave that dropped and rejoined powers up with
+        // the ESC default 100 ms window, which violates FTTI/2.
+        program_sm_watchdogs(&maindevice, &group, self.options.pdo_map()).await?;
 
         let group = walk_into_op(group, &maindevice).await?;
 
@@ -351,6 +362,107 @@ async fn apply_pdo_mapping_for_subdevice<const MAX_SUBDEVICES: usize, const MAX_
     Ok(())
 }
 
+/// Program the SM-watchdog registers (`0x0400` / `0x0420`) for every
+/// `SubDeviceMap` carrying `sm_watchdog: Some(_)`, then read both back
+/// and hard-fail on mismatch. `REQ_0846` / `AOU_0016`.
+///
+/// The ESC default watchdog window (100 ms) violates the FTTI/2 bound
+/// AOU_0016 relies on, and ESI files carry no timeout data — so the
+/// master must program these registers. Silent non-application is this
+/// domain's signature failure mode (a slave that accepts the write but
+/// keeps its old window looks healthy yet drops its safe-state
+/// guarantee), hence the unconditional read-back verify: a mismatch or
+/// write error fails the bring-up / recovery attempt, which surfaces as
+/// terminal Down per `REQ_0842`.
+async fn program_sm_watchdogs<const MAX_SUBDEVICES: usize, const MAX_PDI: usize>(
+    maindevice: &MainDevice<'_>,
+    group: &SubDeviceGroup<MAX_SUBDEVICES, MAX_PDI, DefaultLock, PreOp>,
+    pdo_map: &[crate::options::SubDeviceMap],
+) -> Result<(), ConnectorError> {
+    for map in pdo_map {
+        let Some(wd) = map.sm_watchdog else {
+            continue;
+        };
+
+        let mut found = false;
+        for subdevice in group.iter(maindevice) {
+            if subdevice.configured_address() != map.address {
+                continue;
+            }
+            found = true;
+
+            write_and_verify_register(
+                &subdevice,
+                map.address,
+                RegisterAddress::WatchdogDivider,
+                "0x0400 WatchdogDivider",
+                wd.divider,
+            )
+            .await?;
+            write_and_verify_register(
+                &subdevice,
+                map.address,
+                RegisterAddress::SyncManagerWatchdog,
+                "0x0420 SyncManagerWatchdog",
+                wd.intervals,
+            )
+            .await?;
+            break;
+        }
+
+        if !found {
+            return Err(ConnectorError::Configuration(format!(
+                "SubDevice {:#06x} declares sm_watchdog but is not present on the bus",
+                map.address
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Write a `u16` register, read it back, and fail if it does not stick.
+///
+/// `register_label` names the address symbolically for the error
+/// message; `expected` is the value just written. The ref type is the
+/// concrete one the PRE-OP group's `iter` yields
+/// (`SubDeviceRef<'_, &SubDevice>`) — keeping it concrete (rather than
+/// generic over the state marker) is what makes the returned future
+/// `Send`.
+async fn write_and_verify_register(
+    subdevice: &ethercrab::SubDeviceRef<'_, &ethercrab::SubDevice>,
+    subdevice_address: u16,
+    register: RegisterAddress,
+    register_label: &str,
+    expected: u16,
+) -> Result<(), ConnectorError> {
+    subdevice
+        .register_write::<u16>(register, expected)
+        .await
+        .map_err(|e| {
+            ConnectorError::stack(WatchdogError(format!(
+                "SubDevice {subdevice_address:#06x}: write to {register_label} \
+                 (value {expected}) failed: {e:?}"
+            )))
+        })?;
+
+    let read_back = subdevice
+        .register_read::<u16>(register)
+        .await
+        .map_err(|e| {
+            ConnectorError::stack(WatchdogError(format!(
+                "SubDevice {subdevice_address:#06x}: read-back of {register_label} failed: {e:?}"
+            )))
+        })?;
+
+    if read_back != expected {
+        return Err(ConnectorError::stack(WatchdogError(format!(
+            "SubDevice {subdevice_address:#06x}: {register_label} did not stick \
+             (wrote {expected}, read back {read_back}) — SM watchdog not applied"
+        ))));
+    }
+    Ok(())
+}
+
 /// Walk a PRE-OP group into OP under cyclic process-data exchange
 /// (`REQ_0841`).
 ///
@@ -442,6 +554,17 @@ impl core::fmt::Display for EcWrappedError {
 }
 
 impl std::error::Error for EcWrappedError {}
+
+#[derive(Debug)]
+struct WatchdogError(String);
+
+impl core::fmt::Display for WatchdogError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "sm-watchdog: {}", self.0)
+    }
+}
+
+impl std::error::Error for WatchdogError {}
 
 #[derive(Debug)]
 struct IoError(String);

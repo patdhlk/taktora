@@ -664,6 +664,28 @@ exercised without hardware. Bench tests run only when invoked as
    the ``"bring-up failed"`` prefix and the driver's error text —
    instead of the connector idling in ``Connecting`` forever.
 
+.. test:: SM-watchdog tick maths against the AOU_0016 bound
+   :id: TEST_0862
+   :status: open
+   :verifies: REQ_0846
+
+   Unit tests in
+   ``crates/taktora-connector-ethercat/tests/watchdog.rs`` over the
+   pure ``SmWatchdog`` register model: the default divider yields a
+   100 µs tick (``2498 → 40 ns × 2500``); ``from_timeout_us(50_000)``
+   gives 500 ticks, an effective window of exactly 50 ms; the ceil
+   quantization rounds a 50_001 µs request up to 501 ticks (50.1 ms,
+   above the FTTI/2 bound — so callers must check the *effective*
+   value); a 0 µs request clamps up to one tick (never a disabling
+   0-interval); and an enormous request saturates at ``u16::MAX``
+   ticks without overflow. The register write plus read-back-verify
+   path is hardware-gated: the ``#[ignore]``-gated
+   ``tests/ethercrab_driver.rs`` bring-up test programs a 50 ms window
+   on an output SubDevice (configured address from
+   ``ETHERCAT_TEST_WD_ADDRESS``) and treats reaching OP as evidence
+   that the registers stuck, since a read-back mismatch fails
+   bring-up.
+
 ----
 
 Workspace end-to-end tests
