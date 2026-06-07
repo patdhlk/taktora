@@ -213,6 +213,15 @@ The drill exercises the bus-level recovery path against real silicon.
   `Connector::subscribe_health`.
 - `ChannelReader<u8, N>` over an `EthercatRouting` PDO slice — the
   same surface every other connector in this workspace exposes.
+- `PDO_MAP` declaring per-SubDevice `expected_wkc` (EL1008 = 2,
+  EL2004 = 1; without it a dead bus reads as healthy) and, on the
+  EL2004 output terminal, a 50 ms SM watchdog
+  (`.with_sm_watchdog(SmWatchdog::from_timeout_us(50_000))`) —
+  AOU_0016's FTTI/2 bound, programmed and read-back-verified by the
+  driver at bring-up and recovery (REQ_0846). On a master stop the
+  EL2004 drops its outputs to safe state within that window —
+  observable in the reconnect drill as the channel LEDs going dark at
+  unplug.
 - A minimal `RawByteCodec` defined inline because `JsonCodec` can't
   decode the EL1008's raw PDI byte. The codec is purpose-built for
   this example and intentionally not promoted to the workspace's

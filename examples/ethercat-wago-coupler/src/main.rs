@@ -27,7 +27,7 @@ use clap::Parser;
 use taktora_connector_core::{ChannelDescriptor, ConnectorError, PayloadCodec};
 use taktora_connector_ethercat::{
     EthercatConnector, EthercatConnectorOptions, EthercatRouting, EthercrabBusDriver, PdoDirection,
-    connector::EthercatState, declare_pdu_storage,
+    SmWatchdog, SubDeviceMap, connector::EthercatState, declare_pdu_storage,
 };
 use taktora_connector_host::Connector;
 use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
@@ -43,6 +43,25 @@ const N: usize = 256;
 /// `init_single_group` assigns the first SubDevice `0x1000`. If your
 /// EtherCAT config tool reports a different address, edit this.
 const SUBDEV: u16 = 0x1000;
+
+/// Per-SubDevice map for the single WAGO coupler.
+///
+/// * `expected_wkc = 3`: one SubDevice both read and written by the
+///   LRW datagram (+2 write, +1 read). Without this the connector's
+///   expected WKC is 0 and a dead bus still reads as healthy.
+/// * The PDO-entry lists are empty: the 750-354's PDO assignment is
+///   fixed (`PdoAssign=0`), so no SDO re-assignment is possible or
+///   needed.
+/// * The coupler carries OUTPUT process data (the 750-530), so per
+///   AOU_0016 its SM watchdog must be bounded ≤ FTTI/2 — 50 ms at the
+///   default 100 ms FTTI. The driver programs registers
+///   0x0400/0x0420 during bring-up AND recovery and read-back-verifies
+///   them (REQ_0846): a successful `Connecting -> Up` proves the
+///   device runs the 50 ms window, not the 100 ms ESC default. On a
+///   master stop (unplug, abort) the 750-530 outputs drop to their
+///   safe state within that window.
+static PDO_MAP: &[SubDeviceMap] = &[SubDeviceMap::new(SUBDEV, &[], &[], 3)
+    .with_sm_watchdog(SmWatchdog::from_timeout_us(50_000))];
 
 /// 750-430: bit offset of the 8 digital inputs within the coupler's Tx
 /// process image. The 750-354's fixed PDO assignment (`PdoAssign=0`
@@ -180,6 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Options.
     let opts = EthercatConnectorOptions::builder()
+        .pdo_map(PDO_MAP)
         .network_interface(&cli.nic)
         .cycle_time(Duration::from_millis(2))
         .build();
@@ -225,6 +245,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_value: Option<u8> = None;
     let normal_mode = matches!(cli.mode, Mode::Normal);
 
+    // Recovery resync. The framework deliberately does NOT re-apply
+    // stale output commands after a bus outage: when the watchdog has
+    // fired, the rejoined slave's outputs sit at their configured safe
+    // state, and re-commanding is the APPLICATION's decision once it
+    // observes health return to Up. The health pump below (the single
+    // subscriber — health subscriptions are competing consumers, not
+    // broadcast, so exactly one item must drain them) raises this flag
+    // on every `-> Up` transition; the mirror clears it and drops its
+    // change-detection cache so the next scan rewrites the outputs
+    // from live input data.
+    let resync = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let resync_mirror = Arc::clone(&resync);
+
     exec.add(item_with_triggers(
         |d| -> Result<(), ExecutorError> {
             d.interval(Duration::from_millis(10));
@@ -232,6 +265,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         move |ctx| -> ExecuteResult {
             cycle = cycle.saturating_add(1);
+            if resync_mirror.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                last_value = None;
+            }
             while let Ok(Some(env)) = reader.try_recv() {
                 let v: u8 = env.value;
                 if last_value != Some(v) {
@@ -276,11 +312,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             while let Ok(Some(event)) = health_sub.try_next() {
                 let new_state = event.to.kind();
                 if new_state != last_state {
+                    // Print the full target state, not just the kind:
+                    // Degraded/Down carry the reason ("cycle failed: …",
+                    // "recover failed: …", "bring-up failed: …"), which
+                    // is the primary diagnostic during drills.
                     eprintln!(
-                        "t=+{:>6}ms  ethercat health: {last_state:?} -> {new_state:?}",
-                        started_at.elapsed().as_millis()
+                        "t=+{:>6}ms  ethercat health: {last_state:?} -> {:?}",
+                        started_at.elapsed().as_millis(),
+                        event.to,
                     );
                     use taktora_connector_core::ConnectorHealthKind::*;
+                    if new_state == Up {
+                        resync.store(true, std::sync::atomic::Ordering::Release);
+                    }
                     match new_state {
                         Degraded => drill_seen_degraded = true,
                         Up if drill_seen_degraded => drill_seen_recover_up = true,

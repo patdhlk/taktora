@@ -15,7 +15,8 @@ Three layered pieces:
 - **EtherCAT build-time codegen toolchains** — turn vendor descriptions into
   strongly-typed Rust at build time, with zero runtime parsing: a *device-driver*
   toolchain (ESI XML → typed `EsiDevice` drivers) and a *network-config* toolchain
-  (network YAML → PDO maps / routing tables for the connector).
+  (network YAML → PDO maps / routing tables / validated SM-watchdog
+  config for the connector).
 
 > [!WARNING]
 > **Personal experiment. Not meant for production.**
@@ -69,7 +70,7 @@ grouped by layer.
 
 | Crate | Purpose |
 |---|---|
-| [`taktora-ethercat-netcfg`](crates/taktora-ethercat-netcfg) | Parser + in-memory IR for the EtherCAT network-config YAML. |
+| [`taktora-ethercat-netcfg`](crates/taktora-ethercat-netcfg) | Parser + in-memory IR for the EtherCAT network-config YAML, including config-time validation of the output-slave SM-watchdog bound (AOU_0016: enabled, timeout ≤ FTTI/2). |
 | [`taktora-ethercat-netcfg-codegen`](crates/taktora-ethercat-netcfg-codegen) | Turns the netcfg IR into Rust source (PDO maps, routing tables) for the EtherCAT connector runtime. |
 | [`taktora-ethercat-netcfg-build`](crates/taktora-ethercat-netcfg-build) | `build.rs` glue turning a `network.yaml` into a generated Rust module in `$OUT_DIR`. |
 | [`taktora-ethercat-netcfg-cli`](crates/taktora-ethercat-netcfg-cli) | Command-line front end: expand a `network.yaml` to generated Rust source for inspection. |
