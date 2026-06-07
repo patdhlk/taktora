@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/patdhlk/taktora/compare/taktora-ethercat-esi-v0.3.0...taktora-ethercat-esi-v0.3.1) - 2026-06-07
+
+
+### Fixed
+
+- *(connector-ethercat)* Recover-brick fix + WAGO watchdog drill evidence (REQ_0331/TEST_0863) ([#61](https://github.com/patdhlk/taktora/pull/61))
+
 ## [0.3.0](https://github.com/patdhlk/taktora/compare/taktora-ethercat-esi-v0.2.2...taktora-ethercat-esi-v0.3.0) - 2026-06-07
 
 
