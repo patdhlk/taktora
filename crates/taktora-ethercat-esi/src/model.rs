@@ -105,6 +105,9 @@ pub enum FmmuUsage {
 }
 
 /// One `<Fmmu>` declaration.
+///
+/// The wrapper struct preserves room for future per-FMMU attributes (e.g.
+/// `OpOnly`) without another breaking change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fmmu {
     /// Declared usage.

@@ -152,6 +152,10 @@ struct TypeDto {
 
 // ── FMMU DTO ─────────────────────────────────────────────────────────────────
 
+/// An `<Fmmu>` element. Real ESI carries attributes on this element
+/// (e.g. `<Fmmu OpOnly="1">Outputs</Fmmu>` in Beckhoff EL2004); only the text
+/// content ("Outputs") is meaningful here, so the attributes are tolerated and
+/// ignored.
 #[derive(Deserialize)]
 struct FmmuDto {
     #[serde(rename = "$text", default)]
