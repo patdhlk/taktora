@@ -6,7 +6,7 @@ const NETWORK_YAML: &str = r#"
 schema_version: 1
 bus: { cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_bytes: 256 }
 devices:
-  - { label: coupler, pdos: { tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }], rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
+  - { label: coupler, sm_watchdog_enabled: true, pdos: { tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }], rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
 channels:
   - { name: "ethercat.wago.750-430.inputs",  device: coupler, direction: tx, bit_offset: 0, bit_length: 8, element_type: u8 }
   - { name: "ethercat.wago.750-530.outputs", device: coupler, direction: rx, bit_offset: 0, bit_length: 8, element_type: u8 }

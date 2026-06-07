@@ -14,6 +14,7 @@ bus:
   max_pdi_bytes: 256
 devices:
   - label: coupler
+    sm_watchdog_enabled: true
     pdos:
       tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }]
       rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }]

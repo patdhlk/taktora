@@ -238,6 +238,40 @@ Live under ``crates/ethercat-netcfg-codegen/tests/validation/``.
    from the expectation, and asserts each drives the connector to the
    ``Degraded`` / ``Down`` health path rather than proceeding to OP.
 
+.. test:: SM-watchdog registers resolve and are emitted for output devices
+   :id: TEST_0860
+   :status: open
+   :verifies: REQ_0844
+
+   Resolution + arithmetic + codegen. An rx-carrying device with no
+   override resolves to FTTI/2 (default 100 ms → 500 ticks of 100 µs at
+   divider 2498); a per-device ``sm_watchdog_timeout_ms`` override and a
+   custom ``ftti_ms`` resolve to their own quantized values; an
+   input-only device resolves no watchdog. A value-for-value table pins
+   the quantization (``ceil(timeout_us / 100)``, clamp ``1..=u16::MAX``,
+   ``0 µs`` → 1 tick) against the connector's documented ``SmWatchdog``
+   semantics, including the ceil-over-a-tick case. Codegen over a
+   two-device fixture emits ``SubDeviceMap::new(..).with_sm_watchdog(
+   SmWatchdog { divider, intervals })`` for the output device and a bare
+   ``SubDeviceMap::new(..)`` for the input-only device, asserted against
+   the parsed AST.
+
+.. test:: SM-watchdog bound and enable are validated at config time
+   :id: TEST_0861
+   :status: open
+   :verifies: REQ_0845
+
+   The :need:`REQ_0845` matrix. PASS: ESI output SM with the watchdog
+   trigger enabled and default FTTI/2; an override below the bound. FAIL:
+   an override above FTTI/2; an ESI output SM declaring the watchdog
+   trigger disabled; an inline output device with no
+   ``sm_watchdog_enabled`` attestation; an inline output device attesting
+   ``false``. PASS: an inline output device attesting ``true``. The
+   inclusive boundary (override exactly at FTTI/2 on the tick grid)
+   passes, proving the comparison is ``<=`` against the quantized value;
+   an input-only device is skipped by both checks. Each failure asserts a
+   distinct, named ``NetcfgError`` variant carrying the device label.
+
 .. test:: No runtime parsing; generated config is static with no heap
    :id: TEST_0848
    :status: open

@@ -14,7 +14,7 @@ const DEVICES: &str = r"
 schema_version: 1
 bus: { cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_bytes: 256 }
 devices:
-  - { label: coupler, pdos: { tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }], rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
+  - { label: coupler, sm_watchdog_enabled: true, pdos: { tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }], rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
 ";
 
 /// Parse `yaml` into a config (parsing never validates) and run [`validate`].
@@ -90,7 +90,7 @@ schema_version: 1
 bus: { cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_bytes: 256 }
 devices:
   - { label: din,  address: 0x1005, pdos: { tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }] } }
-  - { label: dout, address: 0x1005, pdos: { rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
+  - { label: dout, address: 0x1005, sm_watchdog_enabled: true, pdos: { rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
 channels: []
 ";
     let err = validate_yaml(yaml).expect_err("duplicate configured address must be rejected");
