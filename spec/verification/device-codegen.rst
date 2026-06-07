@@ -82,6 +82,21 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
    in build-time output (per :need:`REQ_0506`) is the user
    benefit.
 
+.. test:: Per-SM watchdog-trigger enable decodes from control-byte bit 6
+   :id: TEST_0859
+   :status: open
+   :verifies: REQ_0843
+
+   Unit tests in ``crates/taktora-ethercat-esi/tests/sm_watchdog.rs``
+   parse minimal inline ESI documents and assert
+   ``SyncManager::watchdog_trigger_enable`` against control-byte bit 6
+   (``0x40``). Control byte ``#x64`` (the real WAGO 750-354 outputs SM,
+   bit 6 set) decodes to ``true``; ``#x22`` (WAGO mailbox-in SM), ``#x00``
+   (WAGO inputs SM), and ``#x24`` (all bit-6-clear) decode to ``false``;
+   and an ``<Sm>`` with no ``ControlByte`` attribute decodes to ``false``,
+   confirming the parser never fabricates an enabled watchdog from an
+   absent control byte.
+
 ----
 
 Codegen / IR tests

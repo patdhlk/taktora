@@ -485,6 +485,7 @@ requirement or feature it answers.
    :id: BB_0060
    :status: open
    :implements: FEAT_0051
+   :refines: REQ_0843
 
    The parse crate. Reads ESI XML via ``quick-xml`` +
    ``serde``, emits ``EsiFile`` IR. ``no_std`` + ``alloc``. Public
