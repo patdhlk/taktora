@@ -128,6 +128,8 @@ struct DeviceDto {
     profile: Option<ProfileDto>,
     #[serde(rename = "Dc", default)]
     dc: Option<DcDto>,
+    #[serde(rename = "Eeprom", default)]
+    eeprom: Option<EepromDto>,
 }
 
 #[derive(Deserialize)]
@@ -343,6 +345,18 @@ struct FlagsDto {
     pdo_mapping: Option<String>,
 }
 
+// ── eeprom DTO ────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct EepromDto {
+    #[serde(rename = "ByteSize", default)]
+    byte_size: Option<String>,
+    #[serde(rename = "ConfigData", default)]
+    config_data: Option<String>,
+    #[serde(rename = "BootStrap", default)]
+    boot_strap: Option<String>,
+}
+
 // ── distributed clock DTOs ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -507,6 +521,53 @@ fn parse_hex_payload(s: &str) -> Vec<u8> {
             u8::try_from((hi << 4) | lo).ok()
         })
         .collect()
+}
+
+/// Parse a strict hex-byte string (`"0401AB"`) into bytes. Unlike
+/// [`parse_hex_payload`] (lenient, for init-cmd payloads), a non-hex digit or
+/// odd digit count is a semantic error carrying the element path.
+fn parse_hex_bytes(raw: &str, path: &str) -> Result<Vec<u8>, EsiError> {
+    let t = raw.trim();
+    if t.len() % 2 != 0 || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(EsiError::Value {
+            path: path.to_owned(),
+            span: None,
+            reason: format!("invalid hex byte string `{t}`"),
+        });
+    }
+    Ok(t.as_bytes()
+        .chunks(2)
+        .map(|pair| {
+            let s = std::str::from_utf8(pair).expect("ascii hex digits");
+            u8::from_str_radix(s, 16).expect("validated hex digits")
+        })
+        .collect())
+}
+
+// ── eeprom conversion ─────────────────────────────────────────────────────────
+
+/// Convert an [`EepromDto`]. `categories` is left empty here; the raw-xml
+/// pass in [`crate::parse`] fills it (serde cannot capture unknown children).
+fn eeprom_from_dto(dto: &EepromDto) -> Result<crate::model::Eeprom, EsiError> {
+    Ok(crate::model::Eeprom {
+        byte_size: dto
+            .byte_size
+            .as_deref()
+            .map(|s| parse_esi_uint(s, "Eeprom.ByteSize"))
+            .transpose()?,
+        config_data: dto
+            .config_data
+            .as_deref()
+            .map(|s| parse_hex_bytes(s, "Eeprom.ConfigData"))
+            .transpose()?
+            .unwrap_or_default(),
+        bootstrap: dto
+            .boot_strap
+            .as_deref()
+            .map(|s| parse_hex_bytes(s, "Eeprom.BootStrap"))
+            .transpose()?,
+        categories: Vec::new(),
+    })
 }
 
 fn mailbox_from_dtos(
@@ -751,6 +812,7 @@ impl EtherCatInfo {
                 mailbox,
                 dc,
                 dictionary: dictionary_from_profile(dev.profile.as_ref())?,
+                eeprom: dev.eeprom.as_ref().map(eeprom_from_dto).transpose()?,
                 vendor_extensions: Vec::new(),
             });
         }

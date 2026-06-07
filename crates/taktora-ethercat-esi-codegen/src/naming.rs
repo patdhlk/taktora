@@ -279,6 +279,7 @@ mod tests {
             mailbox: None,
             dc: None,
             dictionary: Vec::new(),
+            eeprom: None,
             vendor_extensions: Vec::new(),
         }
     }

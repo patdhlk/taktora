@@ -44,7 +44,12 @@ const KNOWN_DEVICE_CHILDREN: &[&str] = &[
     "ImageFile16x14",
     "Fmmu",
     "Su",
+    "Eeprom",
 ];
+
+/// Direct `<Eeprom>` children that the typed schema consumes and are therefore
+/// NOT captured as opaque category blobs.
+const KNOWN_EEPROM_CHILDREN: &[&str] = &["ByteSize", "ConfigData", "BootStrap"];
 
 /// Strip any namespace prefix from a qualified element name (`Beckhoff:Foo` ->
 /// `Foo`). Used only for the known-child membership test; the captured
@@ -288,4 +293,68 @@ fn value_error(index: &LineIndex, byte_pos: u64, e: &dyn std::fmt::Display) -> E
         span: Some(index.span(offset)),
         reason: e.to_string(),
     }
+}
+
+/// Walk the document and, for each `<Device>` (in document order), collect the
+/// DIRECT children of its `<Eeprom>` element whose local name is not in
+/// [`KNOWN_EEPROM_CHILDREN`] (e.g. `<Category>` blocks), captured verbatim.
+/// Devices without an `<Eeprom>` yield an empty vec.
+pub fn capture_eeprom_categories(xml: &str) -> Result<Vec<Vec<RawXml>>, EsiError> {
+    let index = LineIndex::new(xml);
+    let mut reader = Reader::from_str(xml);
+    let mut per_device: Vec<Vec<RawXml>> = Vec::new();
+
+    // `depth` is the nesting level of the *next* event relative to the document
+    // root (root Start lands at depth 0). Convention mirrors `capture_device_extensions`:
+    // membership tests happen at the current `depth` (before increment), and
+    // `device_depth` / `eeprom_depth` record the depth of the opening Start tag.
+    let mut depth: i32 = 0;
+    let mut device_depth: Option<i32> = None;
+    let mut eeprom_depth: Option<i32> = None;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(start)) => {
+                let name = decode_name(&start, &reader, &index)?;
+                let local = local_name(&name);
+
+                // A direct child of `<Eeprom>` that is not schema-known → capture.
+                if eeprom_depth.is_some_and(|d| depth == d + 1)
+                    && !KNOWN_EEPROM_CHILDREN.contains(&local)
+                {
+                    let subtree = read_subtree(&mut reader, &index, &start, &name)?;
+                    if let Some(cats) = per_device.last_mut() {
+                        cats.push(subtree);
+                    }
+                    // read_subtree consumed the matching End; do NOT increment depth.
+                    continue;
+                }
+
+                if local == "Device" && device_depth.is_none() {
+                    device_depth = Some(depth);
+                    per_device.push(Vec::new());
+                } else if local == "Eeprom"
+                    && device_depth.is_some_and(|d| depth == d + 1)
+                    && eeprom_depth.is_none()
+                {
+                    eeprom_depth = Some(depth);
+                }
+                depth += 1;
+            }
+            Ok(Event::End(_)) => {
+                depth -= 1;
+                if eeprom_depth.is_some_and(|d| depth == d) {
+                    eeprom_depth = None;
+                }
+                if device_depth.is_some_and(|d| depth == d) {
+                    device_depth = None;
+                }
+            }
+            Ok(_) => {}
+            Err(e) => return Err(reader_error(&reader, &index, &e)),
+        }
+    }
+
+    Ok(per_device)
 }

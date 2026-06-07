@@ -51,6 +51,8 @@ pub struct EsiDevice {
     pub dc: Option<DistributedClock>,
     /// Object-dictionary entries, when present.
     pub dictionary: Vec<DictEntry>,
+    /// `<Eeprom>` SII source data, when present.
+    pub eeprom: Option<Eeprom>,
     /// Unrecognised device-level vendor extension elements, captured verbatim.
     pub vendor_extensions: Vec<RawXml>,
 }
@@ -213,6 +215,24 @@ pub struct InitCmd {
 pub struct DistributedClock {
     /// Declared operation modes.
     pub op_modes: Vec<DcOpMode>,
+}
+
+/// `<Eeprom>` content — the SII (`SubDevice` Information Interface) source
+/// data an ESI declares, faithfully captured.
+///
+/// Hex payloads are decoded to raw bytes (a lossless re-representation); the
+/// parser performs **no SII interpretation** — PDI fields, checksums, and
+/// image assembly are consumer (verifier) work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Eeprom {
+    /// Declared EEPROM size in bytes (`<ByteSize>`), when present.
+    pub byte_size: Option<u32>,
+    /// `<ConfigData>` payload — the first SII bytes (PDI configuration).
+    pub config_data: Vec<u8>,
+    /// `<BootStrap>` payload (bootstrap mailbox config), when present.
+    pub bootstrap: Option<Vec<u8>>,
+    /// Unrecognised `<Eeprom>` children (e.g. `<Category>`), captured verbatim.
+    pub categories: Vec<RawXml>,
 }
 
 /// One distributed-clock operation mode.
