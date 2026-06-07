@@ -342,6 +342,25 @@ pub fn capture_eeprom_categories(xml: &str) -> Result<Vec<Vec<RawXml>>, EsiError
                 }
                 depth += 1;
             }
+            Ok(Event::Empty(start)) => {
+                let name = decode_name(&start, &reader, &index)?;
+                let local = local_name(&name);
+                // A self-closing direct child of `<Eeprom>` that is not schema-known → capture as leaf.
+                if eeprom_depth.is_some_and(|d| depth == d + 1)
+                    && !KNOWN_EEPROM_CHILDREN.contains(&local)
+                {
+                    let attributes = decode_attributes(&start, &reader, &index)?;
+                    if let Some(cats) = per_device.last_mut() {
+                        cats.push(RawXml {
+                            name,
+                            attributes,
+                            text: None,
+                            children: Vec::new(),
+                        });
+                    }
+                }
+                // Empty elements do not change depth.
+            }
             Ok(Event::End(_)) => {
                 depth -= 1;
                 if eeprom_depth.is_some_and(|d| depth == d) {

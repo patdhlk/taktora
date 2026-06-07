@@ -71,6 +71,16 @@ fn eeprom_is_no_longer_a_vendor_extension() {
 }
 
 #[test]
+fn self_closing_eeprom_child_is_captured() {
+    let xml = esi("<Eeprom><ConfigData>0401</ConfigData><Category/></Eeprom>");
+    let file = parse(&xml).expect("parses");
+    let eeprom = file.devices[0].eeprom.as_ref().expect("eeprom present");
+    assert_eq!(eeprom.categories.len(), 1);
+    assert_eq!(eeprom.categories[0].name, "Category");
+    assert!(eeprom.categories[0].children.is_empty());
+}
+
+#[test]
 fn beckhoff_fixture_eeprom_is_captured() {
     let file = parse(include_str!("fixtures/beckhoff_el1008.xml")).expect("fixture parses");
     let eeprom = file.devices[0]
