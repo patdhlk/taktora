@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8](https://github.com/patdhlk/taktora/compare/taktora-connector-zenoh-v0.2.7...taktora-connector-zenoh-v0.2.8) - 2026-06-07
+
+
+### Fixed
+
+- *(connectors)* Health subscriptions are true broadcast streams (REQ_0847, closes #60) ([#63](https://github.com/patdhlk/taktora/pull/63))
+- *(connector-ethercat)* Recover-brick fix + WAGO watchdog drill evidence (REQ_0331/TEST_0863) ([#61](https://github.com/patdhlk/taktora/pull/61))
+
 ## [0.2.5](https://github.com/patdhlk/taktora/compare/taktora-connector-zenoh-v0.2.4...taktora-connector-zenoh-v0.2.5) - 2026-06-01
 
 
