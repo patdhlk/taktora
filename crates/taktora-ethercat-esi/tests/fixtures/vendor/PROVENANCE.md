@@ -15,7 +15,8 @@ members-only, Vendor-ID-gated, and not redistributable.
 | File | Device | Source URL | Retrieved | Notes |
 |------|--------|------------|-----------|-------|
 | `Beckhoff_EL3001.xml` | EL3001 1Ch analog input | https://www.beckhoff.com/ (Download -> ESI) | TODO | TODO |
-| `WAGO_750-354.xml` | 750-354 EtherCAT fieldbus coupler | https://www.wago.com/ (Downloads -> ESI) | TODO | MDP modular coupler; exercises Modules/Slots (TEST_0867) |
+| `WAGO_750-354_25.xml` | 750-354 EtherCAT fieldbus coupler | https://www.wago.com/ (Downloads -> ESI) | 2026-06-07 | Full MDP description (vendor file dated 2023-11): single-file module catalog (~270 modules) + `<Slots>`; exercises Modules/Slots (TEST_0867) |
+| `WAGO_750_354_no_modules.xml` | 750-354 EtherCAT fieldbus coupler | https://www.wago.com/ (Downloads -> ESI) | 2026-06-07 | Module-less variant (vendor file dated 2019-03): coupler devices only, no `<Modules>` catalog (TEST_0867) |
 
 ## Expected characteristics asserted by `vendor_real.rs`
 - Vendor id `0x00000002` (Beckhoff)
@@ -23,7 +24,9 @@ members-only, Vendor-ID-gated, and not redistributable.
 - That device has >=1 TxPDO with >=1 entry, and a CoE mailbox.
 
 ## Expected characteristics asserted by `wago_real.rs`
-- Vendor id `0x00000021` (WAGO)
-- A device whose name or type contains `750-354`
-- That device declares `<Slots>` with >=1 slot
-- The file carries a non-empty `<Modules>` catalog
+- Vendor id `0x00000021` (WAGO), both files
+- A device whose name or type contains `750-354`, both files
+- `WAGO_750-354_25.xml`: that device declares `<Slots>` with >=1 slot, the
+  file carries a non-empty `<Modules>` catalog, and every slot-referenced
+  `ModuleIdent` resolves against that catalog
+- `WAGO_750_354_no_modules.xml`: the file carries NO module catalog
