@@ -97,6 +97,48 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
    confirming the parser never fabricates an enabled watchdog from an
    absent control byte.
 
+.. test:: FMMU declarations parse in order with tolerated unknowns
+   :id: TEST_0865
+   :status: open
+   :verifies: REQ_0848
+
+   Unit tests in ``crates/taktora-ethercat-esi/tests/fmmu.rs`` parse
+   inline ESI documents and the committed Beckhoff EL3602 fixture,
+   asserting declaration order, the ``Inputs`` / ``Outputs`` /
+   ``MBoxState`` decodings, attribute-bearing ``<Fmmu>`` elements, and
+   that an unrecognised usage string is preserved as
+   ``FmmuUsage::Other`` without failing the parse.
+
+.. test:: EEPROM source data decodes; bad hex is a located error
+   :id: TEST_0866
+   :status: open
+   :verifies: REQ_0849
+
+   Unit tests in ``crates/taktora-ethercat-esi/tests/eeprom.rs`` parse
+   inline ESI documents and the committed Beckhoff EL1008 / EL3602
+   fixtures, asserting ``ByteSize`` / ``ConfigData`` / ``BootStrap``
+   decode to the expected bytes (lower- and uppercase hex), malformed
+   and odd-length hex payloads raise ``EsiError::Value`` with path
+   ``Eeprom.ConfigData``, ``<Category>`` children (including
+   self-closing elements) are captured as ``RawXml``, and a typed
+   ``<Eeprom>`` no longer appears among the vendor extensions.
+
+.. test:: MDP catalog and slots parse from synthetic and real modular ESI
+   :id: TEST_0867
+   :status: open
+   :verifies: REQ_0850
+
+   Unit tests in ``crates/taktora-ethercat-esi/tests/modules.rs`` parse
+   the synthetic ``modular_coupler.xml`` fixture, asserting the
+   three-module catalog (idents, names, per-module PDOs), the slot
+   constraints (increments, min/max instances, default module idents),
+   malformed module-ident error paths, that a modules-only document
+   parses with empty devices, and that a non-modular fixture yields no
+   modules and no slots. The gated test ``tests/wago_real.rs``
+   additionally parses a real WAGO 750-354 coupler ESI when present in
+   ``tests/fixtures/vendor/`` (not redistributed; see that directory's
+   PROVENANCE.md).
+
 ----
 
 Codegen / IR tests

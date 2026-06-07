@@ -476,6 +476,41 @@ requirement or feature it answers.
    :need:`REQ_0522` / :need:`REQ_0512`, now reworded to match. ❌ A
    thin extra trait (``SdoWrite``) and one generic on ``configure``.
 
+.. arch-decision:: The ESI parser emits a faithful IR and never resolves configuration
+   :id: ADR_0102
+   :status: accepted
+   :refines: FEAT_0051
+   :links: REQ_0504, REQ_0849, REQ_0850
+
+   **Context.** Several ESI constructs describe a *space* of possible
+   device configurations rather than one concrete configuration: PDO
+   assignment alternatives (multiple PDOs competing for a sync
+   manager), MDP module slots (pluggable terminals chosen per
+   installation), and the SII source data (whose meaning depends on
+   verifier policy). Each parser extension re-raises the same question:
+   should the parser resolve these into something concrete — a flat
+   process image, an effective PDO list, decoded PDI fields?
+
+   **Decision.** No. The parser captures what the document declares,
+   structurally and faithfully, and stops there: PDO alternatives are
+   kept per declared element with no bit offsets (:need:`REQ_0504`),
+   the MDP catalog and slot constraints are kept unexpanded
+   (:need:`REQ_0850`), and EEPROM payloads are decoded to bytes but not
+   interpreted (:need:`REQ_0849`). Resolution — picking alternatives,
+   expanding a plugged lineup, assembling or checking an SII image —
+   is consumer work (codegen, network configurator, verifier), where
+   the missing inputs (the user's terminal lineup, the verifier's
+   policy) actually live.
+
+   **Consequences.** ✅ One parse result serves every consumer
+   regardless of its policy. ✅ Parser tests need no configuration
+   fixtures, only documents. ✅ Consumer resolution logic is testable
+   against a stable IR. ❌ Every consumer that needs a process image
+   must implement (or share) resolution logic — the netcfg modular
+   round will design that layer against this boundary. Lossless
+   re-representations (hex → bytes, ``#x`` → integers) are NOT
+   resolution and stay in the parser.
+
 ----
 
 5. Building block view
@@ -488,8 +523,9 @@ requirement or feature it answers.
    :refines: REQ_0843
 
    The parse crate. Reads ESI XML via ``quick-xml`` +
-   ``serde``, emits ``EsiFile`` IR. ``no_std`` + ``alloc``. Public
-   API is ``pub fn parse(xml: &str) -> Result<EsiFile, EsiError>``
+   ``serde``, emits ``EsiFile`` IR. ``std`` baseline per
+   :need:`ADR_0097`. Public API is
+   ``pub fn parse(xml: &str) -> Result<EsiFile, EsiError>``
    and the ``EsiFile`` / ``Device`` / ``Pdo`` / ``DictEntry``
    types per :need:`REQ_0504`. Carries no dependency on
    ``ethercrab``, ``proc-macro2``, or any codegen crate.
