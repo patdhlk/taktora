@@ -295,6 +295,29 @@ Connection lifecycle
    plugin and gateway share an address space). The choice is recorded
    in the connector's ``impl::`` directive (e.g. :need:`IMPL_0040`).
 
+.. req:: Health subscriptions are independent broadcast streams
+   :id: REQ_0847
+   :status: implemented
+   :satisfies: FEAT_0034
+   :links: IMPL_0040, IMPL_0050, IMPL_0060, IMPL_0080, TEST_0864
+
+   Every call to ``Connector::subscribe_health()`` (and to the
+   underlying health monitor's ``subscribe()``) shall return an
+   **independent** stream that observes every health transition
+   emitted after the call. Events shall never be load-balanced
+   between subscriptions, and a transition with zero subscribers
+   shall succeed (observable via ``Connector::health()``). Cloning a
+   subscription handle remains a competing-consumer tap of that one
+   stream and shall be documented as such.
+
+   **Rationale.** The previous implementation handed out clones of a
+   single ``crossbeam_channel`` receiver — competing consumers
+   documented as broadcast. Found live on the WAGO bench (issue #60):
+   a fast-polling second subscriber silently stole every event from
+   the health pump, so a real unplug/recover cycle printed no
+   transitions at all while the data plane worked — the observability
+   surface lying by omission.
+
 .. req:: ReconnectPolicy trait
    :id: REQ_0232
    :status: open

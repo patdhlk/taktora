@@ -709,6 +709,20 @@ exercised without hardware. Bench tests run only when invoked as
    transition (one scan later). Drill verdict:
    ``saw_degraded=true saw_recover_up=true``.
 
+.. test:: Health subscriptions broadcast to every subscriber
+   :id: TEST_0864
+   :status: open
+   :verifies: REQ_0847
+
+   Per-connector integration tests in
+   ``crates/taktora-connector-{ethercat,can,zenoh}/tests/health_broadcast.rs``:
+   two subscriptions opened before a transition must BOTH observe it
+   (the regression from issue #60 — under the old shared-receiver
+   implementation exactly one of them stole the event); a
+   subscription opened after a transition must NOT replay
+   pre-subscription history; and a transition with zero subscribers
+   must succeed and remain observable via ``current()``.
+
 ----
 
 Workspace end-to-end tests

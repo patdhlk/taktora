@@ -34,23 +34,32 @@ use crate::session::SessionState;
 #[derive(Debug)]
 pub struct ZenohHealthMonitor {
     inner: Mutex<HealthMonitor>,
-    tx: Sender<HealthEvent>,
-    rx: Receiver<HealthEvent>,
+    /// One sender per live subscription (`REQ_0847`). Dead
+    /// subscribers (dropped receivers) are pruned on each broadcast.
+    subscribers: Mutex<Vec<Sender<HealthEvent>>>,
     degraded_due_to_drops: AtomicBool,
 }
 
 impl ZenohHealthMonitor {
-    /// Construct a monitor in the initial `Connecting` state with an
-    /// unbounded broadcast channel.
+    /// Construct a monitor in the initial `Connecting` state with no
+    /// subscribers.
     #[must_use]
     pub fn new() -> Self {
-        let (tx, rx) = unbounded();
         Self {
             inner: Mutex::new(HealthMonitor::new()),
-            tx,
-            rx,
+            subscribers: Mutex::new(Vec::new()),
             degraded_due_to_drops: AtomicBool::new(false),
         }
+    }
+
+    /// Broadcast `event` to every live subscriber, pruning
+    /// subscriptions whose receiver has been dropped.
+    fn broadcast(&self, event: &HealthEvent) {
+        let mut subs = self
+            .subscribers
+            .lock()
+            .expect("zenoh health subscriber list lock not poisoned");
+        subs.retain(|tx| tx.send(event.clone()).is_ok());
     }
 
     /// Snapshot the current state.
@@ -75,10 +84,9 @@ impl ZenohHealthMonitor {
     /// # Errors
     ///
     /// * [`ZenohHealthError::Illegal`] when the from→to pair is not
-    ///   allowed per `ARCH_0012`.
-    /// * [`ZenohHealthError::BroadcastClosed`] if the broadcast channel
-    ///   has lost all subscribers (impossible by construction — `self`
-    ///   holds the receive end).
+    ///   allowed per `ARCH_0012`. Broadcasting itself cannot fail: a
+    ///   transition with zero (or only dropped) subscribers succeeds
+    ///   and is observable via [`Self::current`].
     ///
     /// # Panics
     ///
@@ -95,9 +103,7 @@ impl ZenohHealthMonitor {
         if event.to.kind() == ConnectorHealthKind::Up {
             self.degraded_due_to_drops.store(false, Ordering::Release);
         }
-        self.tx
-            .send(event.clone())
-            .map_err(|_| ZenohHealthError::BroadcastClosed)?;
+        self.broadcast(&event);
         Ok(event)
     }
 
@@ -134,7 +140,7 @@ impl ZenohHealthMonitor {
             guard.try_transition_to(target).ok()?
         };
         self.degraded_due_to_drops.store(true, Ordering::Release);
-        let _ = self.tx.send(event.clone());
+        self.broadcast(&event);
         Some(event)
     }
 
@@ -144,11 +150,26 @@ impl ZenohHealthMonitor {
         self.degraded_due_to_drops.load(Ordering::Acquire)
     }
 
-    /// Subscriber-side receiver. Each `Clone` of the returned handle
-    /// observes the same stream — `crossbeam_channel` is MPMC.
+    /// Open an independent subscription (`REQ_0847`): the returned
+    /// receiver observes every transition emitted AFTER this call.
+    /// Multiple subscriptions never compete for events.
+    ///
+    /// Caveat: `Clone`-ing the returned receiver yields competing
+    /// consumers on the SAME stream (`crossbeam_channel` is MPMC) —
+    /// call `subscribe` again for an independent stream instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the subscriber-list mutex was poisoned. See
+    /// [`Self::current`] for the rationale.
     #[must_use]
     pub fn subscribe(&self) -> Receiver<HealthEvent> {
-        self.rx.clone()
+        let (tx, rx) = unbounded();
+        self.subscribers
+            .lock()
+            .expect("zenoh health subscriber list lock not poisoned")
+            .push(tx);
+        rx
     }
 
     /// Apply a single observation of the session — current state plus
@@ -222,9 +243,7 @@ impl ZenohHealthMonitor {
             if ev.to.kind() == ConnectorHealthKind::Up {
                 self.degraded_due_to_drops.store(false, Ordering::Release);
             }
-            // BroadcastClosed is impossible because `self` holds an
-            // internal receiver clone.
-            let _ = self.tx.send(ev);
+            self.broadcast(&ev);
         }
     }
 }
@@ -241,8 +260,10 @@ pub enum ZenohHealthError {
     /// Requested from→to transition not allowed by `ARCH_0012`.
     #[error(transparent)]
     Illegal(#[from] IllegalTransition),
-    /// Broadcast channel has no receivers — should not happen
-    /// because the monitor holds an internal receiver clone.
+    /// Historical variant, **no longer emitted**: broadcasting is
+    /// per-subscriber since `REQ_0847` and a transition with zero
+    /// subscribers simply succeeds. Kept so removing it is not an
+    /// API break.
     #[error("health broadcast channel closed")]
     BroadcastClosed,
 }

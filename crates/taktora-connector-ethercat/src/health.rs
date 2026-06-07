@@ -1,8 +1,9 @@
 //! [`EthercatHealthMonitor`] — thin wrapper around `HealthMonitor`.
 //!
-//! Broadcasts every emitted `HealthEvent` over a `crossbeam_channel`
-//! so observers (e.g. `EthercatConnector::subscribe_health`) can
-//! listen.
+//! Broadcasts every emitted `HealthEvent` to every subscriber
+//! (`REQ_0847`): each [`EthercatHealthMonitor::subscribe`] call opens
+//! its own `crossbeam_channel`, so subscriptions are independent
+//! streams — never competing consumers (#60).
 //!
 //! The wrapper centralises two concerns the bare `HealthMonitor` does
 //! not own:
@@ -11,8 +12,8 @@
 //!    side typically holds it behind a `Mutex` because both the tokio
 //!    sidecar and the executor's `WaitSet` thread observe / mutate
 //!    health.
-//! 2. Fan-out. Every successful transition is rebroadcast to one or
-//!    more subscribers via a `crossbeam_channel::Sender`.
+//! 2. Fan-out. Every successful transition is rebroadcast to EVERY
+//!    subscriber — one `crossbeam_channel::Sender` per subscription.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,23 +33,32 @@ use taktora_connector_core::{
 #[derive(Debug)]
 pub struct EthercatHealthMonitor {
     inner: Mutex<HealthMonitor>,
-    tx: Sender<HealthEvent>,
-    rx: Receiver<HealthEvent>,
+    /// One sender per live subscription (`REQ_0847`). Dead
+    /// subscribers (dropped receivers) are pruned on each broadcast.
+    subscribers: Mutex<Vec<Sender<HealthEvent>>>,
     degraded_due_to_drops: AtomicBool,
 }
 
 impl EthercatHealthMonitor {
-    /// Construct a monitor in the initial `Connecting` state with an
-    /// unbounded broadcast channel.
+    /// Construct a monitor in the initial `Connecting` state with no
+    /// subscribers.
     #[must_use]
     pub fn new() -> Self {
-        let (tx, rx) = unbounded();
         Self {
             inner: Mutex::new(HealthMonitor::new()),
-            tx,
-            rx,
+            subscribers: Mutex::new(Vec::new()),
             degraded_due_to_drops: AtomicBool::new(false),
         }
+    }
+
+    /// Broadcast `event` to every live subscriber, pruning
+    /// subscriptions whose receiver has been dropped.
+    fn broadcast(&self, event: &HealthEvent) {
+        let mut subs = self
+            .subscribers
+            .lock()
+            .expect("health subscriber list lock not poisoned");
+        subs.retain(|tx| tx.send(event.clone()).is_ok());
     }
 
     /// Snapshot the current state.
@@ -73,10 +83,9 @@ impl EthercatHealthMonitor {
     /// # Errors
     ///
     /// * [`IllegalTransition`] when the from→to pair is not allowed
-    ///   per `ARCH_0012`.
-    /// * [`ConnectorError::Stack`] if the broadcast channel has lost
-    ///   all subscribers (impossible by construction — `self` holds
-    ///   the receive end).
+    ///   per `ARCH_0012`. Broadcasting itself cannot fail: a
+    ///   transition with zero (or only dropped) subscribers succeeds
+    ///   and is observable via [`Self::current`].
     ///
     /// # Panics
     ///
@@ -96,17 +105,30 @@ impl EthercatHealthMonitor {
         if event.to.kind() == ConnectorHealthKind::Up {
             self.degraded_due_to_drops.store(false, Ordering::Release);
         }
-        self.tx
-            .send(event.clone())
-            .map_err(|_| EthercatHealthError::BroadcastClosed)?;
+        self.broadcast(&event);
         Ok(event)
     }
 
-    /// Subscriber-side receiver. Each `Clone` of the returned handle
-    /// observes the same stream — `crossbeam_channel` is MPMC.
+    /// Open an independent subscription (`REQ_0847`): the returned
+    /// receiver observes every transition emitted AFTER this call.
+    /// Multiple subscriptions never compete for events.
+    ///
+    /// Caveat: `Clone`-ing the returned receiver yields competing
+    /// consumers on the SAME stream (`crossbeam_channel` is MPMC) —
+    /// call `subscribe` again for an independent stream instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the subscriber-list mutex was poisoned. See
+    /// [`Self::current`] for the rationale.
     #[must_use]
     pub fn subscribe(&self) -> Receiver<HealthEvent> {
-        self.rx.clone()
+        let (tx, rx) = unbounded();
+        self.subscribers
+            .lock()
+            .expect("health subscriber list lock not poisoned")
+            .push(tx);
+        rx
     }
 
     /// Record a cumulative inbound-drop count from one channel's
@@ -138,7 +160,7 @@ impl EthercatHealthMonitor {
             guard.try_transition_to(target).ok()?
         };
         self.degraded_due_to_drops.store(true, Ordering::Release);
-        let _ = self.tx.send(event.clone());
+        self.broadcast(&event);
         Some(event)
     }
 
@@ -161,8 +183,10 @@ pub enum EthercatHealthError {
     /// Requested from→to transition not allowed by `ARCH_0012`.
     #[error(transparent)]
     Illegal(#[from] IllegalTransition),
-    /// Broadcast channel has no receivers — should not happen
-    /// because the monitor holds an internal receiver clone.
+    /// Historical variant, **no longer emitted**: broadcasting is
+    /// per-subscriber since `REQ_0847` and a transition with zero
+    /// subscribers simply succeeds. Kept so removing it is not an
+    /// API break.
     #[error("health broadcast channel closed")]
     BroadcastClosed,
 }
