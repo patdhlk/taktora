@@ -33,6 +33,36 @@ counters) and validating the whole topology.
 
 ----
 
+5. Building block view
+----------------------
+
+.. building-block:: ethercat-netcfg SM-watchdog resolution and validation
+   :id: BB_0096
+   :status: open
+   :implements: FEAT_0085
+   :refines: REQ_0844, REQ_0845
+
+   The parse-layer code that, at ``resolve()`` time, resolves and
+   validates each output device's sync-manager watchdog (the netcfg slice
+   of :need:`AOU_0016`). For every device carrying output (rx) PDOs it
+   computes an effective timeout — the per-device ``sm_watchdog_timeout``
+   override if present, else FTTI/2 — quantizes it to the ESC registers
+   ``0x0400`` / ``0x0420`` (divider 2498 → 100 µs ticks,
+   ``intervals = ceil(timeout_us / 100)``, clamped ``1..=u16::MAX``), and
+   exposes the resolved ``(divider, intervals)`` on the IR for codegen.
+   The quantization arithmetic is a deliberate ~5-line duplicate of the
+   connector's ``SmWatchdog`` (a dependency on the connector runtime was
+   rejected per :need:`REQ_0824`). Validation rejects an effective window
+   that exceeds FTTI/2 (checked against the QUANTIZED value, since
+   ``ceil`` can push a boundary request over the bound), an ESI-sourced
+   output SM whose watchdog trigger is disabled, and an inline-sourced
+   output device that does not attest ``sm_watchdog_enabled: true``.
+   Input-only devices are untouched. Implemented in
+   ``crates/taktora-ethercat-netcfg/src/lib.rs`` and
+   ``crates/taktora-ethercat-netcfg-codegen/src/lib.rs``.
+
+----
+
 9. Architecture decisions
 -------------------------
 

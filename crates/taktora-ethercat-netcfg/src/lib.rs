@@ -43,6 +43,12 @@ pub struct BusConfig {
     pub max_pdi_bytes: usize,
     /// Default NIC to bind the bus to, if any.
     pub default_nic: Option<String>,
+    /// Fault-Tolerant Time Interval: the budget within which a detected
+    /// fault must reach the safe state (`AOU_0006` / `AFSR_0004`). The
+    /// per-device SM watchdog (`AOU_0016`) is bounded at FTTI/2 so a
+    /// silently-stopped master still drives outputs safe inside budget.
+    /// Defaults to 100 ms when the YAML omits `ftti_ms`.
+    pub ftti: Duration,
 }
 
 /// A single device instance declared on the bus.
@@ -58,6 +64,92 @@ pub struct DeviceInstance {
     pub station_alias: Option<u16>,
     /// Optional explicit configured-address override.
     pub address_override: Option<u16>,
+    /// Optional per-device SM-watchdog timeout override. Absent → the
+    /// device inherits FTTI/2 (`REQ_0844`). YAML: `sm_watchdog_timeout_ms`.
+    pub sm_watchdog_timeout: Option<Duration>,
+    /// Explicit attestation, for [`DeviceSource::Inline`] output devices,
+    /// that the device's SM watchdog is (will be) enabled (`REQ_0845`).
+    /// Inline sources carry no ESI control byte to read the enable bit
+    /// from, so the integrator must attest it. YAML: `sm_watchdog_enabled`.
+    pub sm_watchdog_enabled: Option<bool>,
+    /// Resolved SM-watchdog register values for this device, present iff
+    /// the device carries output (rx) PDOs (`REQ_0844`). Codegen emits
+    /// these via `SubDeviceMap::with_sm_watchdog`; input-only devices
+    /// carry `None` and emit no watchdog.
+    pub sm_watchdog: Option<SmWatchdogRegisters>,
+}
+
+/// Resolved ESC SM-watchdog register values for one output device.
+///
+/// `divider` is register `0x0400` (the tick base) and `intervals` is
+/// register `0x0420` (the SM-watchdog time, in ticks). A tick is
+/// `40 ns × (divider + 2)`; netcfg always fixes the divider at
+/// [`DEFAULT_WATCHDOG_DIVIDER`] (a 100 µs tick) and varies only the tick
+/// count. These mirror the connector's
+/// `taktora_connector_ethercat::SmWatchdog` value (deliberately not a
+/// dependency — see [`sm_watchdog_intervals`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmWatchdogRegisters {
+    /// Watchdog divider register `0x0400`. Tick = `40 ns × (divider + 2)`.
+    pub divider: u16,
+    /// SM-watchdog time register `0x0420`, in ticks.
+    pub intervals: u16,
+}
+
+/// Watchdog divider that yields a 100 µs tick: `40 ns × (2498 + 2) = 100 µs`.
+///
+/// Mirrors `taktora_connector_ethercat::DEFAULT_DIVIDER` (the ESC power-up
+/// value); duplicated here so netcfg need not depend on the connector
+/// runtime (`REQ_0824`).
+pub const DEFAULT_WATCHDOG_DIVIDER: u16 = 2498;
+
+/// Quantize a timeout in microseconds to a whole number of 100 µs watchdog
+/// ticks: `intervals = ceil(timeout_us / 100)`, clamped to `1..=u16::MAX`.
+///
+/// This is a deliberate ~5-line duplicate of the connector's
+/// `taktora_connector_ethercat::SmWatchdog::from_timeout_us` arithmetic —
+/// a dependency on that heavy crate was rejected (`REQ_0824` /
+/// `crates/taktora-connector-ethercat/src/watchdog.rs`). Quantization is
+/// upward (ceil): a request that is not a whole multiple of 100 µs rounds
+/// **up** to the next tick, so the effective timeout is `≥ timeout_us`.
+/// Callers checking the FTTI/2 ceiling must compare against the QUANTIZED
+/// effective window, not the request. `0 µs` clamps to one tick, never the
+/// disabling 0-interval value.
+#[must_use]
+pub const fn sm_watchdog_intervals(timeout_us: u32) -> u16 {
+    let ticks = timeout_us.div_ceil(100);
+    if ticks < 1 {
+        1
+    } else if ticks > u16::MAX as u32 {
+        u16::MAX
+    } else {
+        // This branch only runs when `ticks <= u16::MAX`; `try_from` is
+        // not const, so cast. Provably lossless.
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            ticks as u16
+        }
+    }
+}
+
+impl SmWatchdogRegisters {
+    /// Build the registers for a timeout in microseconds, fixing the
+    /// divider at [`DEFAULT_WATCHDOG_DIVIDER`] (100 µs ticks).
+    #[must_use]
+    pub const fn from_timeout_us(timeout_us: u32) -> Self {
+        Self {
+            divider: DEFAULT_WATCHDOG_DIVIDER,
+            intervals: sm_watchdog_intervals(timeout_us),
+        }
+    }
+
+    /// Effective (quantized) watchdog window in nanoseconds:
+    /// `40 ns × (divider + 2) × intervals`. Computed in `u64`; the worst
+    /// case (`2500 × 65535 × 40`) is far inside `u64`.
+    #[must_use]
+    pub const fn effective_timeout_ns(&self) -> u64 {
+        40 * (self.divider as u64 + 2) * self.intervals as u64
+    }
 }
 
 /// The origin of a device's PDO description.
@@ -215,6 +307,49 @@ pub enum NetcfgError {
         /// The offending remote reference, as named in the network config.
         reference: String,
     },
+
+    /// An output (rx-carrying) device's resolved SM-watchdog timeout, once
+    /// quantized to whole 100 µs ticks, exceeds FTTI/2 (`AOU_0016` /
+    /// `REQ_0845`). The bound is checked against the QUANTIZED effective
+    /// window, since `ceil` can push a value that was under the raw bound
+    /// over it.
+    #[error(
+        "device `{label}` SM-watchdog effective timeout {effective_us} µs exceeds the FTTI/2 bound of {bound_us} µs"
+    )]
+    SmWatchdogTimeoutTooLong {
+        /// Label of the offending output device.
+        label: String,
+        /// The quantized effective watchdog window, in microseconds.
+        effective_us: u64,
+        /// The FTTI/2 bound, in microseconds.
+        bound_us: u64,
+    },
+
+    /// An ESI-sourced output device's process-data (output) sync
+    /// manager(s) have the watchdog trigger DISABLED in the ESI control
+    /// byte (`AOU_0016` / `REQ_0845`). The watchdog is the sole mechanism
+    /// that drives outputs to their safe state on a silently-stopped
+    /// master, so a disabled trigger is a config error.
+    #[error(
+        "device `{label}` is an output device but its ESI declares the SM watchdog trigger disabled on an output sync manager"
+    )]
+    SmWatchdogDisabled {
+        /// Label of the offending output device.
+        label: String,
+    },
+
+    /// An [`DeviceSource::Inline`] output device did not attest that its
+    /// SM watchdog is enabled (`AOU_0016` / `REQ_0845`). Inline sources
+    /// carry no ESI control byte to read the enable bit from, so the
+    /// integrator must set `sm_watchdog_enabled: true` — or switch to an
+    /// ESI source whose output SM declares the trigger enabled.
+    #[error(
+        "device `{label}` is an inline output device without an SM-watchdog enable attestation; set `sm_watchdog_enabled: true` or source it from an ESI whose output SM enables the watchdog"
+    )]
+    SmWatchdogNotAttested {
+        /// Label of the offending output device.
+        label: String,
+    },
 }
 
 impl From<taktora_ethercat_esi::EsiError> for NetcfgError {
@@ -246,11 +381,19 @@ pub fn parse(yaml: &str) -> Result<NetworkConfig, NetcfgError> {
 mod dto {
     use super::{
         BusConfig, ChannelBinding, DeviceInstance, DeviceSource, Identity, NetcfgError,
-        NetworkConfig, PdoEntry,
+        NetworkConfig, PdoEntry, SmWatchdogRegisters, sm_watchdog_intervals,
     };
     use core::time::Duration;
     use serde::Deserialize;
     use std::path::PathBuf;
+
+    /// Default Fault-Tolerant Time Interval when `ftti_ms` is omitted, in
+    /// milliseconds (`AOU_0006` — 100 ms).
+    const DEFAULT_FTTI_MS: u64 = 100;
+
+    const fn default_ftti_ms() -> u64 {
+        DEFAULT_FTTI_MS
+    }
 
     #[derive(Deserialize)]
     pub struct NetworkConfigDto {
@@ -270,6 +413,8 @@ mod dto {
         max_pdi_bytes: usize,
         #[serde(default)]
         default_nic: Option<String>,
+        #[serde(default = "default_ftti_ms")]
+        ftti_ms: u64,
     }
 
     #[derive(Deserialize)]
@@ -285,6 +430,10 @@ mod dto {
         station_alias: Option<u16>,
         #[serde(default, rename = "address")]
         address_override: Option<u16>,
+        #[serde(default)]
+        sm_watchdog_timeout_ms: Option<u64>,
+        #[serde(default)]
+        sm_watchdog_enabled: Option<bool>,
     }
 
     #[derive(Deserialize, Default)]
@@ -295,22 +444,126 @@ mod dto {
         tx: Vec<PdoEntry>,
     }
 
+    /// A resolved device plus the ESI-derived watchdog-enable evidence the
+    /// watchdog pass needs but the public IR does not carry. For an
+    /// ESI-sourced device, `esi_output_watchdog_enabled` is `Some(true)`
+    /// iff every output (process-data-write) sync manager declares the
+    /// watchdog trigger enabled, `Some(false)` if any output SM disables
+    /// it, and `None` if the ESI declares no output SM at all. Inline
+    /// devices carry `None` (their attestation lives on the instance).
+    struct ResolvedDevice {
+        device: DeviceInstance,
+        esi_output_watchdog_enabled: Option<bool>,
+    }
+
     impl NetworkConfigDto {
         /// Convert into the IR, resolving any `esi:` device references
-        /// against the filesystem (`REQ_0824`).
+        /// against the filesystem (`REQ_0824`), then resolving and
+        /// validating each output device's SM watchdog (`REQ_0844` /
+        /// `REQ_0845`).
         pub fn resolve(self) -> Result<NetworkConfig, NetcfgError> {
-            let devices = self
-                .devices
-                .into_iter()
-                .map(DeviceInstanceDto::resolve)
-                .collect::<Result<Vec<_>, _>>()?;
+            let bus: BusConfig = self.bus.into();
+            // FTTI/2 bound, in microseconds, against which every output
+            // device's quantized watchdog window is checked.
+            let ftti_half_us = u64::try_from(bus.ftti.as_micros() / 2)
+                .expect("FTTI/2 in µs fits in u64 for any sane ms-granular FTTI");
+
+            let mut devices = Vec::with_capacity(self.devices.len());
+            for dto in self.devices {
+                let ResolvedDevice {
+                    mut device,
+                    esi_output_watchdog_enabled,
+                } = dto.resolve()?;
+                resolve_and_validate_watchdog(
+                    &mut device,
+                    ftti_half_us,
+                    esi_output_watchdog_enabled,
+                )?;
+                devices.push(device);
+            }
+
             Ok(NetworkConfig {
                 schema_version: self.schema_version,
-                bus: self.bus.into(),
+                bus,
                 devices,
                 channels: self.channels,
             })
         }
+    }
+
+    /// Resolve the effective SM watchdog for an output (rx-carrying) device
+    /// and validate it against `AOU_0016` (`REQ_0844` / `REQ_0845`).
+    ///
+    /// Input-only devices (no rx PDOs) carry no watchdog and skip every
+    /// check. For an output device:
+    /// 1. Effective timeout = the `sm_watchdog_timeout` override if present,
+    ///    else FTTI/2.
+    /// 2. Quantize to ESC registers (divider 2498, `ceil` ticks) — the SAME
+    ///    arithmetic as the connector's `SmWatchdog`.
+    /// 3. The QUANTIZED effective window must be ≤ FTTI/2 (ceil can push a
+    ///    boundary value over the bound — that is why the quantized value is
+    ///    checked, not the request).
+    /// 4. The watchdog must be ENABLED: an ESI source's output SM(s) must
+    ///    declare the trigger enabled; an inline source must attest
+    ///    `sm_watchdog_enabled: true`.
+    fn resolve_and_validate_watchdog(
+        device: &mut DeviceInstance,
+        ftti_half_us: u64,
+        esi_output_watchdog_enabled: Option<bool>,
+    ) -> Result<(), NetcfgError> {
+        // Input-only devices are untouched: no rx PDOs, no watchdog.
+        if device.source.rx().is_empty() {
+            return Ok(());
+        }
+
+        // 1 + 2: effective timeout (override or FTTI/2), quantized.
+        let timeout_us = device.sm_watchdog_timeout.map_or_else(
+            || {
+                u32::try_from(ftti_half_us)
+                    .expect("FTTI/2 in µs fits in u32 for any sane ms-granular FTTI")
+            },
+            |d| {
+                u32::try_from(d.as_micros()).expect("per-device watchdog timeout in µs fits in u32")
+            },
+        );
+        let registers = SmWatchdogRegisters {
+            divider: super::DEFAULT_WATCHDOG_DIVIDER,
+            intervals: sm_watchdog_intervals(timeout_us),
+        };
+
+        // 3: the QUANTIZED effective window must be ≤ FTTI/2.
+        let effective_us = registers.effective_timeout_ns() / 1_000;
+        if effective_us > ftti_half_us {
+            return Err(NetcfgError::SmWatchdogTimeoutTooLong {
+                label: device.label.clone(),
+                effective_us,
+                bound_us: ftti_half_us,
+            });
+        }
+
+        // 4: the watchdog must be enabled.
+        match &device.source {
+            DeviceSource::Esi { .. } => {
+                // `Some(false)` (an output SM disables the trigger) or
+                // `None` (the ESI declares no output SM for an rx-carrying
+                // device) both fail the enable check.
+                if esi_output_watchdog_enabled != Some(true) {
+                    return Err(NetcfgError::SmWatchdogDisabled {
+                        label: device.label.clone(),
+                    });
+                }
+            }
+            DeviceSource::Inline { .. } => {
+                if device.sm_watchdog_enabled != Some(true) {
+                    return Err(NetcfgError::SmWatchdogNotAttested {
+                        label: device.label.clone(),
+                    });
+                }
+            }
+        }
+
+        device.sm_watchdog = Some(registers);
+        Ok(())
     }
 
     /// Resolve an `esi:` reference to a LOCAL filesystem path (`REQ_0834`).
@@ -361,17 +614,41 @@ mod dto {
                 max_subdevices: dto.max_subdevices,
                 max_pdi_bytes: dto.max_pdi_bytes,
                 default_nic: dto.default_nic,
+                ftti: Duration::from_millis(dto.ftti_ms),
             }
         }
     }
 
+    /// Fold an ESI device's sync managers into the
+    /// `esi_output_watchdog_enabled` evidence the watchdog pass consumes:
+    /// `Some(true)` iff at least one output SM exists and every output SM
+    /// declares the watchdog trigger enabled; `Some(false)` if any output
+    /// SM disables it; `None` if there is no output SM at all.
+    fn esi_output_watchdog_enabled(
+        sync_managers: &[taktora_ethercat_esi::SyncManager],
+    ) -> Option<bool> {
+        let mut saw_output = false;
+        for sm in sync_managers {
+            if sm.direction == taktora_ethercat_esi::SmDirection::Output {
+                saw_output = true;
+                if !sm.watchdog_trigger_enable {
+                    return Some(false);
+                }
+            }
+        }
+        saw_output.then_some(true)
+    }
+
     impl DeviceInstanceDto {
         /// Convert into a [`DeviceInstance`], resolving an `esi:` reference
-        /// (read file, parse, convert PDOs, map identity) when present.
+        /// (read file, parse, convert PDOs, map identity) when present, and
+        /// capturing the ESI's output-SM watchdog-enable evidence.
         ///
         /// Path resolution is via `std::fs` against the process CWD;
         /// resolving relative-to-the-yaml-file is build glue and deferred.
-        fn resolve(self) -> Result<DeviceInstance, NetcfgError> {
+        /// The resolved `sm_watchdog` is `None` here; the watchdog pass in
+        /// [`NetworkConfigDto::resolve`] fills it for output devices.
+        fn resolve(self) -> Result<ResolvedDevice, NetcfgError> {
             let Self {
                 label,
                 esi,
@@ -379,9 +656,11 @@ mod dto {
                 identity,
                 station_alias,
                 address_override,
+                sm_watchdog_timeout_ms,
+                sm_watchdog_enabled,
             } = self;
 
-            let (source, identity) = match esi {
+            let (source, identity, esi_output_watchdog_enabled) = match esi {
                 Some(reference) => {
                     let path = esi_local_path(&reference)?;
                     let xml = std::fs::read_to_string(&path)?;
@@ -408,10 +687,11 @@ mod dto {
                     if has_inline && (pdos.rx != rx || pdos.tx != tx) {
                         return Err(NetcfgError::EsiContradiction { label });
                     }
+                    let wd_enabled = esi_output_watchdog_enabled(&device.sync_managers);
                     // Keep an explicit YAML identity; otherwise carry the
                     // ESI identity into the device (same type — od-core Identity).
                     let identity = identity.or(Some(device.identity));
-                    (DeviceSource::Esi { path, rx, tx }, identity)
+                    (DeviceSource::Esi { path, rx, tx }, identity, wd_enabled)
                 }
                 None => (
                     DeviceSource::Inline {
@@ -419,15 +699,22 @@ mod dto {
                         tx: pdos.tx,
                     },
                     identity,
+                    None,
                 ),
             };
 
-            Ok(DeviceInstance {
-                label,
-                source,
-                identity,
-                station_alias,
-                address_override,
+            Ok(ResolvedDevice {
+                device: DeviceInstance {
+                    label,
+                    source,
+                    identity,
+                    station_alias,
+                    address_override,
+                    sm_watchdog_timeout: sm_watchdog_timeout_ms.map(Duration::from_millis),
+                    sm_watchdog_enabled,
+                    sm_watchdog: None,
+                },
+                esi_output_watchdog_enabled,
             })
         }
     }

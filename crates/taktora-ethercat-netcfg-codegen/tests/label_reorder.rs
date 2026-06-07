@@ -13,7 +13,7 @@ bus: { cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_
 devices:
   - { label: coupler, pdos: { tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }] } }
   - { label: din,     pdos: { tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }] } }
-  - { label: dout,    pdos: { rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
+  - { label: dout,    sm_watchdog_enabled: true, pdos: { rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
 channels:
   - { name: "ethercat.din.inputs", device: din, direction: tx, bit_offset: 0, bit_length: 8, element_type: u8 }
 "#;
@@ -24,7 +24,7 @@ const CONFIG_B: &str = r#"
 schema_version: 1
 bus: { cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_bytes: 256 }
 devices:
-  - { label: dout,    pdos: { rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
+  - { label: dout,    sm_watchdog_enabled: true, pdos: { rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
   - { label: coupler, pdos: { tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }] } }
   - { label: din,     pdos: { tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }] } }
 channels:

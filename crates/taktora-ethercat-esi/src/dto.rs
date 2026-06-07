@@ -371,6 +371,10 @@ struct CycleTimeDto {
 /// - `0b01` → [`SmDirection::Input`] (`SubDevice` → master)
 /// - `0b00` → [`SmDirection::Output`] (master → `SubDevice`)
 /// - anything else → [`SmDirection::Unspecified`]
+///
+/// `watchdog_trigger_enable` is derived from control-byte bit 6 (`0x40`), the
+/// ETG SM-control watchdog-trigger-enable bit; an absent `ControlByte` decodes
+/// to `false`.
 fn sync_managers_from_dtos(dtos: Vec<SmDto>) -> Result<Vec<crate::model::SyncManager>, EsiError> {
     use crate::model::{SmDirection, SyncManager};
     let mut out = Vec::with_capacity(dtos.len());
@@ -384,6 +388,11 @@ fn sync_managers_from_dtos(dtos: Vec<SmDto>) -> Result<Vec<crate::model::SyncMan
             0b00 => SmDirection::Output,
             _ => SmDirection::Unspecified,
         };
+        // Control-byte bit 6 (0x40) is the ETG SM-control
+        // watchdog-trigger-enable bit. An absent `ControlByte` decoded to 0
+        // above, so a missing attribute yields `false` — never a fabricated
+        // enabled watchdog.
+        let watchdog_trigger_enable = control_byte & 0x40 != 0;
         let start_address = match sm.start_address.as_deref() {
             Some(sa) => parse_esi_u16(sa, "Sm.StartAddress")?,
             None => 0,
@@ -397,6 +406,7 @@ fn sync_managers_from_dtos(dtos: Vec<SmDto>) -> Result<Vec<crate::model::SyncMan
             control_byte,
             enable: parse_esi_bool(sm.enable.as_ref()),
             direction,
+            watchdog_trigger_enable,
         });
     }
     Ok(out)

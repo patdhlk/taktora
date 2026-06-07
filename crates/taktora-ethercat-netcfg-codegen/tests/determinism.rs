@@ -23,6 +23,7 @@ bus:
   max_pdi_bytes: 256
 devices:
   - label: coupler
+    sm_watchdog_enabled: true
     pdos:
       rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }]
       tx: [{ index: 0x6000, bit_offset: 0, bit_length: 16 }]
@@ -30,6 +31,7 @@ devices:
     pdos:
       tx: [{ index: 0x6010, bit_offset: 0, bit_length: 32 }]
   - label: io_block
+    sm_watchdog_enabled: true
     pdos:
       rx: [{ index: 0x7010, bit_offset: 0, bit_length: 8 }]
 channels:
@@ -75,12 +77,14 @@ devices:
   - pdos:
       tx: [{ bit_length: 16, index: 0x6000, bit_offset: 0 }]
       rx: [{ bit_offset: 0, bit_length: 8, index: 0x7000 }]
+    sm_watchdog_enabled: true
     label: coupler
   - label: drive
     pdos:
       tx: [{ bit_offset: 0, bit_length: 32, index: 0x6010 }]
   - pdos:
       rx: [{ index: 0x7010, bit_length: 8, bit_offset: 0 }]
+    sm_watchdog_enabled: true
     label: io_block
 channels:
   - device: coupler

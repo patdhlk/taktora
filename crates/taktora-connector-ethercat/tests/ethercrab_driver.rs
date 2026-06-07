@@ -28,8 +28,8 @@ use taktora_connector_core::ConnectorHealthKind;
 use taktora_connector_ethercat::bus::EthercatPduStorage;
 use taktora_connector_ethercat::driver::BusDriver;
 use taktora_connector_ethercat::{
-    CycleRunner, EthercatConnectorOptions, EthercatHealthMonitor, EthercrabBusDriver,
-    declare_pdu_storage,
+    CycleRunner, EthercatConnectorOptions, EthercatHealthMonitor, EthercrabBusDriver, SmWatchdog,
+    SubDeviceMap, declare_pdu_storage,
 };
 
 declare_pdu_storage!(TEST_PDU_STORAGE);
@@ -99,6 +99,56 @@ async fn bring_up_and_cycle_against_real_bus() {
         );
         now += options.cycle_time();
     }
+}
+
+/// REQ_0846 / AOU_0016 — bring-up programs the SM-watchdog registers
+/// (`0x0400` / `0x0420`) and verifies them by read-back. Requires both
+/// a real NIC (`ETHERCAT_TEST_NIC`) and the configured address of an
+/// output SubDevice (`ETHERCAT_TEST_WD_ADDRESS`, hex e.g. `0x1002`):
+/// the driver writes a 50 ms window and read-back-fails the bring-up if
+/// the registers do not stick, so reaching OP here is the hardware
+/// evidence that the write + verify path applies.
+#[tokio::test]
+#[ignore = "requires real EtherCAT NIC + ETHERCAT_TEST_WD_ADDRESS; run with --ignored"]
+async fn bring_up_programs_and_verifies_sm_watchdog() {
+    // `static` at the top of the function so the clippy
+    // `items_after_statements` lint stays clean.
+    static WD_MAP: std::sync::OnceLock<Vec<SubDeviceMap>> = std::sync::OnceLock::new();
+
+    let Some(iface) = maybe_nic() else {
+        eprintln!("ETHERCAT_TEST_NIC not set; skipping");
+        return;
+    };
+    let Some(address) = std::env::var("ETHERCAT_TEST_WD_ADDRESS")
+        .ok()
+        .and_then(|s| u16::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+    else {
+        eprintln!("ETHERCAT_TEST_WD_ADDRESS not set; skipping");
+        return;
+    };
+
+    // 50 ms = FTTI/2 = 500 ticks of the default 100 µs divider.
+    let map: &'static [SubDeviceMap] = WD_MAP.get_or_init(|| {
+        vec![
+            SubDeviceMap::new(address, &[], &[], 0)
+                .with_sm_watchdog(SmWatchdog::from_timeout_us(50_000)),
+        ]
+    });
+
+    let options = EthercatConnectorOptions::builder()
+        .network_interface(iface)
+        .pdo_map(map)
+        .build();
+
+    let mut driver = EthercrabBusDriver::<MAX_SUBDEVICES, MAX_PDI>::new(&TEST_PDU_STORAGE, options)
+        .expect("driver construction");
+
+    // bring_up internally writes 0x0400/0x0420 and read-back-verifies
+    // them; a mismatch returns Err, so `expect` here is the assertion.
+    let report = Box::pin(driver.bring_up())
+        .await
+        .expect("bring-up programs and verifies the SM watchdog");
+    assert!(report.subdevice_count > 0);
 }
 
 #[ignore = "requires CAP_NET_RAW + EtherCAT NIC; set ETHERCAT_TEST_NIC"]

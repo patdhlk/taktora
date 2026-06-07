@@ -13,8 +13,8 @@ bus: { cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_
 devices:
   - { label: coupler }
   - { label: din,  pdos: { tx: [{ index: 0x6000, bit_offset: 0, bit_length: 8 }] } }
-  - { label: dout, pdos: { rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
-  - { label: combo, pdos: { tx: [{ index: 0x6001, bit_offset: 0, bit_length: 8 }], rx: [{ index: 0x7001, bit_offset: 0, bit_length: 8 }] } }
+  - { label: dout, sm_watchdog_enabled: true, pdos: { rx: [{ index: 0x7000, bit_offset: 0, bit_length: 8 }] } }
+  - { label: combo, sm_watchdog_enabled: true, pdos: { tx: [{ index: 0x6001, bit_offset: 0, bit_length: 8 }], rx: [{ index: 0x7001, bit_offset: 0, bit_length: 8 }] } }
 channels: []
 ";
 
@@ -35,8 +35,9 @@ fn generated_expected_wkcs(yaml: &str) -> Vec<u16> {
         })
         .expect("generated source defines a `static PDO_MAP`");
 
-    // The initializer is `&[ SubDeviceMap { .. }, .. ]`: a reference to an
-    // array literal of struct literals.
+    // The initializer is `&[ SubDeviceMap::new(addr, rx, tx, wkc), .. ]`:
+    // a reference to an array literal of constructor calls. `expected_wkc`
+    // is the 4th positional argument (index 3).
     let array = match &*pdo_map.expr {
         syn::Expr::Reference(r) => match &*r.expr {
             syn::Expr::Array(a) => a,
@@ -49,25 +50,30 @@ fn generated_expected_wkcs(yaml: &str) -> Vec<u16> {
         .elems
         .iter()
         .map(|elem| {
-            let syn::Expr::Struct(sub_map) = elem else {
-                panic!("PDO_MAP element is not a struct literal")
+            // An rx-carrying device emits
+            // `SubDeviceMap::new(..).with_sm_watchdog(..)`, a method call
+            // whose receiver is the `new(..)` call. Unwrap any trailing
+            // method call to reach the constructor.
+            let mut call = elem;
+            while let syn::Expr::MethodCall(mc) = call {
+                call = &mc.receiver;
+            }
+            let syn::Expr::Call(sub_map) = call else {
+                panic!("PDO_MAP element is not a `SubDeviceMap::new(..)` call")
             };
-            let wkc_field = sub_map
-                .fields
+            let wkc_arg = sub_map
+                .args
                 .iter()
-                .find(|f| match &f.member {
-                    syn::Member::Named(ident) => ident == "expected_wkc",
-                    syn::Member::Unnamed(_) => false,
-                })
-                .expect("SubDeviceMap has an `expected_wkc` field");
-            match &wkc_field.expr {
+                .nth(3)
+                .expect("SubDeviceMap::new has an `expected_wkc` argument");
+            match wkc_arg {
                 syn::Expr::Lit(syn::ExprLit {
                     lit: syn::Lit::Int(int),
                     ..
                 }) => int
                     .base10_parse::<u16>()
                     .expect("expected_wkc literal fits in u16"),
-                _ => panic!("expected_wkc field is not an integer literal"),
+                _ => panic!("expected_wkc argument is not an integer literal"),
             }
         })
         .collect()

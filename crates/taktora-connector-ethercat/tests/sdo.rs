@@ -45,23 +45,13 @@ static THREE_TX_ENTRIES: &[PdoEntry] = &[
 
 #[test]
 fn empty_pdo_map_emits_no_writes() {
-    let map = SubDeviceMap {
-        address: 0x0001,
-        rx_pdos: EMPTY_ENTRIES,
-        tx_pdos: EMPTY_ENTRIES,
-        expected_wkc: 0,
-    };
+    let map = SubDeviceMap::new(0x0001, EMPTY_ENTRIES, EMPTY_ENTRIES, 0);
     assert!(pdo_sdo_writes(&map).is_empty());
 }
 
 #[test]
 fn rx_only_emits_clear_assign_count_to_index_0x1c12() {
-    let map = SubDeviceMap {
-        address: 0x0042,
-        rx_pdos: TWO_RX_ENTRIES,
-        tx_pdos: EMPTY_ENTRIES,
-        expected_wkc: 1,
-    };
+    let map = SubDeviceMap::new(0x0042, TWO_RX_ENTRIES, EMPTY_ENTRIES, 1);
     let writes = pdo_sdo_writes(&map);
 
     // 2 entries → 1 clear + 2 entry writes + 1 count = 4 writes.
@@ -115,12 +105,7 @@ fn rx_only_emits_clear_assign_count_to_index_0x1c12() {
 
 #[test]
 fn tx_only_emits_clear_assign_count_to_index_0x1c13() {
-    let map = SubDeviceMap {
-        address: 0x0007,
-        rx_pdos: EMPTY_ENTRIES,
-        tx_pdos: THREE_TX_ENTRIES,
-        expected_wkc: 2,
-    };
+    let map = SubDeviceMap::new(0x0007, EMPTY_ENTRIES, THREE_TX_ENTRIES, 2);
     let writes = pdo_sdo_writes(&map);
 
     // 3 entries → 1 + 3 + 1 = 5 writes.
@@ -138,12 +123,7 @@ fn tx_only_emits_clear_assign_count_to_index_0x1c13() {
 
 #[test]
 fn both_directions_emit_rx_then_tx() {
-    let map = SubDeviceMap {
-        address: 0x0011,
-        rx_pdos: TWO_RX_ENTRIES,
-        tx_pdos: THREE_TX_ENTRIES,
-        expected_wkc: 3,
-    };
+    let map = SubDeviceMap::new(0x0011, TWO_RX_ENTRIES, THREE_TX_ENTRIES, 3);
     let writes = pdo_sdo_writes(&map);
 
     // Rx (2 entries) → 4 writes, Tx (3 entries) → 5 writes = 9.
@@ -158,12 +138,7 @@ fn both_directions_emit_rx_then_tx() {
 /// clear / set-count.
 #[test]
 fn entry_subindexes_start_at_one_and_count_writes_use_subindex_zero() {
-    let map = SubDeviceMap {
-        address: 0x00ff,
-        rx_pdos: TWO_RX_ENTRIES,
-        tx_pdos: EMPTY_ENTRIES,
-        expected_wkc: 1,
-    };
+    let map = SubDeviceMap::new(0x00ff, TWO_RX_ENTRIES, EMPTY_ENTRIES, 1);
     let writes = pdo_sdo_writes(&map);
     let entry_subindexes: Vec<u8> = writes
         .iter()

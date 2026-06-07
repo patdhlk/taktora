@@ -10,6 +10,8 @@ use std::time::Duration;
 
 use taktora_connector_core::{ExponentialBackoff, ReconnectPolicy};
 
+use crate::watchdog::SmWatchdog;
+
 /// Factory closure producing a fresh [`ReconnectPolicy`] instance per
 /// recovery episode. Mirrors the shape used by
 /// `taktora_connector_can::CanConnectorOptions`. `REQ_0332`.
@@ -18,7 +20,12 @@ pub type ReconnectPolicyFactory = Arc<dyn Fn() -> Box<dyn ReconnectPolicy> + Sen
 /// One SubDevice's PDO mapping. Application code declares an array of
 /// these as a `static` and passes the slice to
 /// [`EthercatConnectorOptionsBuilder::pdo_map`].
+///
+/// This struct is `#[non_exhaustive]`: out-of-crate code cannot build
+/// it with a struct literal and must use [`SubDeviceMap::new`] plus the
+/// chainable [`SubDeviceMap::with_sm_watchdog`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct SubDeviceMap {
     /// SubDevice configured address on the EtherCAT bus.
     pub address: u16,
@@ -34,6 +41,50 @@ pub struct SubDeviceMap {
     /// values are 0 (no PDOs / coupler), 1 (RxPDOs only / outputs),
     /// 2 (TxPDOs only / inputs), 3 (both directions).
     pub expected_wkc: u16,
+    /// SM-watchdog registers to program during bring-up and recovery,
+    /// or `None` to leave the SubDevice's registers untouched.
+    /// `REQ_0846`.
+    ///
+    /// `None` mirrors IgH's 0-sentinel and TwinCAT's unticked
+    /// watchdog-config checkbox: the master writes nothing and the ESC
+    /// keeps its power-up window. `Some(wd)` makes the gateway program
+    /// `0x0400`/`0x0420`, read them back, and fail the attempt on
+    /// mismatch — the enforcement path for safety assumption
+    /// `AOU_0016`.
+    pub sm_watchdog: Option<SmWatchdog>,
+}
+
+impl SubDeviceMap {
+    /// Construct a map with no SM-watchdog programming
+    /// (`sm_watchdog: None`).
+    ///
+    /// This is the only construction path for out-of-crate code: the
+    /// struct is `#[non_exhaustive]`, so a literal will not compile
+    /// outside this crate. Chain [`Self::with_sm_watchdog`] to enable
+    /// watchdog enforcement.
+    #[must_use]
+    pub const fn new(
+        address: u16,
+        rx_pdos: &'static [PdoEntry],
+        tx_pdos: &'static [PdoEntry],
+        expected_wkc: u16,
+    ) -> Self {
+        Self {
+            address,
+            rx_pdos,
+            tx_pdos,
+            expected_wkc,
+            sm_watchdog: None,
+        }
+    }
+
+    /// Attach SM-watchdog registers to program during bring-up and
+    /// recovery. `REQ_0846`.
+    #[must_use]
+    pub const fn with_sm_watchdog(mut self, wd: SmWatchdog) -> Self {
+        self.sm_watchdog = Some(wd);
+        self
+    }
 }
 
 /// One mapped object within a PDO. `index` is the SDO index of the

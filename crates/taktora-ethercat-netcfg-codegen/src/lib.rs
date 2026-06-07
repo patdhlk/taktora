@@ -402,13 +402,34 @@ fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
         let rx_entries = rx.iter().map(pdo_entry_tokens);
         let tx_entries = tx.iter().map(pdo_entry_tokens);
 
-        quote! {
-            taktora_connector_ethercat::SubDeviceMap {
-                address: #address,
-                rx_pdos: &[ #(#rx_entries),* ],
-                tx_pdos: &[ #(#tx_entries),* ],
-                expected_wkc: #expected_wkc,
+        // Output (rx-carrying) devices resolve an SM watchdog
+        // (REQ_0844); emit it as a `.with_sm_watchdog(..)` chained on the
+        // `new(..)` constructor. Input-only devices carry `None` and emit
+        // no watchdog (their outputs do not exist, so AOU_0016 does not
+        // apply). Field names mirror the connector's `SmWatchdog`.
+        let watchdog = device.sm_watchdog.as_ref().map(|wd| {
+            let divider = wd.divider;
+            let intervals = wd.intervals;
+            quote! {
+                .with_sm_watchdog(taktora_connector_ethercat::SmWatchdog {
+                    divider: #divider,
+                    intervals: #intervals,
+                })
             }
+        });
+
+        // `SubDeviceMap` is `#[non_exhaustive]`; out-of-crate generated
+        // code must use the `new` constructor rather than a struct
+        // literal. Argument order: address, rx_pdos, tx_pdos,
+        // expected_wkc.
+        quote! {
+            taktora_connector_ethercat::SubDeviceMap::new(
+                #address,
+                &[ #(#rx_entries),* ],
+                &[ #(#tx_entries),* ],
+                #expected_wkc,
+            )
+            #watchdog
         }
     });
 

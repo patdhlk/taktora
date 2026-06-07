@@ -77,6 +77,16 @@ pub struct SyncManager {
     pub enable: bool,
     /// Direction, derived from the control byte / `<Sm>` attributes.
     pub direction: SmDirection,
+    /// Whether this sync manager's watchdog **trigger** is enabled, decoded
+    /// from control-byte bit 6 (`0x40`) — the ETG SM-control
+    /// watchdog-trigger-enable bit. An absent `ControlByte` decodes to
+    /// `false` (the parser never fabricates an enabled watchdog).
+    ///
+    /// This is the per-SM ENABLE only. The watchdog **timeout** lives in the
+    /// device registers `0x0400` / `0x0420`, which real ESI files do not
+    /// declare (verified against vendor files); the timeout is master-side
+    /// configuration (`REQ_0846` territory), not part of this faithful IR.
+    pub watchdog_trigger_enable: bool,
 }
 
 /// One PDO (a `<TxPdo>` or `<RxPdo>` element), preserved structurally.

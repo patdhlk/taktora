@@ -20,24 +20,12 @@ const PDO_ENTRY_RX: PdoEntry = PdoEntry {
 #[test]
 fn expected_wkc_sums_per_subdevicemap() {
     static MAP: &[SubDeviceMap] = &[
-        SubDeviceMap {
-            address: 0x1000, // EK1100 coupler — 0
-            rx_pdos: &[],
-            tx_pdos: &[],
-            expected_wkc: 0,
-        },
-        SubDeviceMap {
-            address: 0x1001, // EL1008 inputs — 2
-            rx_pdos: &[],
-            tx_pdos: &[PDO_ENTRY_TX],
-            expected_wkc: 2,
-        },
-        SubDeviceMap {
-            address: 0x1002, // EL2004 outputs — 1
-            rx_pdos: &[PDO_ENTRY_RX],
-            tx_pdos: &[],
-            expected_wkc: 1,
-        },
+        // EK1100 coupler — 0
+        SubDeviceMap::new(0x1000, &[], &[], 0),
+        // EL1008 inputs — 2
+        SubDeviceMap::new(0x1001, &[], &[PDO_ENTRY_TX], 2),
+        // EL2004 outputs — 1
+        SubDeviceMap::new(0x1002, &[PDO_ENTRY_RX], &[], 1),
     ];
     let opts = EthercatConnectorOptions::builder()
         .network_interface("mock0")

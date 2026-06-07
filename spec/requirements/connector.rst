@@ -875,6 +875,38 @@ EtherCAT reference connector
    architecturally designated observability surface (ARCH_0012);
    structured logging remains a separate, future concern.
 
+.. req:: Master programs the SubDevice SM-watchdog registers
+   :id: REQ_0846
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0862
+
+   For every ``SubDeviceMap`` carrying ``sm_watchdog: Some(wd)``, the
+   gateway shall, during both bring-up and recovery and before the OP
+   transition (while the group is in PRE-OP), program the SubDevice's
+   watchdog-divider register ``0x0400`` with ``wd.divider`` and its
+   SM-watchdog-time register ``0x0420`` with ``wd.intervals``, read
+   both registers back, and fail the bring-up / recovery attempt — with
+   an error naming the SubDevice address, the register, and the
+   expected versus read-back values — on any write error or read-back
+   mismatch. A ``SubDeviceMap`` with ``sm_watchdog: None`` shall leave
+   the SubDevice's watchdog registers untouched.
+
+   **Rationale.** Safety assumption :need:`AOU_0016` requires an output
+   slave's SM watchdog to be enabled with a timeout ≤ FTTI/2 (≤ 50 ms),
+   because on a framework-invariant abort the master stops emitting
+   process-data frames and the slave watchdog is the **sole** mechanism
+   that drives outputs to their safe state (:need:`ADR_0065`). The ESC
+   powers up with a 100 ms window — twice the bound — and ESI files
+   carry no timeout data, so the master must program these registers
+   itself, exactly as IgH (``ecrt_slave_config_watchdog``) and TwinCAT
+   (startup register download) do. Silent non-application is this
+   domain's signature failure mode — a slave that accepts the write but
+   keeps its old window reports healthy while having lost its safe-state
+   guarantee — hence the mandatory read-back verify. The failure
+   propagates out of bring-up and surfaces as terminal ``Down`` per
+   :need:`REQ_0842`.
+
 Host wiring
 ~~~~~~~~~~~
 

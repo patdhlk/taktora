@@ -910,12 +910,17 @@ Framework internal-fault model (FEAT_0024)
      guarantee the slave watchdog already provides. (A *narrow*
      last-gasp that does **not** touch executor internals — GPIO pin,
      black-box flush — is permitted via the :need:`REQ_0125` handler.)
-   * *Static enforcement of the watchdog bound now.* Deferred, not
-     rejected: the SM watchdog is not modelled in
-     ``taktora-ethercat-esi`` / ``taktora-ethercat-netcfg`` today, so
-     the ≤ FTTI/2 bound cannot be validated at config time. The bound
-     is recorded as :need:`AOU_0016`; modelling + validation is a
-     separate dependent slice.
+   * *Static enforcement of the watchdog bound now.* Initially
+     deferred; **implemented 2026-06-07**: the enable bit is decoded
+     from the ESI (:need:`REQ_0843`) and validated at network-config
+     time, the timeout is resolved against FTTI/2 and validated on the
+     quantized effective value (:need:`REQ_0844`, :need:`REQ_0845`),
+     and — because real ESI files carry no timeout data and the ESC
+     power-on default (100 ms) itself violates the bound — the master
+     programs and read-back-verifies the watchdog registers during
+     every bring-up and recovery (:need:`REQ_0846`). :need:`AOU_0016`
+     now records only the residual assumption (device honours its
+     watchdog; safe-state values correct).
 
    **Consequences.**
 

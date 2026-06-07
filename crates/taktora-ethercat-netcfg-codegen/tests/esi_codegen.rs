@@ -21,11 +21,12 @@ const ESI_XML: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
       <Device>
         <Type ProductCode="#x07500354" RevisionNo="#x00000001">Coupler</Type>
         <Name>Coupler</Name>
+        <Sm StartAddress="#x1000" ControlByte="#x40" Enable="1">Outputs</Sm>
         <TxPdo>
           <Index>#x1a00</Index>
           <Entry><Index>#x6000</Index><SubIndex>1</SubIndex><BitLen>8</BitLen></Entry>
         </TxPdo>
-        <RxPdo>
+        <RxPdo Sm="0">
           <Index>#x1600</Index>
           <Entry><Index>#x7000</Index><SubIndex>1</SubIndex><BitLen>8</BitLen></Entry>
         </RxPdo>
@@ -47,13 +48,21 @@ fn lit_u64(expr: &syn::Expr) -> u64 {
     }
 }
 
-/// Pull the named field expr out of a struct literal.
-fn field<'a>(s: &'a syn::ExprStruct, name: &str) -> &'a syn::Expr {
-    &s.fields
+/// Pull a `SubDeviceMap::new(..)` positional argument by the field name
+/// it corresponds to. Argument order mirrors the constructor signature:
+/// `new(address, rx_pdos, tx_pdos, expected_wkc)`.
+fn field<'a>(call: &'a syn::ExprCall, name: &str) -> &'a syn::Expr {
+    let index = match name {
+        "address" => 0,
+        "rx_pdos" => 1,
+        "tx_pdos" => 2,
+        "expected_wkc" => 3,
+        other => panic!("SubDeviceMap::new has no `{other}` argument"),
+    };
+    call.args
         .iter()
-        .find(|f| matches!(&f.member, syn::Member::Named(id) if id == name))
-        .unwrap_or_else(|| panic!("struct literal has a `{name}` field"))
-        .expr
+        .nth(index)
+        .unwrap_or_else(|| panic!("SubDeviceMap::new is missing argument `{name}`"))
 }
 
 /// Extract the array of `PdoEntry { index, bit_length, .. }` from a
@@ -72,15 +81,25 @@ fn pdo_entries(expr: &syn::Expr) -> Vec<(u64, u64)> {
                 panic!("PDO array element is not a struct literal")
             };
             (
-                lit_u64(field(entry, "index")),
-                lit_u64(field(entry, "bit_length")),
+                lit_u64(struct_field(entry, "index")),
+                lit_u64(struct_field(entry, "bit_length")),
             )
         })
         .collect()
 }
 
-/// All `SubDeviceMap { .. }` struct literals from the generated `PDO_MAP`.
-fn sub_device_maps(file: &syn::File) -> Vec<&syn::ExprStruct> {
+/// Pull the named field expr out of a `PdoEntry { .. }` struct literal.
+fn struct_field<'a>(s: &'a syn::ExprStruct, name: &str) -> &'a syn::Expr {
+    &s.fields
+        .iter()
+        .find(|f| matches!(&f.member, syn::Member::Named(id) if id == name))
+        .unwrap_or_else(|| panic!("struct literal has a `{name}` field"))
+        .expr
+}
+
+/// All `SubDeviceMap::new(..)` constructor calls from the generated
+/// `PDO_MAP`.
+fn sub_device_maps(file: &syn::File) -> Vec<&syn::ExprCall> {
     let pdo_map = file
         .items
         .iter()
@@ -101,9 +120,18 @@ fn sub_device_maps(file: &syn::File) -> Vec<&syn::ExprStruct> {
     array
         .elems
         .iter()
-        .map(|elem| match elem {
-            syn::Expr::Struct(s) => s,
-            _ => panic!("PDO_MAP element is not a struct literal"),
+        .map(|elem| {
+            // An rx-carrying device emits
+            // `SubDeviceMap::new(..).with_sm_watchdog(..)`; unwrap any
+            // trailing method call to reach the `new(..)` constructor.
+            let mut call = elem;
+            while let syn::Expr::MethodCall(mc) = call {
+                call = &mc.receiver;
+            }
+            match call {
+                syn::Expr::Call(c) => c,
+                _ => panic!("PDO_MAP element is not a `SubDeviceMap::new(..)` call"),
+            }
         })
         .collect()
 }

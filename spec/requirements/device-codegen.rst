@@ -155,6 +155,39 @@ ESI parser
    ``tests/identity.rs``, ``pdos.rs``, ``sync_managers.rs``,
    ``mailbox.rs``, and ``dc_and_od.rs``.
 
+.. req:: ESI model exposes per-SM watchdog-trigger enable
+   :id: REQ_0843
+   :status: implemented
+   :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0859
+
+   Each ``SyncManager`` in the IR shall expose a
+   ``watchdog_trigger_enable: bool`` decoded from control-byte bit 6
+   (``0x40``) — the ETG SM-control watchdog-trigger-enable bit. The raw
+   ``control_byte`` shall be retained alongside it. An ``<Sm>`` with no
+   ``ControlByte`` attribute shall decode to ``false``: the parser shall
+   never fabricate an enabled watchdog from an absent control byte.
+
+   This is the per-SM ENABLE only. The watchdog **timeout** lives in the
+   device registers ``0x0400`` / ``0x0420``, which real ESI files do not
+   declare (verified against vendor files); the timeout is master-side
+   configuration (``REQ_0846`` territory), not part of this faithful
+   IR.
+
+   **Rationale.** :need:`AOU_0016` requires every fieldbus output slave
+   to run its sync-manager process-data watchdog **enabled** and bounded:
+   under the :need:`ADR_0065` fail-fast model, on a framework-invariant
+   abort the master stops emitting process-data frames and runs no
+   destructors, so the slave watchdog is the **sole** mechanism that
+   drives outputs to their safe state. The per-SM enable bit is the
+   statically-checkable half of that assumption — the only half an ESI
+   file declares — so surfacing it in the IR lets a config-time check
+   detect an output SM that ships with its watchdog trigger disabled. The
+   timeout bound (the other half of :need:`AOU_0016`) is not declared in
+   ESI and is enforced master-side. Implemented in
+   ``crates/taktora-ethercat-esi/src/model.rs`` and
+   ``src/dto.rs``; verified by ``tests/sm_watchdog.rs``.
+
 .. req:: Vendor-specific extensions captured as opaque blobs
    :id: REQ_0505
    :status: implemented
