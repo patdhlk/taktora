@@ -36,7 +36,15 @@ if grep -q $'^on\t' <<<"${gate_output}"; then
     exit 1
 fi
 
-# 2. Iterate.
+# 2. Guard against silently-dropped [patch.crates-io] overrides. Turns the
+#    local-deps patches on, re-resolves each example, and fails if any
+#    taktora-* dep still resolves to a registry source (a dropped patch that
+#    would build stale published crates). Self-contained: it restores the tree
+#    (toggle off + git checkout of manifests/lockfiles) via its own trap.
+echo "==> checking example patch skew (local-deps overrides actually apply)"
+"${SCRIPT_DIR}/check-example-patch-skew.sh"
+
+# 3. Iterate.
 shopt -s nullglob
 exit_code=0
 for manifest in "${EXAMPLES_DIR}"/*/Cargo.toml; do
