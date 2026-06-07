@@ -72,8 +72,11 @@ fn mid_drain_write_failure_rebuffers_remainder() {
     // Pre-populate the offline ring with 5 records BEFORE the listener
     // exists. We use large records (256 KiB each) so a single write
     // dominates the kernel SNDBUF — once the peer half-closes, the
-    // next write reliably fails with EPIPE instead of being absorbed
-    // by the kernel buffer.
+    // next write fails with EPIPE instead of being absorbed by the
+    // kernel buffer. This is timing-dependent, not guaranteed: the
+    // kernel may absorb one more write before the close propagates
+    // (observed on macOS CI, issue #52), so the assertions below
+    // tolerate at most one absorbed record.
     const REC_LEN: usize = 256 * 1024;
     let ring = Arc::new(OfflineRing::with_capacity(16));
     for i in 0..5u8 {
@@ -96,8 +99,9 @@ fn mid_drain_write_failure_rebuffers_remainder() {
         let (mut conn, _) = listener.accept().unwrap();
         let mut buf = vec![0u8; REC_LEN];
         std::io::Read::read_exact(&mut conn, &mut buf).unwrap();
-        // Hard-shutdown both directions so the flusher's next
-        // write_all hits EPIPE deterministically.
+        // Hard-shutdown both directions so one of the flusher's
+        // next writes hits EPIPE (usually the very next one, but
+        // the kernel buffer may absorb a single extra record).
         let _ = conn.shutdown(Shutdown::Both);
         drop(conn);
         drop(listener);
@@ -121,22 +125,27 @@ fn mid_drain_write_failure_rebuffers_remainder() {
     thread::sleep(Duration::from_millis(500));
     handle.shutdown();
 
-    // Ring should still contain the 4 records that were undrained
-    // when the write failed (rec-1..rec-4). With the pre-fix buggy
-    // implementation, only rec-1 would survive — the other three
-    // would be silently dropped from the local `drained` Vec.
+    // Ring should still contain the records that were undrained when
+    // the write failed: rec-1..rec-4, minus at most one record the
+    // kernel accepted for the already-closed peer (a successful
+    // `write` is not delivery — unavoidable loss at this layer, not
+    // a flusher bug). With the pre-fix buggy implementation, only
+    // ONE record would survive — the others would be silently
+    // dropped from the local `drained` Vec — so `len >= 3` still
+    // fully discriminates the regression.
     let remaining = ring.drain_all();
     let tags: Vec<u8> = remaining.iter().map(|b| b[0]).collect();
-    assert_eq!(
-        remaining.len(),
-        4,
-        "expected 4 re-buffered records (rec-1..rec-4), got {} with tags {:?}",
+    assert!(
+        remaining.len() >= 3,
+        "expected at least 3 re-buffered records (at most one absorbed \
+         by SNDBUF after peer shutdown), got {} with tags {:?}",
         remaining.len(),
         tags
     );
+    let full = [b'1', b'2', b'3', b'4'];
     assert_eq!(
         tags,
-        vec![b'1', b'2', b'3', b'4'],
-        "re-buffered records must preserve original FIFO order"
+        full[full.len() - tags.len()..],
+        "re-buffered records must be a FIFO-ordered suffix of rec-1..rec-4"
     );
 }
