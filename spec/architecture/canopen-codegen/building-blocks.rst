@@ -24,8 +24,8 @@ to the runtime trait surface the generated drivers implement.
        ver["BB_0087 canopen-eds-verify<br/>verify(eds, dump) → VerifyReport"]
        adapter["BB_0088 connector CanOpenDevice adapter (follow-on)"]
 
-       ini --> odc
-       odc --> p
+       ini -->|"parse()"| p
+       odc -.->|"OD types"| p
        p -->|EdsFile| g
        g -->|CodegenBackend| b
        b -->|implements| rt

@@ -43,6 +43,7 @@ on the same init path (:need:`REQ_0805`).
        Sink -->|"no daemon, no sink"| UseConsole
        UseDlt --> Bridge
        UseConsole --> Bridge
+       KeepExisting --> Bridge
 
 ----
 
