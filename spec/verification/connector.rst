@@ -4,7 +4,7 @@ Connector framework — verification
 Test cases verifying the connector framework requirements. Each ``test``
 directive ``:verifies:`` one or more requirements from
 :doc:`../requirements/connector/index` (or building blocks from
-:doc:`../architecture/connector`). The four-layer test pyramid from the
+:doc:`../architecture/connector/index`). The four-layer test pyramid from the
 architecture's quality strategy is reflected by the section grouping
 below: unit, codec, transport integration, MQTT integration, workspace
 end-to-end, and loom concurrency.

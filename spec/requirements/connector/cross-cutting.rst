@@ -144,7 +144,7 @@ Every requirement in this chapter (excluding rejected anti-goals) carries a
 ``:satisfies:`` link to its capability-cluster feat; every cluster feat
 ``:satisfies:`` :need:`FEAT_0030`. Architectural specifications
 (``spec`` directives) refining these requirements are emitted in
-:doc:`../../architecture/connector`. Verification artefacts (``test``
+:doc:`../../architecture/connector/index`. Verification artefacts (``test``
 directives) are emitted in :doc:`../../verification/connector`.
 
 .. needtable::

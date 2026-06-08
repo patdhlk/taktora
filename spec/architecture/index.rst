@@ -11,7 +11,7 @@ detailed-design notes that predate the arc42 adoption.
 .. toctree::
    :maxdepth: 2
 
-   connector
+   connector/index
    plc-runtime/index
    bounded-alloc
    device-codegen/index
