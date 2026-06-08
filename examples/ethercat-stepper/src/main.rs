@@ -295,6 +295,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             | (u8::from(dev.channel_2.input) << 1)
                             | (u8::from(dev.channel_3.input) << 2)
                             | (u8::from(dev.channel_4.input) << 3)
+                            | (u8::from(dev.channel_5.input) << 4)
+                            | (u8::from(dev.channel_6.input) << 5)
+                            | (u8::from(dev.channel_7.input) << 6)
+                            | (u8::from(dev.channel_8.input) << 7)
                     }
                     // Decode failure: fall back to the raw byte rather than
                     // panic in the hot loop.
