@@ -61,21 +61,26 @@ re-entering the wait.
        Wake{"wake cause?"}
        EINTR["bare EINTR — dispatch nothing,<br/>count nothing, re-enter wait"]
        Stop["stop request / SIGINT-SIGTERM<br/>→ return Ok(())"]
-       Pre["pre_execute reference point<br/>(task-logic start, telemetry clock)"]
        Faulted{"task faulted?"}
+       Skip["faulted, no handler:<br/>no submission,<br/>pre_execute NOT called"]
+       Pre["pre_execute reference point<br/>(task-logic start, telemetry clock)"]
+       PreH["pre_execute reference point<br/>(task-logic start, telemetry clock)"]
        Exec["execute item logic"]
        Handler["dispatch fault handler<br/>once per cycle"]
        Post["post_execute: fold took / jitter /<br/>lateness into CycleStats"]
+       PostF["post_execute:<br/>faulted = true, took = None"]
        Obs["on_cycle_stats(&CycleObservation)<br/>(once per scan attempt, incl. faulted)"]
 
        Wait --> Wake
        Wake -->|"EINTR"| EINTR --> Wait
        Wake -->|"stop / termination"| Stop
-       Wake -->|"grid tick / event"| Pre
-       Pre --> Faulted
-       Faulted -->|"no"| Exec --> Post
-       Faulted -->|"yes"| Handler --> Post
-       Post --> Obs --> Wait
+       Wake -->|"grid tick / event"| Faulted
+       Faulted -->|"no"| Pre --> Exec --> Post
+       Faulted -->|"yes · handler registered"| PreH --> Handler --> Post
+       Faulted -->|"yes · no handler"| Skip --> PostF
+       Post --> Obs
+       PostF --> Obs
+       Obs --> Wait
 
 .. arch-decision:: Pre-allocate dispatch scratch at Executor::build time
    :id: ADR_0011
