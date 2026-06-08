@@ -390,11 +390,16 @@ per-sample update path), and per-task aggregate slots allocated at
    (per :need:`REQ_0104`).
    ✅ Per-task memory footprint is bounded and known at build time
    (~1 kB / task for the histogram + snapshots).
-   ❌ Percentile values are bucket-quantised — relative accuracy is
-   bounded by bucket width (~33% within a single bucket, ≤ 1% at
-   the bucket centroid). Acceptable for soft-RT telemetry; the
-   :need:`REQ_0111` harness exposes raw samples for finer offline
-   analysis when needed.
+   ❌ Percentile values are bucket-quantised. With the shipped octave
+   layout the geometric-midpoint estimate is bounded at a factor of ``√2``
+   (≈ +42 % / −29 %, ``taktora_stats::PERCENTILE_MAX_REL_ERR_PCT``) — **not**
+   ≤ 1 %. "≥ 3 buckets per decade" yields ~factor-2 bucket width and is a
+   *different* constraint from a ≤ 1 % centroid bound (which needs ~115
+   buckets per decade); the original wording here conflated them. Acceptable
+   for soft-RT trend telemetry; any threshold/SLA decision uses the
+   exact-extreme gate of :need:`REQ_0851`, and the :need:`REQ_0111` harness
+   exposes raw samples for exact offline percentiles. Tightening the estimate
+   to ≤ 1 % is tracked as :need:`REQ_0852`.
 
    **Amendment (:need:`REQ_0105`, :need:`REQ_0106`).** The histogram is
    retained as the percentile estimator, but two quantities are added
