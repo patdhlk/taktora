@@ -5,7 +5,7 @@ Architecture documentation for the workspace-wide logging facade and
 its default DLT backend (see :doc:`../../requirements/logging/index`),
 structured per the arc42 template and encoded with sphinx-needs using
 the useblocks "x-as-code" arc42 directive types. Mirrors the structure
-of :doc:`../canopen-codegen` for diff-friendly review.
+of :doc:`../canopen-codegen/index` for diff-friendly review.
 
 Each architectural element ``:refines:`` or ``:implements:`` a parent
 requirement so the trace is preserved end-to-end.

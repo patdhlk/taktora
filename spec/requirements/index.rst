@@ -22,7 +22,7 @@ top-level features:
   build-time layered crates that translate CANopen EDS (CiA 306)
   files into strongly-typed Rust device drivers, with a shared
   ``fieldbus-od-core`` OD IR co-owned by the EtherCAT toolchain.
-  See :doc:`canopen-codegen`.
+  See :doc:`canopen-codegen/index`.
 * :need:`FEAT_0070` "Shared logging base library" — a workspace-wide
   logging facade (``taktora-log``) with a default AUTOSAR DLT
   backend (``taktora-log-dlt``) and a clean swap path for
@@ -48,7 +48,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    connector
    bounded-alloc
    device-codegen/index
-   canopen-codegen
+   canopen-codegen/index
    logging/index
    ethercat-netcfg/index
    motion/index

@@ -15,7 +15,7 @@ detailed-design notes that predate the arc42 adoption.
    plc-runtime
    bounded-alloc
    device-codegen/index
-   canopen-codegen
+   canopen-codegen/index
    logging/index
    ethercat-netcfg/index
    motion/index
