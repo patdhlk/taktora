@@ -9,7 +9,7 @@ top-level features:
   :doc:`plc-runtime/index`.
 * :need:`FEAT_0030` "Connector framework" — the general-purpose framework
   for bridging taktora-executor applications to external protocols. See
-  :doc:`connector`.
+  :doc:`connector/index`.
 * :need:`FEAT_0040` "Bounded global allocator" — workspace
   infrastructure providing a static, pre-allocated, fixed-block
   ``#[global_allocator]`` for taktora binaries that require
@@ -45,7 +45,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    :maxdepth: 2
 
    plc-runtime/index
-   connector
+   connector/index
    bounded-alloc
    device-codegen/index
    canopen-codegen/index

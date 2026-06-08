@@ -7,7 +7,7 @@ the useblocks "x-as-code" conventions
 (https://x-as-code.useblocks.com/how-to-guides/arc42/index.html).
 
 Each architectural element ``:refines:`` or ``:implements:`` a parent
-requirement from :doc:`../requirements/connector` so the trace is
+requirement from :doc:`../requirements/connector/index` so the trace is
 preserved end-to-end.
 
 .. contents:: Sections

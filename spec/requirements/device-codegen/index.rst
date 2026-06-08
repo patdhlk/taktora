@@ -8,7 +8,7 @@ time, with zero runtime XML parsing and no dependency on the
 ``taktora-connector-ethercat`` runtime.
 
 The decomposition mirrors the convention established in
-:doc:`../connector` and :doc:`../plc-runtime/index`:
+:doc:`../connector/index` and :doc:`../plc-runtime/index`:
 
 * **Top-level umbrella feature** — :need:`FEAT_0050` — peer to
   :need:`FEAT_0010` (PLC runtime heart), :need:`FEAT_0030` (Connector
