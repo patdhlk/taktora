@@ -100,6 +100,30 @@ Building blocks
      every ``alloc``; ``lock()`` stores ``true`` (Release),
      ``alloc`` reads (Acquire) and panics if set.
 
+   The diagram below illustrates how the four sub-components are
+   arranged inside the single ``static BoundedAllocator<N, S>``
+   instance and how an ``alloc`` call traverses them:
+
+   .. mermaid::
+
+      graph TD
+          subgraph Static["static BoundedAllocator&lt;N, S&gt;"]
+              Arena["Arena<br/>UnsafeCell&lt;[u8; N×S]&gt;<br/>(repr(align(S)))"]
+              Bitmap["Free bitmap<br/>[AtomicU64; (N+63)/64]<br/>bit i = 1 → block i free"]
+              Counters["Counters<br/>alloc_count · dealloc_count<br/>peak_in_use  (AtomicUsize)"]
+              Lock["Lock flag<br/>AtomicBool<br/>(false = open)"]
+          end
+          Caller["caller: alloc(layout)"]
+          Caller -->|"1. load(Acquire)"| Lock
+          Lock -->|"true → panic"| Panic["panic (abort)"]
+          Lock -->|"false → size/align check"| Check{"layout.size ≤ S?"}
+          Check -->|"no → return null"| Null["null → alloc_error_handler → abort"]
+          Check -->|"yes → bit-scan"| Bitmap
+          Bitmap -->|"no free bit → return null"| Null
+          Bitmap -->|"CAS 1→0 on bit i"| Arena
+          Arena -->|"pointer to block i"| Counters
+          Counters -->|"fetch_add alloc_count<br/>update peak_in_use"| Result["return ptr"]
+
    Lifetime contract — the entire structure is intended for
    ``static`` storage. No public ``new`` other than the ``const fn``
    used in a ``static`` initialiser.
@@ -157,6 +181,18 @@ Implementation
      bitmap-CAS invariant (a thread that observes a ``1->0``
      transition on bit ``i`` is the unique owner of block ``i``
      until it CASs the bit back to ``1`` in ``dealloc``).
+
+   The lock lifecycle (:need:`REQ_0302`) is one-way — once
+   ``lock()`` is called there is no path back to ``Open``:
+
+   .. mermaid::
+
+      stateDiagram-v2
+          [*] --> Open : static initialisation
+          Open --> Open : alloc / dealloc (normal operation)
+          Open --> Locked : lock() — stores true (Release)
+          Locked --> Locked : dealloc (still permitted)
+          Locked --> Abort : alloc / alloc_zeroed / realloc\n→ panic → abort
 
    **``crates/taktora-bounded-alloc/tests/``**
 

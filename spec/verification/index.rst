@@ -8,13 +8,13 @@ Test cases verifying requirements. Each ``test`` directive
 .. toctree::
    :maxdepth: 2
 
-   connector
-   plc-runtime
+   connector/index
+   plc-runtime/index
    bounded-alloc
-   device-codegen
-   canopen-codegen
-   logging
-   ethercat-netcfg
+   device-codegen/index
+   canopen-codegen/index
+   logging/index
+   ethercat-netcfg/index
 
 .. needtable::
    :types: test

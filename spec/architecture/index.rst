@@ -11,14 +11,14 @@ detailed-design notes that predate the arc42 adoption.
 .. toctree::
    :maxdepth: 2
 
-   connector
-   plc-runtime
+   connector/index
+   plc-runtime/index
    bounded-alloc
-   device-codegen
-   canopen-codegen
-   logging
-   ethercat-netcfg
-   motion
+   device-codegen/index
+   canopen-codegen/index
+   logging/index
+   ethercat-netcfg/index
+   motion/index
    safety
 
 Building blocks
