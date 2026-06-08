@@ -6,7 +6,8 @@
 //!
 //! EL1008 channel map: ch1(bit0)=Index +, ch2(bit1)=Index -,
 //! ch3(bit2)=Emergency-stop, ch4(bit3)=Fault-reset, ch5(bit4)=Jog + (endless,
-//! hold-to-run), ch6(bit5)=Jog - (endless). Jog overrides the index moves while
+//! hold-to-run), ch6(bit5)=Jog - (endless), ch7(bit6)=Set-zero (load 0 into the
+//! position counter at the current spot). Jog overrides the index moves while
 //! held and stops on release or stall (e.g. reaching a hard block).
 
 use crate::el7047::{El7047Control, El7047Status, start_type};
@@ -66,6 +67,7 @@ impl Controller {
         let reset = rising & 0b0000_1000 != 0; // ch4 rising edge
         let jog_plus = buttons & 0b0001_0000 != 0; // ch5 level-triggered
         let jog_minus = buttons & 0b0010_0000 != 0; // ch6 level-triggered
+        let set_zero = buttons & 0b0100_0000 != 0; // ch7 level-triggered
 
         let mut ctrl = El7047Control {
             enable: healthy && !estop,
@@ -77,6 +79,17 @@ impl Controller {
             deceleration: p.deceleration,
             ..Default::default()
         };
+
+        // ch7: manual set-zero. Load 0 into the position counter at the current
+        // location (a readable datum). No motion while setting the datum; cancel
+        // any in-flight index latch. Takes precedence over jog/index.
+        if set_zero {
+            self.execute_held = false;
+            self.seen_busy = false;
+            ctrl.set_counter = true;
+            ctrl.set_counter_value = 0;
+            return ctrl;
+        }
 
         // ch5/ch6: hold-to-run endless jog (drive toward a hard block). This is
         // level-triggered and OVERRIDES the index moves while a jog button is
@@ -343,6 +356,18 @@ mod tests {
         let ctrl = c.step(0b0001_0000, &idle_status(), params(), true);
         assert!(ctrl.execute);
         assert_eq!(ctrl.start_type, start_type::ENDLESS_PLUS);
+    }
+
+    #[test]
+    fn ch7_sets_counter_to_zero_without_moving() {
+        let mut c = Controller::default();
+        let ctrl = c.step(0b0100_0000, &idle_status(), params(), true);
+        assert!(ctrl.set_counter, "ch7 pulses ENC Set counter");
+        assert_eq!(ctrl.set_counter_value, 0);
+        assert!(!ctrl.execute, "no motion while setting the datum");
+        // release -> set_counter clears.
+        let ctrl = c.step(0, &idle_status(), params(), true);
+        assert!(!ctrl.set_counter);
     }
 
     #[test]

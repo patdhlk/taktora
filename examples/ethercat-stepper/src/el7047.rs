@@ -62,13 +62,24 @@ pub struct El7047Control {
     pub acceleration: u16,
     /// Deceleration ramp (POS-interface raw units).
     pub deceleration: u16,
+    /// ENC Control bit2 ("Set counter"): pulse to load `set_counter_value`
+    /// into the position counter (manual zero / datum).
+    pub set_counter: bool,
+    /// ENC "Set counter value" — the value loaded when `set_counter` pulses.
+    pub set_counter_value: i32,
 }
 
 /// Encode the control surface into the 22-byte positioning-interface
-/// output image. Bytes 0-5 (ENC Control) stay zero.
+/// output image. ENC Control is bytes 0-5: byte0 bit2 = "Set counter",
+/// bytes 2-5 = "Set counter value".
 #[must_use]
 pub fn encode_control(c: &El7047Control) -> [u8; OUTPUT_LEN] {
     let mut img = [0u8; OUTPUT_LEN];
+    // ENC Control (bytes 0-5): byte0 bit2 = Set counter; bytes 2-5 = value.
+    if c.set_counter {
+        img[0] |= 1 << 2;
+    }
+    img[2..6].copy_from_slice(&c.set_counter_value.to_le_bytes());
     // STM Control word (bytes 6-7): bit0 Enable, bit1 Reset, bit2 Reduce-torque.
     let mut stm = 0u16;
     if c.enable {
@@ -157,6 +168,23 @@ mod tests {
         };
         let img = encode_control(&ctrl);
         assert_eq!(u16::from_le_bytes([img[8], img[9]]) & 0x0002, 0x0002);
+    }
+
+    #[test]
+    fn encode_set_counter_targets_enc_control() {
+        let ctrl = El7047Control {
+            set_counter: true,
+            set_counter_value: 0,
+            ..Default::default()
+        };
+        let img = encode_control(&ctrl);
+        // ENC Control byte0 bit2 = Set counter.
+        assert_eq!(img[0] & 0b0000_0100, 0b0000_0100);
+        // Set counter value bytes 2-5 = 0.
+        assert_eq!(i32::from_le_bytes([img[2], img[3], img[4], img[5]]), 0);
+        // Not setting the counter leaves ENC Control clear.
+        let img0 = encode_control(&El7047Control::default());
+        assert_eq!(img0[0] & 0b0000_0100, 0);
     }
 
     #[test]
