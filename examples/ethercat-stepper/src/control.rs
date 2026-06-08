@@ -26,11 +26,17 @@ pub struct MoveParams {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Controller {
     prev_buttons: u8,
-    // Latch for the Beckhoff positioning Execute input: we hold Execute high
-    // from the rising edge that fires a move until the drive acknowledges with
-    // Busy, then drop it so it is ready for the next rising edge. Forced low on
-    // emergency-stop or loss of connector health (safe-state wins).
+    // Latch for the Beckhoff positioning Execute input. We hold Execute high for
+    // the WHOLE move — from the rising edge that fires it until the drive has
+    // gone Busy and then returned to not-Busy (move complete) — NOT just until
+    // Busy. Dropping Execute mid-move aborts the travel on the EL7047, which
+    // truncated each move to the few increments it covered in one control cycle.
+    // Forced low on emergency-stop or loss of connector health (safe-state wins).
     execute_held: bool,
+    // True once Busy has been observed for the in-flight move, so we can tell
+    // "move not started yet" (hold) from "move finished" (release) — both have
+    // busy == false.
+    seen_busy: bool,
     // Target of the in-flight move. The POS-interface Target position must stay
     // valid for the WHOLE time Execute is held high — the EL7047 re-reads it and
     // would truncate the move if it reverted to 0 on the held cycles.
@@ -68,13 +74,21 @@ impl Controller {
             ..Default::default()
         };
 
-        // Drop a held Execute once the drive acknowledges the move with Busy;
-        // it is then ready for the next rising edge.
-        if self.execute_held && status.busy {
-            self.execute_held = false;
+        // Track move progress and release Execute only when the move completes:
+        // Busy has been observed AND has since cleared. Holding Execute through
+        // the whole Busy window is required — dropping it early aborts the move.
+        if self.execute_held {
+            if status.busy {
+                self.seen_busy = true;
+            }
+            if self.seen_busy && !status.busy {
+                self.execute_held = false;
+            }
         }
 
-        let can_move = healthy && !estop && !status.busy && !status.error;
+        // Fire a new move only when idle (drive ready, not busy, not already
+        // executing a held move).
+        let can_move = healthy && !estop && !status.busy && !status.error && !self.execute_held;
         if can_move {
             let dir = if rising & 0b0000_0001 != 0 {
                 Some(1)
@@ -86,6 +100,7 @@ impl Controller {
             if let Some(sign) = dir {
                 self.held_target = p.step * sign;
                 self.execute_held = true;
+                self.seen_busy = false;
             }
         }
 
@@ -185,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_held_until_busy_then_second_press_fires() {
+    fn execute_held_through_whole_move_then_second_press_fires() {
         let mut c = Controller::default();
         // settle prev_buttons low
         let _ = c.step(0, &idle_status(), params(), true);
@@ -193,37 +208,43 @@ mod tests {
         let ctrl = c.step(0b0000_0001, &idle_status(), params(), true);
         assert!(ctrl.execute, "rising edge should fire Execute");
         assert_eq!(ctrl.target_position, 3200);
-        // next cycle: drive has not yet acknowledged (still !busy), button still
-        // held (no new rising edge) -> Execute stays high (held) AND the target
-        // must stay stable (regression: it used to revert to 0, truncating the
-        // move to a few increments on real hardware).
+        // before the drive reports Busy, Execute stays high and target stable.
         let ctrl = c.step(0b0000_0001, &idle_status(), params(), true);
-        assert!(ctrl.execute, "Execute should stay high until Busy");
-        assert_eq!(
-            ctrl.target_position, 3200,
-            "target must stay valid while Execute is held"
-        );
-        // drive acknowledges with Busy -> Execute drops, ready for next edge.
+        assert!(ctrl.execute, "Execute held before Busy");
+        assert_eq!(ctrl.target_position, 3200, "target stable while held");
+        // drive is now Busy (moving). Execute MUST stay high for the whole move —
+        // dropping it here aborts the travel on the EL7047.
         let busy = El7047Status {
             ready: true,
             busy: true,
             ..Default::default()
         };
         let ctrl = c.step(0b0000_0001, &busy, params(), true);
-        assert!(!ctrl.execute, "Execute should drop once Busy observed");
-        // move completes: not Busy, In-Target. Release button, then press again.
+        assert!(
+            ctrl.execute,
+            "Execute must stay high WHILE Busy (whole move)"
+        );
+        assert_eq!(ctrl.target_position, 3200, "target stable while moving");
+        // still moving a few cycles later -> still held.
+        let ctrl = c.step(0b0000_0001, &busy, params(), true);
+        assert!(ctrl.execute, "Execute still high mid-move");
+        // move completes: Busy clears, In-Target set -> Execute released.
         let done = El7047Status {
             ready: true,
             in_target: true,
             ready_to_execute: true,
             ..Default::default()
         };
+        let ctrl = c.step(0b0000_0001, &done, params(), true);
+        assert!(!ctrl.execute, "Execute released once the move completes");
+        // release button, then press again -> a fresh move fires.
         let _ = c.step(0, &done, params(), true); // release
         let ctrl = c.step(0b0000_0001, &done, params(), true); // second press
         assert!(
             ctrl.execute,
             "a fresh press after completion should re-fire"
         );
+        assert_eq!(ctrl.target_position, 3200);
     }
 
     #[test]
