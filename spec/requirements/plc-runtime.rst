@@ -589,34 +589,87 @@ Scan-cycle observability
 
 .. req:: Per-task latency percentiles
    :id: REQ_0100
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0021
+   :links: BB_0050, IMPL_0070, TEST_0190
 
    The runtime shall report p50, p95, and p99 execute-duration percentiles
    per registered task, computed over a sliding window whose size is
    configurable at ``Executor::build`` time.
 
-   Percentile estimation shall use a fixed-bucket log-linear histogram
-   covering the value range 100 ns … 10 s with at least three buckets
-   per decade (yielding ≤ 1% relative error at bucket centroids). The
-   bucket layout shall be fixed at compile time so the per-sample update
-   path is allocation-free; see :need:`REQ_0104` and :need:`ADR_0060`.
+   Percentile estimation uses a fixed, compile-time bucket histogram so the
+   per-sample update path is allocation-free (:need:`REQ_0104`,
+   :need:`ADR_0060`). The reported percentile is the **geometric midpoint**
+   of the occupied bucket (``2^i · √2`` for the shipped octave layout),
+   which removes the systematic downward bias of a lower-edge estimate and
+   bounds the estimate's relative error symmetrically at
+   ``taktora_stats::PERCENTILE_MAX_REL_ERR_PCT`` — a factor of ``√2``, i.e.
+   ≈ +42 % / −29 % for the octave layout.
 
-   Implementation note (2026-06-03): the current ``taktora-stats``
-   histogram uses octave buckets (~one-octave estimate error); achieving
-   the ≤ 1% bound requires a sub-octave bucket refinement, tracked as
-   separate work. The p50/p95/p99 reporting and sliding window are
-   implemented; this requirement remains ``draft`` pending that precision
-   refinement.
+   These percentiles are **coarse telemetry for trend and shape, not
+   threshold-grade figures.** Any SLA, acceptance, commissioning, or
+   regression decision shall instead use the exact windowed extremes of the
+   exact-extreme SLO conformance gate (:need:`REQ_0851`); the histogram is
+   deliberately *not* authoritative for pass/fail. Tightening the percentile
+   estimate itself to ≤ 1 % relative error is a separate, deferred concern
+   tracked as :need:`REQ_0852` (sub-octave buckets) — it is not on the
+   production sign-off path.
 
-   Update (2026-06-04): the percentile estimate now reports the **geometric
-   midpoint** of the containing octave (``2^i · √2``) rather than the bucket
-   lower edge. This removes the systematic downward bias (a value just under
-   ``2^(i+1)`` previously read back as ``2^i``, −50%) and bounds the relative
-   error symmetrically at ``taktora_stats::PERCENTILE_MAX_REL_ERR_PCT`` (≈
-   42%). The exact extremes of :need:`REQ_0105` (``min``/``max``) remain the
-   values to use for any threshold decision until the sub-octave refinement
-   lands.
+.. req:: Exact-extreme SLO conformance gate
+   :id: REQ_0851
+   :status: implemented
+   :satisfies: FEAT_0021
+   :links: BB_0050, IMPL_0070, TEST_0849, TEST_0191, TEST_0850
+
+   Any pass/fail decision on cycle-time behaviour — acceptance test,
+   commissioning sign-off, regression gate, or alarm threshold — shall be
+   evaluated against the **exact** windowed extremes the runtime retains,
+   never against the bucket-quantised percentiles of :need:`REQ_0100`. The
+   percentile histogram carries up to
+   ``taktora_stats::PERCENTILE_MAX_REL_ERR_PCT`` relative error by
+   construction and is reserved for trend visualisation.
+
+   The authoritative quantities, each an actual observed sample carrying no
+   bucket-quantisation error and aged with the same sliding window as
+   :need:`REQ_0100`, are:
+
+   * **execute-duration min/max** — :need:`REQ_0105` (monotonic-deque
+     backed, exact);
+   * **maximum period jitter** — :need:`REQ_0101` (exact windowed maximum);
+   * **maximum deadline lateness** — :need:`REQ_0106` (exact signed windowed
+     maximum).
+
+   All three are already exposed on both the pull snapshot and the push /
+   NDJSON paths (:need:`REQ_0103`, :need:`REQ_0111`). A jitter SLO of the
+   form "max jitter ≤ X over the window" is therefore decidable **exactly,
+   today**, with no dependency on the deferred histogram-precision work of
+   :need:`REQ_0852`. This requirement records the policy that the exact
+   path — not the estimate — is the gate.
+
+.. req:: Sub-octave percentile precision
+   :id: REQ_0852
+   :status: draft
+   :satisfies: FEAT_0021
+   :refines: REQ_0100
+
+   To make the percentile **estimate** of :need:`REQ_0100` itself
+   threshold-grade, the histogram shall bound percentile relative error at
+   ≤ 1 % at bucket centroids across the range 100 ns … 10 s, while
+   preserving the allocation-free, bounded-time per-sample update of
+   :need:`REQ_0104`. This requires a sub-octave (log-linear /
+   mantissa-subdivided) bucket layout in place of the shipped octave
+   buckets. Verified by :need:`TEST_0868`.
+
+   Until it lands, exact threshold decisions use the exact-extreme gate of
+   :need:`REQ_0851`; this requirement only tightens the estimate and is not
+   on the production sign-off path.
+
+   **Math note.** The ≤ 1 % bound and "≥ 3 buckets per decade" are
+   *independent* constraints, not equivalent ones. Three buckets per decade
+   give ~factor-2 bucket width (≈ 40 % worst-case intra-bucket error); a
+   ≤ 1 % centroid bound needs bucket edges in roughly a 1.02 ratio
+   (~115 buckets per decade). The superseded wording of :need:`REQ_0100`
+   and the original :need:`ADR_0060` consequence note conflated the two.
 
 .. req:: Per-task maximum jitter
    :id: REQ_0101
