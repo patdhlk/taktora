@@ -36,7 +36,7 @@ top-level features:
 * :need:`FEAT_0090` "Real-time motion control" — soft-real-time,
   allocation-free trajectory generation (profiles, electronic gearing,
   camming, flying saw) feeding CiA 402 drives in CSP mode, layered on
-  the taktora runtime. See :doc:`motion`.
+  the taktora runtime. See :doc:`motion/index`.
 
 Each ``req`` directive ``:satisfies:`` one ``feat`` parent; each
 capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
@@ -51,7 +51,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    canopen-codegen
    logging
    ethercat-netcfg
-   motion
+   motion/index
 
 Requirements at a glance
 ------------------------

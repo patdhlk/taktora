@@ -1,10 +1,8 @@
-Motion — trajectory core architecture
-=====================================
+Allocation-free trajectory core
+===============================
 
-Detailed design for taktora's motion-control stack (:need:`FEAT_0090`).
-This page collects the architecture decisions and building blocks for
-``taktora-motion-core`` and, later, the executor/connector glue
-``taktora-motion``.
+Architecture decisions for the pure algorithmic layer
+``taktora-motion-core`` (the FEAT_0091 trajectory core).
 
 Architecture decisions
 ----------------------
