@@ -9,7 +9,7 @@ Test cases verifying requirements. Each ``test`` directive
    :maxdepth: 2
 
    connector
-   plc-runtime
+   plc-runtime/index
    bounded-alloc
    device-codegen/index
    canopen-codegen/index

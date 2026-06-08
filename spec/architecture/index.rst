@@ -12,7 +12,7 @@ detailed-design notes that predate the arc42 adoption.
    :maxdepth: 2
 
    connector
-   plc-runtime
+   plc-runtime/index
    bounded-alloc
    device-codegen/index
    canopen-codegen/index

@@ -14,7 +14,7 @@ This specification frames the workspace as the **runtime heart of a
 soft-real-time PLC**: a foundation for non-safety industrial automation,
 robotics control loops, machine-monitoring runtimes, and R&D testbeds where
 occasional jitter is acceptable. The framing follows directly from a gap
-analysis (recorded in :doc:`requirements/plc-runtime`) that distinguishes
+analysis (recorded in :doc:`requirements/plc-runtime/index`) that distinguishes
 the capabilities ``taktora`` already provides from those that must be
 added before it can credibly call itself a soft-RT PLC.
 
@@ -38,7 +38,7 @@ are ``feat`` directives; individual obligations are ``req`` directives that
 Reading order
 -------------
 
-Start with :doc:`requirements/plc-runtime` for the full feature/requirement
+Start with :doc:`requirements/plc-runtime/index` for the full feature/requirement
 decomposition. Work-in-progress sections — :doc:`architecture/index` and
 :doc:`verification/index` — will land alongside the implementation work that
 closes the gap requirements.

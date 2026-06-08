@@ -6,7 +6,7 @@ top-level features:
 
 * :need:`FEAT_0010` "PLC runtime heart on iceoryx2" — taktora-executor
   framed as the runtime heart of a soft-real-time PLC. See
-  :doc:`plc-runtime`.
+  :doc:`plc-runtime/index`.
 * :need:`FEAT_0030` "Connector framework" — the general-purpose framework
   for bridging taktora-executor applications to external protocols. See
   :doc:`connector`.
@@ -44,7 +44,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
 .. toctree::
    :maxdepth: 2
 
-   plc-runtime
+   plc-runtime/index
    connector
    bounded-alloc
    device-codegen/index
