@@ -26,7 +26,7 @@ top-level features:
 * :need:`FEAT_0070` "Shared logging base library" — a workspace-wide
   logging facade (``taktora-log``) with a default AUTOSAR DLT
   backend (``taktora-log-dlt``) and a clean swap path for
-  ``log4rs`` / ``env_logger`` / bespoke loggers. See :doc:`logging`.
+  ``log4rs`` / ``env_logger`` / bespoke loggers. See :doc:`logging/index`.
 * :need:`FEAT_0080` "EtherCAT network-config codegen toolchain" —
   build-time layered crates that translate an integrator-authored
   ``network.yaml`` (bus topology + channel wiring) into the
@@ -49,7 +49,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    bounded-alloc
    device-codegen
    canopen-codegen
-   logging
+   logging/index
    ethercat-netcfg
    motion/index
 

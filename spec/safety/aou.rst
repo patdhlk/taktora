@@ -107,7 +107,7 @@ Logging (taktora-log / taktora-log-dlt)
 ---------------------------------------
 
 These AoUs cover the workspace logging surface (see
-:doc:`../requirements/logging` and :doc:`../architecture/logging`).
+:doc:`../requirements/logging/index` and :doc:`../architecture/logging/index`).
 Logging is QM (per :need:`CON_0027`); every safety-relevant property of
 the log stream depends on the integrator's deployment, so taktora
 carries the responsibility as AoUs rather than as TSRs.

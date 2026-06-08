@@ -13,7 +13,7 @@ Test cases verifying requirements. Each ``test`` directive
    bounded-alloc
    device-codegen
    canopen-codegen
-   logging
+   logging/index
    ethercat-netcfg
 
 .. needtable::

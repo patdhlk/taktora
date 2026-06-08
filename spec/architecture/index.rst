@@ -16,7 +16,7 @@ detailed-design notes that predate the arc42 adoption.
    bounded-alloc
    device-codegen
    canopen-codegen
-   logging
+   logging/index
    ethercat-netcfg
    motion/index
    safety
