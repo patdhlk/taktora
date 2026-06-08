@@ -31,6 +31,10 @@ pub struct Controller {
     // Busy, then drop it so it is ready for the next rising edge. Forced low on
     // emergency-stop or loss of connector health (safe-state wins).
     execute_held: bool,
+    // Target of the in-flight move. The POS-interface Target position must stay
+    // valid for the WHOLE time Execute is held high — the EL7047 re-reads it and
+    // would truncate the move if it reverted to 0 on the held cycles.
+    held_target: i32,
 }
 
 impl Controller {
@@ -80,7 +84,7 @@ impl Controller {
                 None
             };
             if let Some(sign) = dir {
-                ctrl.target_position = p.step * sign;
+                self.held_target = p.step * sign;
                 self.execute_held = true;
             }
         }
@@ -92,6 +96,13 @@ impl Controller {
         }
 
         ctrl.execute = self.execute_held;
+        // Hold the target steady for as long as Execute is asserted; the drive
+        // latched the move on the rising edge but keeps reading this field.
+        ctrl.target_position = if self.execute_held {
+            self.held_target
+        } else {
+            0
+        };
         ctrl
     }
 }
@@ -181,10 +192,17 @@ mod tests {
         // press ch1 -> rising edge fires the move
         let ctrl = c.step(0b0000_0001, &idle_status(), params(), true);
         assert!(ctrl.execute, "rising edge should fire Execute");
+        assert_eq!(ctrl.target_position, 3200);
         // next cycle: drive has not yet acknowledged (still !busy), button still
-        // held (no new rising edge) -> Execute stays high (held).
+        // held (no new rising edge) -> Execute stays high (held) AND the target
+        // must stay stable (regression: it used to revert to 0, truncating the
+        // move to a few increments on real hardware).
         let ctrl = c.step(0b0000_0001, &idle_status(), params(), true);
         assert!(ctrl.execute, "Execute should stay high until Busy");
+        assert_eq!(
+            ctrl.target_position, 3200,
+            "target must stay valid while Execute is held"
+        );
         // drive acknowledges with Busy -> Execute drops, ready for next edge.
         let busy = El7047Status {
             ready: true,
