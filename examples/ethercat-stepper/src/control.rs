@@ -202,7 +202,10 @@ mod tests {
         };
         let _ = c.step(0, &done, params(), true); // release
         let ctrl = c.step(0b0000_0001, &done, params(), true); // second press
-        assert!(ctrl.execute, "a fresh press after completion should re-fire");
+        assert!(
+            ctrl.execute,
+            "a fresh press after completion should re-fire"
+        );
     }
 
     #[test]
