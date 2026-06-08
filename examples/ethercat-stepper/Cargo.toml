@@ -7,14 +7,56 @@ description = "taktora integration example: executor + ethercat connector drivin
 license     = "Apache-2.0 OR MIT"
 
 [workspace]
-# Empty — opt out of parent workspace discovery (mirrors every example here).
+# Empty — opt out of parent workspace discovery so this crate's
+# location (potentially inside `.claude/worktrees/...`) doesn't get
+# pulled into the outer repo's workspace. Established pattern across
+# every example in this directory.
 
 [dependencies]
-taktora-ethercat-esi-rt = { path = "../../crates/taktora-ethercat-esi-rt" }
-taktora-connector-core  = { path = "../../crates/taktora-connector-core" }
-bitvec                  = "1"
-serde                   = { version = "1", features = ["derive"] }
-serde_json              = "1"
+# NOTE: 0.2 (not 0.1) for the same reason as the connector below — `^0.1`
+# rejects the local 0.2.x path patch AND splits the dependency graph into two
+# `taktora_executor` versions (the published connector-host 0.1.8 requires
+# ^0.2.0), which fails `register_with` with a type mismatch.
+taktora-executor                = "0.2"
+taktora-connector-core          = "0.2"
+taktora-connector-host          = "0.1"
+taktora-connector-transport-iox = "0.1"
+# NOTE: must track the current published major so the `[patch.crates-io]` path
+# override actually applies — a stale caret req silently falls back to the
+# published crate (this produced the bogus WKC `expected 9` on the bus once).
+# 0.3 brings the non_exhaustive SubDeviceMap constructors + SmWatchdog +
+# with_startup_sdos/StartupSdo (the startup-SDO API this example relies on).
+# CI enforces this via scripts/check-example-patch-skew.sh.
+taktora-connector-ethercat      = { version = "0.3", features = ["bus-integration"] }
+
+# ESI device-driver toolchain. These two crates are unpublished, so they are
+# path-only here (a local hardware demo, never built from crates.io). The
+# build script (below) turns the trimmed Beckhoff fixtures in `esi/` into a
+# generated `devices.rs`; `taktora-ethercat-esi-rt` provides the EsiDevice
+# trait + bitvec re-exports the generated code and this binary share.
+taktora-ethercat-esi-rt         = { path = "../../crates/taktora-ethercat-esi-rt" }
+bitvec                          = "1"
+
+clap       = { version = "4", features = ["derive"] }
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio      = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 
 [build-dependencies]
-taktora-ethercat-esi-build = { path = "../../crates/taktora-ethercat-esi-build" }
+taktora-ethercat-esi-build      = { path = "../../crates/taktora-ethercat-esi-build" }
+
+# >>> taktora-examples-local-deps >>>
+# [patch.crates-io]
+# taktora-executor                = { path = "../../crates/taktora-executor" }
+# taktora-executor-tracing        = { path = "../../crates/taktora-executor-tracing" }
+# taktora-log                     = { path = "../../crates/taktora-log" }
+# taktora-log-dlt                 = { path = "../../crates/taktora-log-dlt" }
+# taktora-bounded-alloc           = { path = "../../crates/taktora-bounded-alloc" }
+# taktora-connector-core          = { path = "../../crates/taktora-connector-core" }
+# taktora-connector-transport-iox = { path = "../../crates/taktora-connector-transport-iox" }
+# taktora-connector-codec         = { path = "../../crates/taktora-connector-codec" }
+# taktora-connector-host          = { path = "../../crates/taktora-connector-host" }
+# taktora-connector-can           = { path = "../../crates/taktora-connector-can" }
+# taktora-connector-ethercat      = { path = "../../crates/taktora-connector-ethercat" }
+# taktora-connector-zenoh         = { path = "../../crates/taktora-connector-zenoh" }
+# <<< taktora-examples-local-deps <<<
