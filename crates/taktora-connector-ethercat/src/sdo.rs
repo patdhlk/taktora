@@ -72,7 +72,7 @@ pub fn pdo_sdo_writes(map: &SubDeviceMap) -> Vec<SdoWrite> {
 /// PDO-assignment writes from [`pdo_sdo_writes`] so config (e.g. motor
 /// current) is in place before the mapping is committed.
 #[must_use]
-pub fn startup_sdo_writes(map: &crate::options::SubDeviceMap) -> Vec<SdoWrite> {
+pub fn startup_sdo_writes(map: &SubDeviceMap) -> Vec<SdoWrite> {
     map.startup_sdos
         .iter()
         .map(|s| SdoWrite {
