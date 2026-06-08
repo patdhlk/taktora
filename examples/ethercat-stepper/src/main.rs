@@ -82,22 +82,54 @@ const ROUTING_BITS_EL7047_IN: u16 = (el7047::INPUT_LEN * 8) as u16;
 // `entry.index` for the `0x1C12`/`0x1C13` SM assignment, so bit_offset and
 // bit_length are left at 0 here.
 static EL7047_RX: &[PdoEntry] = &[
-    PdoEntry { index: 0x1601, bit_offset: 0, bit_length: 0 }, // ENC Control (unused)
-    PdoEntry { index: 0x1602, bit_offset: 0, bit_length: 0 }, // STM Control
-    PdoEntry { index: 0x1606, bit_offset: 0, bit_length: 0 }, // POS Control
+    PdoEntry {
+        index: 0x1601,
+        bit_offset: 0,
+        bit_length: 0,
+    }, // ENC Control (unused)
+    PdoEntry {
+        index: 0x1602,
+        bit_offset: 0,
+        bit_length: 0,
+    }, // STM Control
+    PdoEntry {
+        index: 0x1606,
+        bit_offset: 0,
+        bit_length: 0,
+    }, // POS Control
 ];
 static EL7047_TX: &[PdoEntry] = &[
-    PdoEntry { index: 0x1a01, bit_offset: 0, bit_length: 0 }, // ENC Status (unused)
-    PdoEntry { index: 0x1a03, bit_offset: 0, bit_length: 0 }, // STM Status
-    PdoEntry { index: 0x1a07, bit_offset: 0, bit_length: 0 }, // POS Status
+    PdoEntry {
+        index: 0x1a01,
+        bit_offset: 0,
+        bit_length: 0,
+    }, // ENC Status (unused)
+    PdoEntry {
+        index: 0x1a03,
+        bit_offset: 0,
+        bit_length: 0,
+    }, // STM Status
+    PdoEntry {
+        index: 0x1a07,
+        bit_offset: 0,
+        bit_length: 0,
+    }, // POS Status
 ];
 
 /// Operator-declared startup SDOs: stepper motor current limits, written in
 /// PRE-OP before PDO assignment (REQ_0853). Units = mA. Tune for your motor;
 /// see README.md.
 static EL7047_STARTUP: &[StartupSdo] = &[
-    StartupSdo { index: 0x8010, subindex: 0x01, value: SdoValue::U16(1800) }, // max current
-    StartupSdo { index: 0x8010, subindex: 0x02, value: SdoValue::U16(900) },  // standby current
+    StartupSdo {
+        index: 0x8010,
+        subindex: 0x01,
+        value: SdoValue::U16(1800),
+    }, // max current
+    StartupSdo {
+        index: 0x8010,
+        subindex: 0x02,
+        value: SdoValue::U16(900),
+    }, // standby current
 ];
 
 /// Working-counter mapping for WKC-based health (`REQ_0329`). EL1008 (input)
@@ -223,7 +255,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Latest decoded EL7047 status; held across cycles for logging on change.
     let last_logged: Arc<Mutex<Option<el7047::El7047Status>>> = Arc::new(Mutex::new(None));
     let last_logged_for_item = Arc::clone(&last_logged);
+    // Fault-lamp blink state, toggled on a sub-cadence of the control loop so
+    // the blink is actually visible.
     let mut lamp_blink = false;
+    let mut blink_cycles: u32 = 0;
+    // Control loop runs at CONTROL_PERIOD (10 ms); toggling every 25 cycles
+    // (250 ms) gives a ~2 Hz blink the eye can resolve.
+    const BLINK_TOGGLE_CYCLES: u32 = 25;
 
     exec.add(item_with_triggers(
         |d| -> Result<(), ExecutorError> {
@@ -245,9 +283,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Drain the EL1008 reader, keeping the latest button byte.
             let mut buttons = 0u8;
+            let mut dev = generated::EL1008::default();
             while let Ok(Some(env)) = reader_el1008.try_recv() {
                 let img: [u8; 1] = env.value;
-                let mut dev = generated::EL1008::default();
+                // Re-pack the codegen-decoded channels into a plain `u8`
+                // bitmask so the pure `control::Controller` stays
+                // codegen-agnostic (it sees buttons, not generated types).
                 buttons = match dev.decode_inputs(img.view_bits::<Lsb0>()) {
                     Ok(()) => {
                         (u8::from(dev.channel_1.input))
@@ -284,8 +325,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Status lamp on the EL2004: ch1 = drive ready & connector healthy;
-            // ch2 blinks while a fault is latched.
-            lamp_blink = !lamp_blink;
+            // ch2 blinks at ~2 Hz while a fault is latched. The blink state
+            // flips every BLINK_TOGGLE_CYCLES control cycles (25 * 10 ms =
+            // 250 ms half-period) so the blink is visible rather than a 50 Hz
+            // dim glow.
+            blink_cycles += 1;
+            if blink_cycles >= BLINK_TOGGLE_CYCLES {
+                blink_cycles = 0;
+                lamp_blink = !lamp_blink;
+            }
             let mut el2004 = generated::EL2004::default();
             el2004.channel_1.output = status.ready && healthy_now;
             el2004.channel_2.output = status.error && lamp_blink;
