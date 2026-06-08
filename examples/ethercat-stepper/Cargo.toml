@@ -1,0 +1,20 @@
+[package]
+name        = "ethercat-stepper"
+version     = "0.1.0"
+edition     = "2024"
+publish     = false
+description = "taktora integration example: executor + ethercat connector driving a Beckhoff EL7047 stepper off EL1008 inputs"
+license     = "Apache-2.0 OR MIT"
+
+[workspace]
+# Empty — opt out of parent workspace discovery (mirrors every example here).
+
+[dependencies]
+taktora-ethercat-esi-rt = { path = "../../crates/taktora-ethercat-esi-rt" }
+taktora-connector-core  = { path = "../../crates/taktora-connector-core" }
+bitvec                  = "1"
+serde                   = { version = "1", features = ["derive"] }
+serde_json              = "1"
+
+[build-dependencies]
+taktora-ethercat-esi-build = { path = "../../crates/taktora-ethercat-esi-build" }
