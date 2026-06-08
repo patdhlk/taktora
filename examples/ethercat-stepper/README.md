@@ -76,6 +76,7 @@ emergency-stop and the jog buttons are level-triggered (held):
 | ch4 | 3 | **Fault reset** | rising edge |
 | ch5 | 4 | **Jog +** (endless, drive toward the block) | level (held) |
 | ch6 | 5 | **Jog −** (endless) | level (held) |
+| ch7 | 6 | **Set zero** (datum here: load 0 into the position counter) | level (held) |
 
 Behaviour notes:
 
@@ -96,6 +97,11 @@ Behaviour notes:
   so you can drive onto a block without grinding. Holding both jog
   buttons is ambiguous and stops the drive. (A stall may latch the STM
   error; press ch4 to reset.)
+- **Set zero** (ch7). Loads `0` into the position counter at the current
+  location via the ENC Control PDO ("Set counter"), giving a readable
+  datum. No motion occurs while it is held. Because index moves are
+  relative, this is a convenience for a clean reference, not a
+  prerequisite for motion.
 - **Emergency stop** (ch3) clears Enable and asserts the POS Control
   emergency-stop bit for as long as the button is held.
 
