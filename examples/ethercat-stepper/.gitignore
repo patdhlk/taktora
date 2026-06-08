@@ -10,3 +10,11 @@ esi/*.xml
 !esi/beckhoff_el1008.xml
 !esi/beckhoff_el2004.xml
 !esi/beckhoff_el7047.xml
+
+# Cargo.lock is intentionally NOT tracked for this example: it depends on the
+# unreleased in-tree taktora-connector-ethercat 0.3.1 (startup_sdos / REQ_0853)
+# via the local-deps patch. A committed lock can only pin the published 0.3.0,
+# which makes a patch-on build silently resolve the wrong version (the path
+# patch is dropped as unused). Regenerate fresh: `scripts/examples-local.sh on`
+# then build. Track it once connector-ethercat 0.3.1 is published to crates.io.
+/Cargo.lock
