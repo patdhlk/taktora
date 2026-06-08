@@ -65,8 +65,8 @@ homing or absolute reference — positions are relative.
 
 ## Button map (EL1008)
 
-Channels are Lsb0 (`ch1` = bit 0). The controller is edge-triggered
-except for emergency-stop, which is level-triggered:
+Channels are Lsb0 (`ch1` = bit 0). Index moves are edge-triggered;
+emergency-stop and the jog buttons are level-triggered (held):
 
 | Channel | Bit | Function | Trigger |
 |---|---|---|---|
@@ -74,6 +74,8 @@ except for emergency-stop, which is level-triggered:
 | ch2 | 1 | Index **−** (relative move by `−step`) | rising edge |
 | ch3 | 2 | **Emergency stop** | level (held) |
 | ch4 | 3 | **Fault reset** | rising edge |
+| ch5 | 4 | **Jog +** (endless, drive toward the block) | level (held) |
+| ch6 | 5 | **Jog −** (endless) | level (held) |
 
 Behaviour notes:
 
@@ -82,10 +84,18 @@ Behaviour notes:
 - **Busy lockout.** While a move is running (POS Status `Busy`), new
   index presses are ignored — one move per press, no queueing.
 - **Execute hold.** On the firing edge, Execute is driven high and
-  **held** until the drive acknowledges with `Busy`, then dropped so it
-  is armed for the next press. Emergency-stop or loss of connector
-  health forces Execute (and the latch) low immediately — safe-state
-  wins.
+  **held for the whole move** — until the drive has reported `Busy` and
+  then returned to not-`Busy` (move complete). Dropping Execute early
+  aborts the travel on the EL7047, so it must be held throughout.
+  Emergency-stop or loss of connector health forces Execute low
+  immediately — safe-state wins.
+- **Jog** (ch5/ch6). Hold to run the motor continuously in one
+  direction (Start type *Endless plus/minus*); release to stop. Jog
+  **overrides** the index moves while held. It also stops automatically
+  on a **motor stall** — e.g. when the carriage reaches a hard block —
+  so you can drive onto a block without grinding. Holding both jog
+  buttons is ambiguous and stops the drive. (A stall may latch the STM
+  error; press ch4 to reset.)
 - **Emergency stop** (ch3) clears Enable and asserts the POS Control
   emergency-stop bit for as long as the button is held.
 
