@@ -13,6 +13,11 @@ pub const INPUT_LEN: usize = 24;
 pub mod start_type {
     /// Relative move: the target position is a delta from the current one.
     pub const RELATIVE: u16 = 2;
+    /// Endless move in the positive direction (jog) — runs while Execute is held
+    /// and stops when it drops or the drive stalls. Target position is ignored.
+    pub const ENDLESS_PLUS: u16 = 3;
+    /// Endless move in the negative direction (jog).
+    pub const ENDLESS_MINUS: u16 = 4;
 }
 
 /// Decoded EL7047 status (subset we care about).

@@ -5,7 +5,9 @@
 //! relative move); respects `Busy`, `Error`, and connector health.
 //!
 //! EL1008 channel map: ch1(bit0)=Index +, ch2(bit1)=Index -,
-//! ch3(bit2)=Emergency-stop, ch4(bit3)=Fault-reset.
+//! ch3(bit2)=Emergency-stop, ch4(bit3)=Fault-reset, ch5(bit4)=Jog + (endless,
+//! hold-to-run), ch6(bit5)=Jog - (endless). Jog overrides the index moves while
+//! held and stops on release or stall (e.g. reaching a hard block).
 
 use crate::el7047::{El7047Control, El7047Status, start_type};
 
@@ -62,6 +64,8 @@ impl Controller {
 
         let estop = buttons & 0b0000_0100 != 0; // ch3 level-triggered
         let reset = rising & 0b0000_1000 != 0; // ch4 rising edge
+        let jog_plus = buttons & 0b0001_0000 != 0; // ch5 level-triggered
+        let jog_minus = buttons & 0b0010_0000 != 0; // ch6 level-triggered
 
         let mut ctrl = El7047Control {
             enable: healthy && !estop,
@@ -73,6 +77,29 @@ impl Controller {
             deceleration: p.deceleration,
             ..Default::default()
         };
+
+        // ch5/ch6: hold-to-run endless jog (drive toward a hard block). This is
+        // level-triggered and OVERRIDES the index moves while a jog button is
+        // held. Releasing the button drops Execute (which stops the move), and a
+        // stall — e.g. the carriage reaching the block — also stops it so we do
+        // not grind against the stop.
+        if jog_plus || jog_minus {
+            // Cancel any in-flight index latch while jogging.
+            self.execute_held = false;
+            self.seen_busy = false;
+            let can_jog =
+                healthy && !estop && !status.error && !status.motor_stall && (jog_plus ^ jog_minus); // both pressed -> ambiguous -> stop
+            if can_jog {
+                ctrl.start_type = if jog_plus {
+                    start_type::ENDLESS_PLUS
+                } else {
+                    start_type::ENDLESS_MINUS
+                };
+                ctrl.execute = true;
+            }
+            // target_position is ignored for endless moves; leave it 0.
+            return ctrl;
+        }
 
         // Track move progress and release Execute only when the move completes:
         // Busy has been observed AND has since cleared. Holding Execute through
@@ -259,6 +286,75 @@ mod tests {
         let ctrl = c.step(0b0000_0101, &idle_status(), params(), true);
         assert!(ctrl.emergency_stop);
         assert!(!ctrl.execute, "estop must force Execute low even when held");
+    }
+
+    #[test]
+    fn ch5_jogs_endless_plus_while_held() {
+        let mut c = Controller::default();
+        let ctrl = c.step(0b0001_0000, &idle_status(), params(), true);
+        assert!(ctrl.execute);
+        assert_eq!(ctrl.start_type, start_type::ENDLESS_PLUS);
+        assert!(ctrl.enable);
+        // release -> Execute drops (move stops).
+        let ctrl = c.step(0, &idle_status(), params(), true);
+        assert!(!ctrl.execute);
+    }
+
+    #[test]
+    fn ch6_jogs_endless_minus() {
+        let mut c = Controller::default();
+        let ctrl = c.step(0b0010_0000, &idle_status(), params(), true);
+        assert!(ctrl.execute);
+        assert_eq!(ctrl.start_type, start_type::ENDLESS_MINUS);
+    }
+
+    #[test]
+    fn jog_stops_on_stall_at_block() {
+        let mut c = Controller::default();
+        // jogging
+        let ctrl = c.step(0b0001_0000, &idle_status(), params(), true);
+        assert!(ctrl.execute);
+        // carriage reaches the block -> motor stalls -> stop pushing.
+        let stalled = El7047Status {
+            ready: true,
+            motor_stall: true,
+            ..Default::default()
+        };
+        let ctrl = c.step(0b0001_0000, &stalled, params(), true);
+        assert!(!ctrl.execute, "must stop driving once stalled on the block");
+    }
+
+    #[test]
+    fn both_jog_buttons_stop() {
+        let mut c = Controller::default();
+        let ctrl = c.step(0b0011_0000, &idle_status(), params(), true);
+        assert!(!ctrl.execute, "ambiguous direction -> stop");
+    }
+
+    #[test]
+    fn jog_overrides_and_cancels_an_index_move() {
+        let mut c = Controller::default();
+        // start an index move (Execute held)
+        let _ = c.step(0, &idle_status(), params(), true);
+        let ctrl = c.step(0b0000_0001, &idle_status(), params(), true);
+        assert!(ctrl.execute);
+        assert_eq!(ctrl.start_type, start_type::RELATIVE);
+        // now hold ch5: jog takes over with an endless move.
+        let ctrl = c.step(0b0001_0000, &idle_status(), params(), true);
+        assert!(ctrl.execute);
+        assert_eq!(ctrl.start_type, start_type::ENDLESS_PLUS);
+    }
+
+    #[test]
+    fn jog_blocked_by_estop_and_health() {
+        let mut c = Controller::default();
+        // estop while jogging -> no drive, no enable.
+        let ctrl = c.step(0b0001_0100, &idle_status(), params(), true);
+        assert!(!ctrl.execute);
+        assert!(!ctrl.enable);
+        // unhealthy while jogging -> no drive.
+        let ctrl = c.step(0b0001_0000, &idle_status(), params(), false);
+        assert!(!ctrl.execute);
     }
 
     #[test]
