@@ -77,4 +77,11 @@ mod tests {
         let mut buf = [0u8; 8];
         assert!(RawImageCodec.encode(&src, &mut buf).is_err());
     }
+
+    #[test]
+    fn decode_errors_on_wrong_length() {
+        // 8 bytes cannot deserialise into a fixed-size [u8; 22] image.
+        let res: Result<[u8; 22], _> = RawImageCodec.decode(&[0u8; 8]);
+        assert!(res.is_err());
+    }
 }

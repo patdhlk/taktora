@@ -26,7 +26,11 @@ pub struct MoveParams {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Controller {
     prev_buttons: u8,
-    execute_held: bool, // we hold Execute high for one move, drop it when not Busy
+    // Latch for the Beckhoff positioning Execute input: we hold Execute high
+    // from the rising edge that fires a move until the drive acknowledges with
+    // Busy, then drop it so it is ready for the next rising edge. Forced low on
+    // emergency-stop or loss of connector health (safe-state wins).
+    execute_held: bool,
 }
 
 impl Controller {
@@ -60,9 +64,9 @@ impl Controller {
             ..Default::default()
         };
 
-        // Drop a previously-held Execute once the move is no longer Busy
-        // (Execute is edge-triggered; hold high until the move starts).
-        if self.execute_held && !status.busy {
+        // Drop a held Execute once the drive acknowledges the move with Busy;
+        // it is then ready for the next rising edge.
+        if self.execute_held && status.busy {
             self.execute_held = false;
         }
 
@@ -77,10 +81,17 @@ impl Controller {
             };
             if let Some(sign) = dir {
                 ctrl.target_position = p.step * sign;
-                ctrl.execute = true;
                 self.execute_held = true;
             }
         }
+
+        // Safe-state wins: emergency-stop or loss of health forces the latch
+        // (and the Execute output) low.
+        if estop || !healthy {
+            self.execute_held = false;
+        }
+
+        ctrl.execute = self.execute_held;
         ctrl
     }
 }
@@ -160,6 +171,52 @@ mod tests {
         };
         let ctrl = c.step(0b0000_1000, &faulted, params(), true);
         assert!(ctrl.reset);
+    }
+
+    #[test]
+    fn execute_held_until_busy_then_second_press_fires() {
+        let mut c = Controller::default();
+        // settle prev_buttons low
+        let _ = c.step(0, &idle_status(), params(), true);
+        // press ch1 -> rising edge fires the move
+        let ctrl = c.step(0b0000_0001, &idle_status(), params(), true);
+        assert!(ctrl.execute, "rising edge should fire Execute");
+        // next cycle: drive has not yet acknowledged (still !busy), button still
+        // held (no new rising edge) -> Execute stays high (held).
+        let ctrl = c.step(0b0000_0001, &idle_status(), params(), true);
+        assert!(ctrl.execute, "Execute should stay high until Busy");
+        // drive acknowledges with Busy -> Execute drops, ready for next edge.
+        let busy = El7047Status {
+            ready: true,
+            busy: true,
+            ..Default::default()
+        };
+        let ctrl = c.step(0b0000_0001, &busy, params(), true);
+        assert!(!ctrl.execute, "Execute should drop once Busy observed");
+        // move completes: not Busy, In-Target. Release button, then press again.
+        let done = El7047Status {
+            ready: true,
+            in_target: true,
+            ready_to_execute: true,
+            ..Default::default()
+        };
+        let _ = c.step(0, &done, params(), true); // release
+        let ctrl = c.step(0b0000_0001, &done, params(), true); // second press
+        assert!(ctrl.execute, "a fresh press after completion should re-fire");
+    }
+
+    #[test]
+    fn estop_clears_a_held_execute() {
+        let mut c = Controller::default();
+        let _ = c.step(0, &idle_status(), params(), true);
+        // fire a move -> Execute held high
+        let ctrl = c.step(0b0000_0001, &idle_status(), params(), true);
+        assert!(ctrl.execute);
+        // next cycle assert ch3 (estop): Execute must be forced low even though
+        // it was held, and the latch must be cleared (safe-state wins).
+        let ctrl = c.step(0b0000_0101, &idle_status(), params(), true);
+        assert!(ctrl.emergency_stop);
+        assert!(!ctrl.execute, "estop must force Execute low even when held");
     }
 
     #[test]

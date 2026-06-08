@@ -174,4 +174,11 @@ mod tests {
     fn decode_rejects_short_buffer() {
         assert!(decode_status(&[0u8; 4]).is_none());
     }
+
+    #[test]
+    fn decode_boundary_length() {
+        // Exactly INPUT_LEN bytes decodes; one byte short does not.
+        assert!(decode_status(&[0u8; INPUT_LEN]).is_some());
+        assert!(decode_status(&[0u8; INPUT_LEN - 1]).is_none());
+    }
 }
