@@ -476,7 +476,7 @@ spec text that needed amendment during implementation.
      required (contrast :need:`REQ_0325` for EtherCAT).
 
    **Tests.** The corpus authored alongside this directive in
-   :doc:`../../verification/connector` includes TEST_0300
+   :doc:`../../verification/connector/index` includes TEST_0300
    (``ZenohRouting`` validation), TEST_0301 (``Connector`` trait
    surface), TEST_0302 (pub/sub end-to-end via
    ``MockZenohSession``), TEST_0303 (query round-trip via
@@ -634,7 +634,7 @@ spec text that needed amendment during implementation.
      :need:`REQ_0327`).
 
    **Tests.** The corpus authored alongside this directive in
-   :doc:`../../verification/connector` includes TEST_0500
+   :doc:`../../verification/connector/index` includes TEST_0500
    (``CanConnector`` trait surface), TEST_0501 (``CanRouting``
    field round-trip), TEST_0502 / TEST_0503 (classical and FD
    round-trip via ``MockCanInterface``), TEST_0504 (per-iface

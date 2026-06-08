@@ -8,7 +8,7 @@ Test cases verifying requirements. Each ``test`` directive
 .. toctree::
    :maxdepth: 2
 
-   connector
+   connector/index
    plc-runtime/index
    bounded-alloc
    device-codegen/index

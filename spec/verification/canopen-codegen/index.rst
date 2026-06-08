@@ -7,7 +7,7 @@ Each ``test`` directive ``:verifies:`` one or more requirements from
 quality goals from :doc:`../../architecture/canopen-codegen/index`).
 
 The toolchain is build-time only — there are no cyclic-runtime
-integration tests beyond what :doc:`../connector` already covers for
+integration tests beyond what :doc:`../connector/index` already covers for
 :need:`FEAT_0046`. The verification surface here is therefore
 heavier on snapshot / golden-file / property tests than on
 multi-process integration. Mirrors the structure of

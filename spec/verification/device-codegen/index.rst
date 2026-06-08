@@ -7,7 +7,7 @@ Test cases verifying the device-driver codegen toolchain. Each
 :doc:`../../architecture/device-codegen/index`).
 
 The toolchain is build-time only — there are no cyclic-runtime
-integration tests beyond what :doc:`../connector` already covers for
+integration tests beyond what :doc:`../connector/index` already covers for
 :need:`FEAT_0041`. The verification surface here is therefore
 heavier on snapshot / golden-file / property tests than on
 multi-process integration.
