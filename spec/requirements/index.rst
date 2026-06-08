@@ -17,7 +17,7 @@ top-level features:
 * :need:`FEAT_0050` "Device-driver codegen toolchain" — build-time
   layered crates that translate EtherCAT ESI XML into strongly-typed
   Rust device drivers, consumed by ``taktora-connector-ethercat`` and
-  any other ethercrab user. See :doc:`device-codegen`.
+  any other ethercrab user. See :doc:`device-codegen/index`.
 * :need:`FEAT_0060` "CANopen device-driver codegen toolchain" —
   build-time layered crates that translate CANopen EDS (CiA 306)
   files into strongly-typed Rust device drivers, with a shared
@@ -47,7 +47,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    plc-runtime
    connector
    bounded-alloc
-   device-codegen
+   device-codegen/index
    canopen-codegen
    logging/index
    ethercat-netcfg/index

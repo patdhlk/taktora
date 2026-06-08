@@ -27,7 +27,7 @@ reference an ESI file to inherit its PDO catalog and identity.
 The design rationale and the full grilling trail live in
 ``docs/superpowers/specs/2026-05-31-ethercat-netcfg-codegen-design.md``.
 The decomposition mirrors the convention established in
-:doc:`../device-codegen`: a top-level umbrella feature, capability-cluster
+:doc:`../device-codegen/index`: a top-level umbrella feature, capability-cluster
 sub-features that ``:satisfies:`` it, and concrete shall-clauses under
 each cluster.
 

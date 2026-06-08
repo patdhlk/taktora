@@ -7,7 +7,7 @@ Electronic Data Sheet (EDS, CiA 306) files into strongly-typed Rust
 driver modules at build time, with zero runtime INI parsing and no
 dependency on the ``taktora-connector-can`` runtime.
 
-The decomposition is the peer of :doc:`device-codegen` for CANopen,
+The decomposition is the peer of :doc:`device-codegen/index` for CANopen,
 executing the lift foreseen by :need:`ADR_0073` (now closed by
 :need:`ADR_0078`):
 

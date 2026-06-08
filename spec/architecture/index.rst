@@ -14,7 +14,7 @@ detailed-design notes that predate the arc42 adoption.
    connector
    plc-runtime
    bounded-alloc
-   device-codegen
+   device-codegen/index
    canopen-codegen
    logging/index
    ethercat-netcfg/index

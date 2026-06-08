@@ -11,7 +11,7 @@ integration tests beyond what :doc:`connector` already covers for
 :need:`FEAT_0046`. The verification surface here is therefore
 heavier on snapshot / golden-file / property tests than on
 multi-process integration. Mirrors the structure of
-:doc:`device-codegen` so reviewers can read both verification
+:doc:`device-codegen/index` so reviewers can read both verification
 pages 1:1.
 
 ----

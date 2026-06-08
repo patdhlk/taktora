@@ -5,7 +5,7 @@ Architecture documentation for the CANopen device-driver codegen
 toolchain (see :doc:`../requirements/canopen-codegen`), structured
 per the arc42 template and encoded with sphinx-needs using the
 useblocks "x-as-code" arc42 directive types. Mirrors the structure of
-:doc:`device-codegen` so reviewers can read both umbrellas 1:1.
+:doc:`device-codegen/index` so reviewers can read both umbrellas 1:1.
 
 Each architectural element ``:refines:`` or ``:implements:`` a parent
 requirement so the trace is preserved end-to-end.
@@ -293,7 +293,7 @@ Quality goals capture the qualities the architecture is optimised for.
 
 The toolchain's shape is the consequence of nine architectural
 decisions captured below. The structure of the decisions mirrors
-:doc:`device-codegen` so the rationale chain from ESI to EDS is
+:doc:`device-codegen/index` so the rationale chain from ESI to EDS is
 explicit and visible.
 
 .. arch-decision:: Lift OD IR to fieldbus-od-core now

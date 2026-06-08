@@ -11,7 +11,7 @@ Test cases verifying requirements. Each ``test`` directive
    connector
    plc-runtime
    bounded-alloc
-   device-codegen
+   device-codegen/index
    canopen-codegen
    logging/index
    ethercat-netcfg/index
