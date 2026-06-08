@@ -526,6 +526,21 @@ that ``:refines:`` the requirement or feature it answers.
    require a builder method instead of a routing field — accepted
    tradeoff for type-system simplicity.
 
+.. arch-decision:: Startup SDOs as a typed SubDeviceMap field
+   :id: ADR_0103
+   :status: accepted
+   :refines: REQ_0853
+
+   Device configuration that must precede PDO assignment (motor current,
+   operation-mode selection) is declared as a static ``startup_sdos`` slice
+   on ``SubDeviceMap``, applied in PRE-OP before the ``0x1C12``/``0x1C13``
+   assignment writes, rather than via a runtime SDO escape hatch.
+   Rationale: keeps bring-up fully declarative and reproducible from the
+   checkout (consistent with ``with_sm_watchdog`` and explicit WKC), and the
+   same data drives the planned master-side motion runtime. Trade-off: only
+   ``SdoValue`` types (U8/U16) are expressible today; wider types land when a
+   device needs them.
+
 .. arch-decision:: Reply framing uses a Zenoh-private 1-byte payload prefix
    :id: ADR_0043
    :status: open

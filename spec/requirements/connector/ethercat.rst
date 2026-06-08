@@ -403,3 +403,17 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
    guarantee — hence the mandatory read-back verify. The failure
    propagates out of bring-up and surfaces as terminal ``Down`` per
    :need:`REQ_0842`.
+
+.. req:: Operator-declared startup SDOs applied before PDO assignment
+   :id: REQ_0853
+   :status: implemented
+   :satisfies: FEAT_0041
+   :links: BB_0033, ADR_0103, TEST_0869
+
+   ``SubDeviceMap`` shall carry an optional ``startup_sdos`` list of
+   ``StartupSdo`` (index / subindex / value) that the driver writes to the
+   matching SubDevice during the PRE-OP transition **before** the PDO
+   assignment writes of :need:`REQ_0315`. This lets an application
+   configure device parameters (e.g. stepper motor current limits) that
+   must be set prior to committing the process-data mapping. An empty list
+   produces no writes.

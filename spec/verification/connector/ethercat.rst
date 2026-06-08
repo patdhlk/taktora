@@ -422,3 +422,18 @@ exercised without hardware. Bench tests run only when invoked as
    subscription opened after a transition must NOT replay
    pre-subscription history; and a transition with zero subscribers
    must succeed and remain observable via ``current()``.
+
+.. test:: Startup SDOs written in order before PDO assignment
+   :id: TEST_0869
+   :status: open
+   :verifies: REQ_0853
+
+   Unit tests in ``taktora-connector-ethercat`` over the startup-SDO
+   sequencer:
+   ``startup_writes_carry_map_address_and_order`` asserts that, for a
+   ``SubDeviceMap`` carrying a non-empty ``startup_sdos`` list, the driver
+   emits one SDO write per ``StartupSdo`` to the matching SubDevice address
+   in declaration order, and that every startup write precedes the
+   ``0x1C12``/``0x1C13`` PDO-assignment writes of :need:`REQ_0315`;
+   ``empty_startup_sdos_produce_no_writes`` asserts that a ``SubDeviceMap``
+   with an empty ``startup_sdos`` list produces zero startup SDO writes.
