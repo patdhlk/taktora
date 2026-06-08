@@ -79,7 +79,7 @@ pub use health::EthercatHealthMonitor;
 pub use mock::{CycleKind, MockBusDriver};
 pub use options::{
     EthercatConnectorOptions, EthercatConnectorOptionsBuilder, PdoEntry, ReconnectPolicyFactory,
-    SubDeviceMap,
+    StartupSdo, SubDeviceMap,
 };
 pub use registry::{
     ChannelBinding, ChannelHandle, ChannelRegistry, InboundPublish, OutboundDrain,
@@ -88,6 +88,8 @@ pub use registry::{
 pub use routing::{EthercatRouting, PdoDirection};
 pub use runner::{CycleReport, CycleRunner};
 pub use scheduler::{CycleDecision, CycleScheduler};
-pub use sdo::{SM_ASSIGN_RX_PDO, SM_ASSIGN_TX_PDO, SdoValue, SdoWrite, pdo_sdo_writes};
+pub use sdo::{
+    SM_ASSIGN_RX_PDO, SM_ASSIGN_TX_PDO, SdoValue, SdoWrite, pdo_sdo_writes, startup_sdo_writes,
+};
 pub use watchdog::SmWatchdog;
 pub use wkc::{WkcVerdict, evaluate_wkc, expected_wkc_from_map};
