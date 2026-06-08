@@ -14,7 +14,7 @@ Test cases verifying requirements. Each ``test`` directive
    device-codegen
    canopen-codegen
    logging/index
-   ethercat-netcfg
+   ethercat-netcfg/index
 
 .. needtable::
    :types: test

@@ -1,70 +1,15 @@
-EtherCAT network-config codegen — architecture (arc42)
-======================================================
+Architecture decisions
+======================
 
-Architecture documentation for the EtherCAT network-config codegen
-toolchain (see :doc:`../requirements/ethercat-netcfg`), structured per
-the arc42 template and encoded with sphinx-needs using the useblocks
-"x-as-code" arc42 conventions.
+arc42 §9 — the accepted decisions behind the EtherCAT network-config
+codegen toolchain (:need:`FEAT_0080`). Each ``arch-decision``
+``:refines:`` the parent requirement or feature it serves.
 
-Each decision ``:refines:`` the requirement or capability-cluster
-feature it constrains, so the trace from design rationale to shall-clause
-is preserved end-to-end. The full grilling trail behind these decisions
-lives in
-``docs/superpowers/specs/2026-05-31-ethercat-netcfg-codegen-design.md``.
-
-.. contents:: Sections
+.. contents:: Decisions
    :local:
    :depth: 1
 
 ----
-
-1. Introduction and goals
--------------------------
-
-The toolchain's reason-to-exist is **moving the EtherCAT bus wiring out
-of hand-written Rust constants and into a validated, build-time-compiled
-config file**, without disturbing the connector runtime. Today every
-``examples/ethercat-*`` ``main.rs`` hand-writes ``SUBDEV`` addresses,
-bit offsets, and routings, with a comment warning that the configured
-station address shifts whenever the topology changes. This toolchain
-compiles a ``network.yaml`` down to the exact ``&'static`` tables those
-files write by hand, computing the derived parts (addresses, working
-counters) and validating the whole topology.
-
-----
-
-5. Building block view
-----------------------
-
-.. building-block:: ethercat-netcfg SM-watchdog resolution and validation
-   :id: BB_0096
-   :status: open
-   :implements: FEAT_0085
-   :refines: REQ_0844, REQ_0845
-
-   The parse-layer code that, at ``resolve()`` time, resolves and
-   validates each output device's sync-manager watchdog (the netcfg slice
-   of :need:`AOU_0016`). For every device carrying output (rx) PDOs it
-   computes an effective timeout — the per-device ``sm_watchdog_timeout``
-   override if present, else FTTI/2 — quantizes it to the ESC registers
-   ``0x0400`` / ``0x0420`` (divider 2498 → 100 µs ticks,
-   ``intervals = ceil(timeout_us / 100)``, clamped ``1..=u16::MAX``), and
-   exposes the resolved ``(divider, intervals)`` on the IR for codegen.
-   The quantization arithmetic is a deliberate ~5-line duplicate of the
-   connector's ``SmWatchdog`` (a dependency on the connector runtime was
-   rejected per :need:`REQ_0824`). Validation rejects an effective window
-   that exceeds FTTI/2 (checked against the QUANTIZED value, since
-   ``ceil`` can push a boundary request over the bound), an ESI-sourced
-   output SM whose watchdog trigger is disabled, and an inline-sourced
-   output device that does not attest ``sm_watchdog_enabled: true``.
-   Input-only devices are untouched. Implemented in
-   ``crates/taktora-ethercat-netcfg/src/lib.rs`` and
-   ``crates/taktora-ethercat-netcfg-codegen/src/lib.rs``.
-
-----
-
-9. Architecture decisions
--------------------------
 
 .. arch-decision:: Build-time codegen over runtime parsing
    :id: ADR_0092

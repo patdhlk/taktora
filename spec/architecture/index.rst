@@ -17,7 +17,7 @@ detailed-design notes that predate the arc42 adoption.
    device-codegen
    canopen-codegen
    logging/index
-   ethercat-netcfg
+   ethercat-netcfg/index
    motion/index
    safety
 

@@ -32,7 +32,7 @@ top-level features:
   ``network.yaml`` (bus topology + channel wiring) into the
   ``&'static`` bus tables ``taktora-connector-ethercat`` consumers
   hand-write today, composing on top of the ESI device toolchain.
-  See :doc:`ethercat-netcfg`.
+  See :doc:`ethercat-netcfg/index`.
 * :need:`FEAT_0090` "Real-time motion control" — soft-real-time,
   allocation-free trajectory generation (profiles, electronic gearing,
   camming, flying saw) feeding CiA 402 drives in CSP mode, layered on
@@ -50,7 +50,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    device-codegen
    canopen-codegen
    logging/index
-   ethercat-netcfg
+   ethercat-netcfg/index
    motion/index
 
 Requirements at a glance
