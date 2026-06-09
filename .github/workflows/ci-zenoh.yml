@@ -74,7 +74,14 @@ jobs:
       - uses: actions/checkout@v6
       - uses: Swatinem/rust-cache@v2
       - name: Install nightly (for cargo-public-api rustdoc JSON)
-        uses: dtolnay/rust-toolchain@nightly
+        # PINNED, not floating `@nightly`. cargo-public-api builds rustdoc JSON
+        # (a nightly-only feature), but the latest nightly is an untested daily
+        # dependency: a nightly bump broke the pinned iceoryx2 fork's rustdoc
+        # build and turned this job red on every PR. Pin a known-good nightly and
+        # bump this date deliberately when the rustdoc-JSON format requires it.
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-06-08
       - name: Install stable (default for cargo test)
         uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-public-api
