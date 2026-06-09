@@ -6,14 +6,32 @@ Live under ``crates/ethercat-esi-codegen-ethercrab/tests/``.
 .. test:: EL3001 backend output snapshot
    :id: TEST_0420
    :status: open
-   :verifies: REQ_0521, REQ_0522, REQ_0523, REQ_0524
+   :verifies: REQ_0521, REQ_0522
 
    Run parse → codegen → backend → prettyplease on the canonical
    ``EL3001`` ESI fixture. Compare the formatted output against a
    committed ``snapshots/el3001.rs`` golden file using
    ``insta::assert_snapshot!``. Reviewer regenerates the golden
    when intentional changes land; CI fails on unintentional
-   churn.
+   churn. The ``<Dev>OpMode`` enum shape (:need:`REQ_0523`,
+   :need:`REQ_0524`) is verified directly by :need:`TEST_0870`.
+
+.. test:: EL7047 OpMode enum, exact lengths, pdo_assignment, round-trip
+   :id: TEST_0870
+   :status: implemented
+   :verifies: REQ_0523, REQ_0524, REQ_0528
+
+   Tests in
+   ``crates/taktora-ethercat-esi-codegen-ethercrab-tests/tests/op_mode.rs``
+   run the EL7047 ESI through parse → codegen → backend and assert the
+   joint per-device ``OpMode`` enum: all nine operating modes are
+   emitted as variants (:need:`REQ_0523`); each variant's
+   ``{ inputs, outputs }`` payload yields the exact per-mode
+   ``input_len`` / ``output_len`` and a decode/encode round-trip is
+   lossless for the active mode (:need:`REQ_0524`); and
+   ``pdo_assignment()`` returns the expected Rx (``0x1C12`` / SM2) and
+   Tx (``0x1C13`` / SM3) ``u16`` index lists per active mode
+   (:need:`REQ_0528`).
 
 .. test:: Generated registry covers every emitted device
    :id: TEST_0421
