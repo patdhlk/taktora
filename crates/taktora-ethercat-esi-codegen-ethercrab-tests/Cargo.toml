@@ -17,5 +17,8 @@ publish      = false
 taktora-ethercat-esi-rt = { workspace = true }
 bitvec                  = { workspace = true }
 
+[dev-dependencies]
+taktora-ethercat-esi = { workspace = true }
+
 [build-dependencies]
 taktora-ethercat-esi-build = { workspace = true }
