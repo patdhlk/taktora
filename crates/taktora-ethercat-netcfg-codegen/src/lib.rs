@@ -12,7 +12,8 @@ use std::collections::HashMap;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use taktora_ethercat_netcfg::{
-    ChannelBinding, DeviceInstance, NetworkConfig, PdoDirection, PdoEntry,
+    ChannelBinding, DeviceInstance, NetworkConfig, PdoDirection, PdoEntry, SdoValueSpec,
+    StartupSdoSpec,
 };
 
 /// Errors that can occur while [`generate`]-ing Rust source.
@@ -418,6 +419,15 @@ fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
             }
         });
 
+        let startup = if device.startup_sdos.is_empty() {
+            None
+        } else {
+            let sdos = device.startup_sdos.iter().map(startup_sdo_tokens);
+            Some(quote! {
+                .with_startup_sdos(&[ #(#sdos),* ])
+            })
+        };
+
         // `SubDeviceMap` is `#[non_exhaustive]`; out-of-crate generated
         // code must use the `new` constructor rather than a struct
         // literal. Argument order: address, rx_pdos, tx_pdos,
@@ -430,6 +440,7 @@ fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
                 #expected_wkc,
             )
             #watchdog
+            #startup
         }
     });
 
@@ -500,5 +511,31 @@ fn pdo_entry_tokens(entry: &PdoEntry) -> TokenStream {
             bit_offset: #bit_offset,
             bit_length: #bit_length,
         }
+    }
+}
+
+/// Emit one `taktora_connector_ethercat::StartupSdo` literal.
+fn startup_sdo_tokens(sdo: &StartupSdoSpec) -> TokenStream {
+    let index = sdo.index;
+    let subindex = sdo.subindex;
+    let value = sdo_value_tokens(sdo.value);
+    quote! {
+        taktora_connector_ethercat::StartupSdo {
+            index: #index,
+            subindex: #subindex,
+            value: #value,
+        }
+    }
+}
+
+/// Emit the `taktora_connector_ethercat::SdoValue::<V>(..)` literal.
+fn sdo_value_tokens(value: SdoValueSpec) -> TokenStream {
+    match value {
+        SdoValueSpec::U8(v) => quote!(taktora_connector_ethercat::SdoValue::U8(#v)),
+        SdoValueSpec::U16(v) => quote!(taktora_connector_ethercat::SdoValue::U16(#v)),
+        SdoValueSpec::U32(v) => quote!(taktora_connector_ethercat::SdoValue::U32(#v)),
+        SdoValueSpec::I8(v) => quote!(taktora_connector_ethercat::SdoValue::I8(#v)),
+        SdoValueSpec::I16(v) => quote!(taktora_connector_ethercat::SdoValue::I16(#v)),
+        SdoValueSpec::I32(v) => quote!(taktora_connector_ethercat::SdoValue::I32(#v)),
     }
 }
