@@ -39,16 +39,24 @@ pub struct SdoWrite {
     pub value: SdoValue,
 }
 
-/// SDO write value. The two variants cover the entire PDO-assignment
-/// sequence (`REQ_0315`); broader types can land alongside future
-/// SDO-based configuration paths.
+/// SDO write value. `U8`/`U16` cover the PDO-assignment sequence
+/// (`REQ_0315`); the wider and signed variants exist for operator-declared
+/// startup-configuration SDOs (`REQ_0853`), where drive parameters are
+/// commonly 16/32-bit and occasionally signed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SdoValue {
-    /// 8-bit unsigned. Used for the count subindex of a PDO
-    /// assignment.
+    /// 8-bit unsigned.
     U8(u8),
-    /// 16-bit unsigned. Used for each entry of a PDO assignment.
+    /// 16-bit unsigned.
     U16(u16),
+    /// 32-bit unsigned.
+    U32(u32),
+    /// 8-bit signed.
+    I8(i8),
+    /// 16-bit signed.
+    I16(i16),
+    /// 32-bit signed.
+    I32(i32),
 }
 
 /// Emit the full SDO write sequence for one [`SubDeviceMap`].
@@ -164,5 +172,37 @@ mod startup_tests {
     fn empty_startup_sdos_produce_no_writes() {
         let map = SubDeviceMap::new(0x1003, &[], &[], 3);
         assert!(startup_sdo_writes(&map).is_empty());
+    }
+
+    #[test]
+    fn startup_writes_carry_wide_and_signed_values() {
+        static STARTUP: &[StartupSdo] = &[
+            StartupSdo {
+                index: 0x8011,
+                subindex: 0x01,
+                value: SdoValue::U32(100_000),
+            },
+            StartupSdo {
+                index: 0x8011,
+                subindex: 0x02,
+                value: SdoValue::I32(-5),
+            },
+            StartupSdo {
+                index: 0x8011,
+                subindex: 0x03,
+                value: SdoValue::I16(-1),
+            },
+            StartupSdo {
+                index: 0x8011,
+                subindex: 0x04,
+                value: SdoValue::I8(-128),
+            },
+        ];
+        let map = SubDeviceMap::new(0x1003, &[], &[], 3).with_startup_sdos(STARTUP);
+        let writes = startup_sdo_writes(&map);
+        assert_eq!(writes.len(), 4);
+        assert_eq!(writes[0].value, SdoValue::U32(100_000));
+        assert_eq!(writes[1].value, SdoValue::I32(-5));
+        assert_eq!(writes[3].value, SdoValue::I8(-128));
     }
 }
