@@ -77,6 +77,8 @@ pub struct DeviceInstance {
     /// these via `SubDeviceMap::with_sm_watchdog`; input-only devices
     /// carry `None` and emit no watchdog.
     pub sm_watchdog: Option<SmWatchdogRegisters>,
+    /// Operator-declared startup SDOs, in declaration order. Empty if none.
+    pub startup_sdos: Vec<StartupSdoSpec>,
 }
 
 /// Resolved ESC SM-watchdog register values for one output device.
@@ -201,6 +203,35 @@ pub struct PdoEntry {
     pub bit_offset: u16,
     /// Bit length of the entry.
     pub bit_length: u16,
+}
+
+/// One operator-declared startup SDO, written in PRE-OP before PDO assignment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupSdoSpec {
+    /// SDO object-dictionary index.
+    pub index: u16,
+    /// SDO object-dictionary subindex.
+    pub subindex: u8,
+    /// Typed value to write.
+    pub value: SdoValueSpec,
+}
+
+/// A typed startup-SDO value. Mirrors `taktora_connector_ethercat::SdoValue`;
+/// codegen emits the matching connector variant as text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SdoValueSpec {
+    /// 8-bit unsigned.
+    U8(u8),
+    /// 16-bit unsigned.
+    U16(u16),
+    /// 32-bit unsigned.
+    U32(u32),
+    /// 8-bit signed.
+    I8(i8),
+    /// 16-bit signed.
+    I16(i16),
+    /// 32-bit signed.
+    I32(i32),
 }
 
 /// Direction of a process-data channel.
@@ -385,6 +416,23 @@ pub enum NetcfgError {
         /// Label of the offending output device.
         label: String,
     },
+
+    /// A startup-SDO `value` does not fit its declared `type`.
+    #[error(
+        "device `{label}` startup SDO {index:#06x}:{subindex:#04x} value {value} out of range for type {ty}"
+    )]
+    SdoValueOutOfRange {
+        /// Offending device label.
+        label: String,
+        /// SDO index.
+        index: u16,
+        /// SDO subindex.
+        subindex: u8,
+        /// Declared type name (e.g. "u16").
+        ty: String,
+        /// The out-of-range value as written.
+        value: i64,
+    },
 }
 
 impl From<taktora_ethercat_esi::EsiError> for NetcfgError {
@@ -416,7 +464,8 @@ pub fn parse(yaml: &str) -> Result<NetworkConfig, NetcfgError> {
 mod dto {
     use super::{
         BusConfig, ChannelBinding, DeviceInstance, DeviceSource, Identity, NetcfgError,
-        NetworkConfig, PdoEntry, SmWatchdogRegisters, sm_watchdog_intervals,
+        NetworkConfig, PdoEntry, SdoValueSpec, SmWatchdogRegisters, StartupSdoSpec,
+        sm_watchdog_intervals,
     };
     use core::time::Duration;
     use serde::Deserialize;
@@ -471,6 +520,8 @@ mod dto {
         sm_watchdog_timeout_ms: Option<u64>,
         #[serde(default)]
         sm_watchdog_enabled: Option<bool>,
+        #[serde(default)]
+        startup_sdos: Vec<StartupSdoDto>,
     }
 
     #[derive(Deserialize, Default)]
@@ -479,6 +530,66 @@ mod dto {
         rx: Vec<PdoEntry>,
         #[serde(default)]
         tx: Vec<PdoEntry>,
+    }
+
+    #[derive(Deserialize, Clone, Copy)]
+    #[serde(rename_all = "lowercase")]
+    enum SdoTypeDto {
+        U8,
+        U16,
+        U32,
+        I8,
+        I16,
+        I32,
+    }
+
+    impl SdoTypeDto {
+        const fn name(self) -> &'static str {
+            match self {
+                Self::U8 => "u8",
+                Self::U16 => "u16",
+                Self::U32 => "u32",
+                Self::I8 => "i8",
+                Self::I16 => "i16",
+                Self::I32 => "i32",
+            }
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct StartupSdoDto {
+        index: u16,
+        subindex: u8,
+        #[serde(rename = "type")]
+        ty: SdoTypeDto,
+        value: i64,
+    }
+
+    fn convert_startup_sdo(
+        label: &str,
+        dto: &StartupSdoDto,
+    ) -> Result<StartupSdoSpec, NetcfgError> {
+        let v = dto.value;
+        let oor = || NetcfgError::SdoValueOutOfRange {
+            label: label.to_owned(),
+            index: dto.index,
+            subindex: dto.subindex,
+            ty: dto.ty.name().to_owned(),
+            value: v,
+        };
+        let value = match dto.ty {
+            SdoTypeDto::U8 => SdoValueSpec::U8(u8::try_from(v).map_err(|_| oor())?),
+            SdoTypeDto::U16 => SdoValueSpec::U16(u16::try_from(v).map_err(|_| oor())?),
+            SdoTypeDto::U32 => SdoValueSpec::U32(u32::try_from(v).map_err(|_| oor())?),
+            SdoTypeDto::I8 => SdoValueSpec::I8(i8::try_from(v).map_err(|_| oor())?),
+            SdoTypeDto::I16 => SdoValueSpec::I16(i16::try_from(v).map_err(|_| oor())?),
+            SdoTypeDto::I32 => SdoValueSpec::I32(i32::try_from(v).map_err(|_| oor())?),
+        };
+        Ok(StartupSdoSpec {
+            index: dto.index,
+            subindex: dto.subindex,
+            value,
+        })
     }
 
     /// A resolved device plus the ESI-derived watchdog-enable evidence the
@@ -676,11 +787,18 @@ mod dto {
                 address_override,
                 sm_watchdog_timeout_ms,
                 sm_watchdog_enabled,
+                startup_sdos,
             } = self;
 
             if esi.is_none() && op_mode.is_some() {
                 return Err(NetcfgError::OpModeOnFlatDevice { label });
             }
+
+            // Convert startup SDOs before `label` is moved into the DeviceInstance literal.
+            let startup_sdos = startup_sdos
+                .iter()
+                .map(|s| convert_startup_sdo(&label, s))
+                .collect::<Result<Vec<_>, _>>()?;
 
             let (source, identity, esi_output_watchdog_enabled) = match esi {
                 Some(reference) => {
@@ -770,6 +888,7 @@ mod dto {
                     sm_watchdog_timeout: sm_watchdog_timeout_ms.map(Duration::from_millis),
                     sm_watchdog_enabled,
                     sm_watchdog: None,
+                    startup_sdos,
                 },
                 esi_output_watchdog_enabled,
             })
