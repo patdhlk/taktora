@@ -35,6 +35,20 @@ fn out_of_range_value_for_type_errors() {
 }
 
 #[test]
+fn negative_value_for_unsigned_type_errors() {
+    // -1 does not fit u8 (the most likely real-world mistake: a signed
+    // parameter copied without changing the declared type).
+    let err = parse(&yaml(
+        "      - { index: 0x8010, subindex: 0x01, type: u8, value: -1 }",
+    ))
+    .unwrap_err();
+    assert!(
+        matches!(err, NetcfgError::SdoValueOutOfRange { .. }),
+        "got {err:?}"
+    );
+}
+
+#[test]
 fn no_startup_sdos_is_empty() {
     let cfg = parse(
         "schema_version: 1\nbus: { cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_bytes: 256 }\ndevices:\n  - label: din\n    pdos: { tx: [{ index: 0x1a00, bit_offset: 0, bit_length: 8 }] }\nchannels: []\n",
