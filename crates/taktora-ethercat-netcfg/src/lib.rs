@@ -775,6 +775,34 @@ mod dto {
         saw_output.then_some(true)
     }
 
+    /// Map an ESI [`ResolveError`](taktora_ethercat_esi::ResolveError) to the
+    /// netcfg error for `label`, stamping the device label on each variant.
+    /// Extracted from [`DeviceInstanceDto::resolve`] to keep its cyclomatic
+    /// complexity within the project's gate.
+    fn map_resolve_error(label: &str, e: taktora_ethercat_esi::ResolveError) -> NetcfgError {
+        use taktora_ethercat_esi::ResolveError as R;
+        match e {
+            R::NoAlternativeMappings => NetcfgError::OpModeOnFlatDevice {
+                label: label.to_owned(),
+            },
+            R::MappingNotFound {
+                requested,
+                available,
+            } => NetcfgError::OpModeNotFound {
+                label: label.to_owned(),
+                requested,
+                available,
+            },
+            R::NoDefaultMapping => NetcfgError::NoDefaultMapping {
+                label: label.to_owned(),
+            },
+            R::UnknownAssignmentPdo { index } => NetcfgError::UnknownAssignmentPdo {
+                label: label.to_owned(),
+                index,
+            },
+        }
+    }
+
     impl DeviceInstanceDto {
         /// Convert into a [`DeviceInstance`], resolving an `esi:` reference
         /// (read file, parse, convert PDOs, map identity) when present, and
@@ -827,32 +855,9 @@ mod dto {
 
                     // op_mode selects the PDO mapping and is not retained in
                     // the IR; the resolved PDOs in `assignment` are the only output.
-                    let assignment =
-                        device.resolve_assignment(op_mode.as_deref()).map_err(|e| {
-                            use taktora_ethercat_esi::ResolveError as R;
-                            match e {
-                                R::NoAlternativeMappings => NetcfgError::OpModeOnFlatDevice {
-                                    label: label.clone(),
-                                },
-                                R::MappingNotFound {
-                                    requested,
-                                    available,
-                                } => NetcfgError::OpModeNotFound {
-                                    label: label.clone(),
-                                    requested,
-                                    available,
-                                },
-                                R::NoDefaultMapping => NetcfgError::NoDefaultMapping {
-                                    label: label.clone(),
-                                },
-                                R::UnknownAssignmentPdo { index } => {
-                                    NetcfgError::UnknownAssignmentPdo {
-                                        label: label.clone(),
-                                        index,
-                                    }
-                                }
-                            }
-                        })?;
+                    let assignment = device
+                        .resolve_assignment(op_mode.as_deref())
+                        .map_err(|e| map_resolve_error(&label, e))?;
                     let to_entry = |e: &taktora_ethercat_esi::ResolvedPdoEntry| PdoEntry {
                         index: e.index,
                         bit_offset: e.bit_offset,
