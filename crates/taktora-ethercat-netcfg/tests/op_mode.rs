@@ -8,8 +8,8 @@ const ESI_XML: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
   <Vendor><Id>#x00000002</Id></Vendor>
   <Descriptions><Devices><Device>
     <Type ProductCode="#x1b773052" RevisionNo="#x00170000">EL7047</Type>
-    <Sm StartAddress="#x1000" ControlByte="#x40" Enable="1">Outputs</Sm>
-    <Sm StartAddress="#x1400" ControlByte="#x04" Enable="1">Inputs</Sm>
+    <Sm StartAddress="#x1000" ControlByte="#x44" Enable="1">Outputs</Sm>
+    <Sm StartAddress="#x1400" ControlByte="#x00" Enable="1">Inputs</Sm>
     <RxPdo Sm="2"><Index>#x1600</Index><Entry><Index>#x7010</Index><BitLen>16</BitLen></Entry></RxPdo>
     <RxPdo><Index>#x1601</Index><Entry><Index>#x7010</Index><BitLen>48</BitLen></Entry></RxPdo>
     <TxPdo Sm="3"><Index>#x1a00</Index><Entry><Index>#x6010</Index><BitLen>16</BitLen></Entry></TxPdo>

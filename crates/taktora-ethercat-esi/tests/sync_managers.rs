@@ -16,5 +16,5 @@ fn parses_sync_managers_in_order() {
 
     assert_eq!(sms[2].start_address, 0x1100);
     assert_eq!(sms[2].control_byte, 0x00);
-    assert_eq!(sms[2].direction, SmDirection::Output);
+    assert_eq!(sms[2].direction, SmDirection::Input);
 }

@@ -23,7 +23,7 @@ const ESI_XML: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
       <Device>
         <Type ProductCode="#x07500354" RevisionNo="#x00000001">Coupler</Type>
         <Name>Coupler</Name>
-        <Sm StartAddress="#x1000" ControlByte="#x40" Enable="1">Outputs</Sm>
+        <Sm StartAddress="#x1000" ControlByte="#x44" Enable="1">Outputs</Sm>
         <TxPdo Sm="3">
           <Index>#x1a00</Index>
           <Entry><Index>#x6000</Index><SubIndex>1</SubIndex><BitLen>8</BitLen></Entry>
