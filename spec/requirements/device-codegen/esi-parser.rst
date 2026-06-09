@@ -194,6 +194,32 @@ out, with no knowledge of codegen, ethercrab, or taktora-executor.
    and ``src/dto.rs``; verified by ``tests/modules.rs`` and the gated
    real-file test ``tests/wago_real.rs``.
 
+.. req:: AlternativeSmMapping captured faithfully, never resolved
+   :id: REQ_0529
+   :status: implemented
+   :satisfies: FEAT_0051
+   :links: BB_0060, TEST_0871
+
+   The parser shall capture each ``<AlternativeSmMapping>`` declared
+   under ``<Info><VendorSpecific><TwinCAT>`` into a vendor-neutral,
+   typed IR — its name, its default flag, and, per sync manager, the
+   ordered list of assigned PDO indices with their optional
+   ``ChannelNo`` — without resolving it to a process image, picking a
+   default, or merging it with the per-PDO ``Sm=`` mapping. A device
+   that declares no ``<AlternativeSmMapping>`` shall yield an empty
+   set, not a fabricated default.
+
+   **Rationale.** An ``<AlternativeSmMapping>`` enumerates one complete
+   selectable PDO-assignment set spanning every sync manager (e.g. the
+   EL7047 "Positioning interface" assigns SM2 = {0x1601, 0x1602,
+   0x1606} and SM3 = {0x1a01, 0x1a03, 0x1a07}). Capturing each as a
+   faithful set is what lets the codegen emit the joint per-device
+   ``<Dev>OpMode`` enum (:need:`REQ_0523`); resolving it here would
+   bake codegen policy into the parser, violating
+   :need:`ADR_0102`. The capture-it-verbatim posture matches
+   :need:`REQ_0504` (PDO alternatives kept unresolved) and
+   :need:`REQ_0850` (MDP catalog kept unexpanded). issue #70.
+
 .. req:: Vendor-specific extensions captured as opaque blobs
    :id: REQ_0505
    :status: implemented
