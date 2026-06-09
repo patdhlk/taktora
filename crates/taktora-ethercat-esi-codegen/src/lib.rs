@@ -14,11 +14,11 @@
 use std::collections::HashMap;
 
 use proc_macro2::{Ident, TokenStream};
-use taktora_ethercat_esi::{EsiFile, Pdo};
+use taktora_ethercat_esi::{AlternativeSmMapping, EsiFile, Pdo};
 
 pub use taktora_fieldbus_od_core::Identity;
 
-mod naming;
+pub mod naming;
 
 /// A resolved, borrowing codegen IR for one device: parser data with all naming
 /// and revision policy already applied.
@@ -39,6 +39,9 @@ pub struct Device<'a> {
     pub tx_pdos: &'a [Pdo],
     /// `RxPDOs` (master → `SubDevice`), borrowed from the parsed model.
     pub rx_pdos: &'a [Pdo],
+    /// Predefined PDO-assignment combinations (`AlternativeSmMapping`),
+    /// borrowed from the parsed model. Empty for single-assignment devices.
+    pub alt_sm_mappings: &'a [AlternativeSmMapping],
 }
 
 /// A backend that turns resolved [`Device`]s into Rust token streams.
@@ -85,34 +88,15 @@ pub enum CodegenError {
         reason: String,
     },
 
-    /// A PDO-assignment alternative group resolved to zero alternatives. A
-    /// backend cannot emit a choice enum with no variants (nor a `Default`), so
-    /// this is surfaced rather than emitting uncompilable tokens. The grouping
-    /// only ever produces non-empty groups, so this guards an internal
-    /// invariant (`REQ_0523`).
-    #[error("alternative group for enum {enum_ident:?} has no alternatives")]
-    EmptyAlternativeGroup {
-        /// The enum identifier the empty group would have produced.
-        enum_ident: String,
-    },
-
-    /// A single direction (`Tx`/`Rx`) resolved to MORE THAN ONE PDO-assignment
-    /// alternative group. The spec-required shape is one alternative group per
-    /// direction (the master picks one PDO assignment via 0x1C12/0x1C13).
-    /// Emitting more than one group is currently miscompiled: every group is
-    /// laid out at the same `base_offset`, so two groups in one direction would
-    /// alias the same bits at decode/encode time (silent data corruption).
-    /// Until per-group offset threading exists this is rejected as a hard error
-    /// rather than emitting wrong codegen (`REQ_0523`/`REQ_0524`).
-    #[error(
-        "device {device:?} resolves more than one alternative group in the {direction} direction; \
-         multiple alternative groups per direction are not yet supported"
-    )]
-    MultipleAlternativeGroups {
-        /// The device whose direction over-resolved.
+    /// An `AlternativeSmMapping` referenced a PDO index that is in neither the
+    /// device's `TxPdo` nor `RxPdo` list — the ESI file is internally
+    /// inconsistent.
+    #[error("device {device}: AlternativeSmMapping references unknown PDO {index:#06x}")]
+    UnknownAssignmentPdo {
+        /// The device struct ident.
         device: String,
-        /// The offending direction (`"Tx"` for inputs, `"Rx"` for outputs).
-        direction: &'static str,
+        /// The dangling PDO index.
+        index: u16,
     },
 }
 
@@ -192,73 +176,41 @@ pub fn pdo_struct_ident(
     make_ident(&format!("{device_struct}{segment}"))
 }
 
-/// Resolve the enum identifier for a PDO-assignment alternative group
-/// (`REQ_0523`).
-///
-/// A device with a single alternative group names it `<Dev>PdoAssignment`
-/// (`label: None`). A device with multiple groups disambiguates each by a
-/// caller-supplied `PascalCase` label segment (e.g. derived from the shared sync
-/// manager / direction), yielding `<Dev>PdoAssignment<Label>`.
+/// The `<Dev>OpMode` enum identifier for a device's PDO-assignment set.
 ///
 /// # Errors
 ///
 /// Returns [`CodegenError::InvalidIdent`] if the concatenation does not lex to
 /// exactly one identifier token (the sanitisation policy prevents this).
-pub fn pdo_assignment_enum_ident(
-    device_struct: &Ident,
-    label: Option<&str>,
-) -> Result<Ident, CodegenError> {
-    let suffix = label.map_or_else(String::new, naming::pdo_struct_segment_raw);
-    make_ident(&format!("{device_struct}PdoAssignment{suffix}"))
+pub fn op_mode_enum_ident(device_struct: &Ident) -> Result<Ident, CodegenError> {
+    make_ident(&format!("{device_struct}OpMode"))
 }
 
-/// Resolve the device-struct field identifier holding a PDO-assignment enum
-/// (`REQ_0523`).
-///
-/// A single alternative group uses the bare `pdo` field; multiple groups
-/// disambiguate with a caller-supplied snake-case label (`pdo_sm3`).
+/// The enum-variant identifier for one assignment (`<Dev>OpMode::<Variant>`).
 ///
 /// # Errors
 ///
-/// Returns [`CodegenError::InvalidIdent`] if the result does not lex to exactly
-/// one identifier token (the sanitisation policy prevents this).
-pub fn pdo_assignment_field_ident(label: Option<&str>) -> Result<Ident, CodegenError> {
-    label.map_or_else(
-        || make_ident("pdo"),
-        |label| field_ident(&format!("pdo_{label}")),
-    )
+/// Returns [`CodegenError::InvalidIdent`] if the rendered segment does not lex to
+/// exactly one identifier token (the sanitisation policy prevents this).
+pub fn op_mode_variant_ident(name: Option<&str>, ordinal: usize) -> Result<Ident, CodegenError> {
+    make_ident(&naming::op_mode_variant_segment(name, ordinal))
 }
 
-/// Resolve the enum-variant identifier for one alternative PDO (`REQ_0523`).
-///
-/// The variant is a `PascalCase` rendering of the PDO `<Name>` (`"Standard"` →
-/// `Standard`), or its mapping index when unnamed (`0x1A00` → `Pdo1a00`).
-///
-/// # Errors
-///
-/// Returns [`CodegenError::InvalidIdent`] if the rendered segment does not lex
-/// to exactly one identifier token (the sanitisation policy prevents this).
-pub fn pdo_variant_ident(name: Option<&str>, index: u16) -> Result<Ident, CodegenError> {
-    make_ident(&naming::pdo_variant_segment(name, index))
-}
-
-/// Resolve the per-variant struct identifier `<Dev>Pdo<Variant>` holding one
-/// alternative PDO's typed entries (`REQ_0524`).
-///
-/// The variant segment renders the PDO `<Name>` in `PascalCase` (`ALT` +
-/// `Standard` → `ALTPdoStandard`), or its index when unnamed.
+/// The per-variant data-struct identifier (`<Dev><Variant>`).
 ///
 /// # Errors
 ///
 /// Returns [`CodegenError::InvalidIdent`] if the concatenation does not lex to
 /// exactly one identifier token (the sanitisation policy prevents this).
-pub fn pdo_variant_struct_ident(
+pub fn op_mode_variant_struct_ident(
     device_struct: &Ident,
     name: Option<&str>,
-    index: u16,
+    ordinal: usize,
 ) -> Result<Ident, CodegenError> {
-    let segment = naming::pdo_variant_segment(name, index);
-    make_ident(&format!("{device_struct}Pdo{segment}"))
+    make_ident(&format!(
+        "{device_struct}{}",
+        naming::op_mode_variant_segment(name, ordinal)
+    ))
 }
 
 /// Whether every resolved device has a distinct `const_ident`. Used only by the
@@ -306,6 +258,7 @@ fn resolve_devices(esi: &EsiFile) -> Result<Vec<Device<'_>>, CodegenError> {
                 name: device.name.as_deref(),
                 tx_pdos: &device.tx_pdos,
                 rx_pdos: &device.rx_pdos,
+                alt_sm_mappings: &device.alt_sm_mappings,
             })
         })
         .collect::<Result<_, _>>()?;

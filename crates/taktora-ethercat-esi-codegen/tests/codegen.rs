@@ -6,71 +6,7 @@ use std::cell::RefCell;
 use proc_macro2::TokenStream;
 use quote::quote;
 use taktora_ethercat_esi as esi;
-use taktora_ethercat_esi_codegen::{
-    CodegenBackend, CodegenError, Device, generate, pdo_assignment_enum_ident,
-    pdo_assignment_field_ident, pdo_variant_ident, pdo_variant_struct_ident,
-};
-
-#[test]
-fn pdo_assignment_idents_for_single_and_multi_group() {
-    let dev = proc_macro2::Ident::new("ALT", proc_macro2::Span::call_site());
-
-    // Single group: bare `<Dev>PdoAssignment` enum and a `pdo` field.
-    assert_eq!(
-        pdo_assignment_enum_ident(&dev, None).unwrap().to_string(),
-        "ALTPdoAssignment"
-    );
-    assert_eq!(pdo_assignment_field_ident(None).unwrap().to_string(), "pdo");
-
-    // Multi-group: label-disambiguated enum + field.
-    assert_eq!(
-        pdo_assignment_enum_ident(&dev, Some("Sm3"))
-            .unwrap()
-            .to_string(),
-        "ALTPdoAssignmentSm3"
-    );
-    assert_eq!(
-        pdo_assignment_field_ident(Some("sm3")).unwrap().to_string(),
-        "pdo_sm3"
-    );
-}
-
-#[test]
-fn pdo_variant_idents_from_name_and_index() {
-    let dev = proc_macro2::Ident::new("ALT", proc_macro2::Span::call_site());
-
-    assert_eq!(
-        pdo_variant_ident(Some("Standard"), 0x1A00)
-            .unwrap()
-            .to_string(),
-        "Standard"
-    );
-    assert_eq!(
-        pdo_variant_ident(Some("Compact"), 0x1A01)
-            .unwrap()
-            .to_string(),
-        "Compact"
-    );
-    // Unnamed → index fallback.
-    assert_eq!(
-        pdo_variant_ident(None, 0x1A02).unwrap().to_string(),
-        "Pdo1a02"
-    );
-
-    // Per-variant struct ident is `<Dev>Pdo<Variant>`.
-    assert_eq!(
-        pdo_variant_struct_ident(&dev, Some("Standard"), 0x1A00)
-            .unwrap()
-            .to_string(),
-        "ALTPdoStandard"
-    );
-    assert_eq!(
-        pdo_variant_struct_ident(&dev, Some("Compact"), 0x1A01)
-            .unwrap()
-            .to_string(),
-        "ALTPdoCompact"
-    );
-}
+use taktora_ethercat_esi_codegen::{CodegenBackend, CodegenError, Device, generate};
 
 /// A no-op backend that records the resolved struct idents it saw, so tests can
 /// assert ordering and the module-root call without inspecting emitted tokens.
@@ -219,6 +155,48 @@ fn generated_tokens_parse_as_rust() {
     let ts = generate(&file, &backend).expect("generate");
     // The emitted token stream must be a syntactically valid Rust file.
     let _file: syn::File = syn::parse2(ts).expect("emitted tokens parse as a Rust file");
+}
+
+#[test]
+fn op_mode_variant_segment_pascalizes_name() {
+    use taktora_ethercat_esi_codegen::naming;
+    assert_eq!(
+        naming::op_mode_variant_segment(Some("Positioning interface"), 0),
+        "PositioningInterface"
+    );
+    assert_eq!(
+        naming::op_mode_variant_segment(Some("Velocity control compact"), 0),
+        "VelocityControlCompact"
+    );
+    // Unnamed mapping falls back to a stable ordinal.
+    assert_eq!(naming::op_mode_variant_segment(None, 3), "Mode4");
+    // Names that sanitise to nothing fall back to the ordinal (no "_" variant).
+    assert_eq!(naming::op_mode_variant_segment(Some("---"), 0), "Mode1");
+    assert_eq!(naming::op_mode_variant_segment(Some("   "), 2), "Mode3");
+}
+
+#[test]
+fn op_mode_idents_build_expected_names() {
+    use taktora_ethercat_esi_codegen::{
+        op_mode_enum_ident, op_mode_variant_ident, op_mode_variant_struct_ident,
+    };
+    let dev = proc_macro2::Ident::new("EL7047", proc_macro2::Span::call_site());
+    assert_eq!(
+        op_mode_enum_ident(&dev).unwrap().to_string(),
+        "EL7047OpMode"
+    );
+    assert_eq!(
+        op_mode_variant_ident(Some("Positioning interface"), 0)
+            .unwrap()
+            .to_string(),
+        "PositioningInterface"
+    );
+    assert_eq!(
+        op_mode_variant_struct_ident(&dev, Some("Positioning interface"), 0)
+            .unwrap()
+            .to_string(),
+        "EL7047PositioningInterface"
+    );
 }
 
 /// A device whose `<Type>` sanitises to a Rust keyword (`match`) must resolve to

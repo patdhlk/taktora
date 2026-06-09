@@ -23,9 +23,8 @@ use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use taktora_ethercat_esi::Pdo;
 use taktora_ethercat_esi_codegen::{
-    CodegenBackend, CodegenError, Device, Identity, field_ident, pdo_assignment_enum_ident,
-    pdo_assignment_field_ident, pdo_field_ident, pdo_struct_ident, pdo_variant_ident,
-    pdo_variant_struct_ident,
+    CodegenBackend, CodegenError, Device, Identity, field_ident, op_mode_enum_ident,
+    op_mode_variant_ident, op_mode_variant_struct_ident, pdo_field_ident, pdo_struct_ident,
 };
 
 mod typemap;
@@ -137,248 +136,177 @@ fn resolve_direction(
     Ok((resolved, offset))
 }
 
-/// One alternative PDO inside an alternative group: its enum-variant ident, its
-/// per-variant struct ident, the resolved entry fields, and the variant's total
-/// bit width (used for the active-variant length guard).
-struct ResolvedAlternative {
+/// One resolved assignment ("OpMode"): its enum-variant ident, its per-variant
+/// data-struct ident, and the resolved input/output PDOs (already grouped into
+/// the existing per-PDO `ResolvedPdo` shape, laid out from offset 0 within the
+/// variant). Plus the raw Rx/Tx index lists for `pdo_assignment()`.
+struct ResolvedAssignment {
     variant_ident: Ident,
     struct_ident: Ident,
-    fields: Vec<ResolvedField>,
-    bits: usize,
+    inputs: Vec<ResolvedPdo>,
+    input_bits: usize,
+    outputs: Vec<ResolvedPdo>,
+    output_bits: usize,
+    rx_indices: Vec<u16>,
+    tx_indices: Vec<u16>,
 }
 
-/// One alternative group within a direction: the device-struct enum field, the
-/// enum type ident, and the closed set of alternatives the master chooses among
-/// at bring-up (0x1C12/0x1C13). Exactly one alternative is active at runtime.
-struct ResolvedAltGroup {
-    field_ident: Ident,
-    enum_ident: Ident,
-    alternatives: Vec<ResolvedAlternative>,
-}
-
-/// Split a direction's PDOs into the always-on set (`Fixed || Mandatory`, kept
-/// as the existing T8 flat/sub-struct treatment) and the alternative candidates
-/// (everything else — the master picks one at bring-up, so they form a closed
-/// CHOICE). Declaration order is preserved within each partition.
-fn partition_pdos(pdos: &[Pdo]) -> (Vec<&Pdo>, Vec<&Pdo>) {
-    pdos.iter().partition(|p| p.fixed || p.mandatory)
-}
-
-/// Classify a whole direction's PDOs into the final always-on set and the
-/// genuine (≥2-PDO) alternative groups.
-///
-/// The always-on set is `(Fixed || Mandatory)` PDOs ∪ singleton candidates (a
-/// non-fixed/non-mandatory PDO that is the only candidate in its Sm/`<Exclude>`
-/// group is not an alternative — see [`classify_alternatives`]). It is returned
-/// in original declaration order so the running bit-offset threads correctly:
-/// every always-on PDO — reclassified singleton or not — takes its place in the
-/// offset accumulator in declaration order.
-fn classify_direction(pdos: &[Pdo]) -> (Vec<&Pdo>, Vec<Vec<&Pdo>>) {
-    let (_, candidates) = partition_pdos(pdos);
-    let (singletons, genuine) = classify_alternatives(&candidates);
-
-    let is_singleton = |p: &Pdo| singletons.iter().any(|s| std::ptr::eq(*s, p));
-    let always_on: Vec<&Pdo> = pdos
-        .iter()
-        .filter(|p| p.fixed || p.mandatory || is_singleton(p))
-        .collect();
-
-    (always_on, genuine)
-}
-
-/// Union-find `find` with path-halving over a `parent` slice.
-fn uf_find(parent: &mut [usize], mut i: usize) -> usize {
-    while parent[i] != i {
-        parent[i] = parent[parent[i]];
-        i = parent[i];
+/// Resolve a device's assignment set (`REQ_0523`, issue #70).
+fn resolve_assignments(
+    device_struct: &Ident,
+    tx_pdos: &[Pdo],
+    rx_pdos: &[Pdo],
+    mappings: &[taktora_ethercat_esi::AlternativeSmMapping],
+) -> Result<Vec<ResolvedAssignment>, CodegenError> {
+    if mappings.is_empty() {
+        return Ok(vec![resolve_default_assignment(
+            device_struct,
+            tx_pdos,
+            rx_pdos,
+        )?]);
     }
-    i
-}
+    // Default mapping first (stable), then the rest in document order.
+    let mut order: Vec<usize> = (0..mappings.len()).collect();
+    order.sort_by_key(|&i| !mappings[i].default); // default (true) sorts first
 
-/// Union the components containing `a` and `b`.
-fn uf_union(parent: &mut [usize], a: usize, b: usize) {
-    let (ra, rb) = (uf_find(parent, a), uf_find(parent, b));
-    if ra != rb {
-        parent[ra] = rb;
-    }
-}
-
-/// Group the alternative-candidate PDOs into alternative groups: PDOs sharing a
-/// sync manager (`pdo.sm`) form one group, then `<Exclude>` connected
-/// components refine the grouping (two PDOs in the same SM that exclude each
-/// other, transitively, end in the same group). PDOs with no `sm` each form
-/// their own singleton group keyed by index, so they never merge spuriously.
-///
-/// Returns groups in first-appearance order; within a group, PDOs stay in
-/// declaration order.
-fn group_alternatives<'a>(candidates: &[&'a Pdo]) -> Vec<Vec<&'a Pdo>> {
-    // Union-find over the candidate slice indices.
-    let mut parent: Vec<usize> = (0..candidates.len()).collect();
-
-    // 1) Union PDOs that share a (Some) sync manager.
-    for (i, pi) in candidates.iter().enumerate() {
-        for (offset, pj) in candidates[i + 1..].iter().enumerate() {
-            if let (Some(si), Some(sj)) = (pi.sm, pj.sm) {
-                if si == sj {
-                    uf_union(&mut parent, i, i + 1 + offset);
+    // Phase 1: compute every mapping's (variant_ident, struct_ident) pair AND
+    // validate/collect its Rx/Tx index lists, but DON'T resolve directions yet.
+    // Both idents derive from the same name segment, so PascalCase-colliding
+    // names produce identical pairs here.
+    let mut planned = Vec::with_capacity(order.len());
+    for (ordinal, &mi) in order.iter().enumerate() {
+        let m = &mappings[mi];
+        let mut rx_indices = Vec::new();
+        let mut tx_indices = Vec::new();
+        for sm in &m.sm_assignments {
+            for p in &sm.pdos {
+                if rx_pdos.iter().any(|q| q.index == p.index) {
+                    rx_indices.push(p.index);
+                } else if tx_pdos.iter().any(|q| q.index == p.index) {
+                    tx_indices.push(p.index);
+                } else {
+                    return Err(CodegenError::UnknownAssignmentPdo {
+                        device: device_struct.to_string(),
+                        index: p.index,
+                    });
                 }
             }
         }
-    }
-
-    // 2) Refine with <Exclude> edges (by mapping index), unioning the endpoints.
-    let index_of: std::collections::HashMap<u16, usize> = candidates
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (p.index, i))
-        .collect();
-    for (i, p) in candidates.iter().enumerate() {
-        for excl in &p.exclude {
-            if let Some(&j) = index_of.get(excl) {
-                uf_union(&mut parent, i, j);
-            }
-        }
-    }
-
-    // Collect components in first-appearance order.
-    let mut order: Vec<usize> = Vec::new();
-    let mut groups: std::collections::HashMap<usize, Vec<&Pdo>> = std::collections::HashMap::new();
-    for (i, pdo) in candidates.iter().enumerate() {
-        let root = uf_find(&mut parent, i);
-        if !groups.contains_key(&root) {
-            order.push(root);
-        }
-        groups.entry(root).or_default().push(pdo);
-    }
-    order
-        .into_iter()
-        .map(|r| groups.remove(&r).expect("root collected above"))
-        .collect()
-}
-
-/// Refine the alternative-candidate grouping into real alternatives vs.
-/// mis-grouped always-on PDOs.
-///
-/// A candidate group of size 1 is NOT an alternative: a non-`Fixed`/non-
-/// `Mandatory` PDO that is the only candidate competing for its sync manager
-/// (or `<Exclude>` component) is just an always-on (default) PDO whose mapping
-/// happens to be reconfigurable. Only a group of **≥2** candidates is a genuine
-/// alternative set (mutually-exclusive mappings competing for one Sm, or
-/// `<Exclude>`-linked).
-///
-/// Returns `(singletons, genuine_groups)`:
-/// - `singletons`: the lone-candidate PDOs to fold back into the always-on set,
-///   in declaration order;
-/// - `genuine_groups`: the ≥2-PDO groups, in first-appearance order, each in
-///   declaration order.
-fn classify_alternatives<'a>(candidates: &[&'a Pdo]) -> (Vec<&'a Pdo>, Vec<Vec<&'a Pdo>>) {
-    let groups = group_alternatives(candidates);
-    let mut singletons: Vec<&Pdo> = Vec::new();
-    let mut genuine: Vec<Vec<&Pdo>> = Vec::new();
-    for group in groups {
-        if group.len() == 1 {
-            singletons.push(group[0]);
-        } else {
-            genuine.push(group);
-        }
-    }
-    // Preserve declaration order among reclassified singletons (the
-    // first-appearance group order already follows declaration order, but a
-    // group's first member is not necessarily its lowest declaration index, so
-    // sort defensively by the candidate-slice position).
-    singletons.sort_by_key(|p| {
-        candidates
-            .iter()
-            .position(|c| std::ptr::eq(*c, *p))
-            .unwrap_or(usize::MAX)
-    });
-    (singletons, genuine)
-}
-
-/// Resolve one alternative group into [`ResolvedAlternative`]s. Every
-/// alternative's entries are laid out starting at `base_offset` (the running
-/// offset after this direction's always-on PDOs), since exactly one alternative
-/// occupies that space at runtime. `label` disambiguates the enum/field idents
-/// across groups; the caller passes `None` for the single-group case (the only
-/// shape currently emitted — see [`resolve_alt_groups`]).
-fn resolve_alt_group(
-    group: &[&Pdo],
-    device_struct: &Ident,
-    base_offset: usize,
-    label: Option<&str>,
-) -> Result<ResolvedAltGroup, CodegenError> {
-    let mut alternatives = Vec::with_capacity(group.len());
-    for pdo in group {
-        let mut offset = base_offset;
-        let fields = resolve_pdo_fields(pdo, &mut offset)?;
-        alternatives.push(ResolvedAlternative {
-            variant_ident: pdo_variant_ident(pdo.name.as_deref(), pdo.index)?,
-            struct_ident: pdo_variant_struct_ident(device_struct, pdo.name.as_deref(), pdo.index)?,
-            fields,
-            bits: offset - base_offset,
+        planned.push(Planned {
+            variant_ident: op_mode_variant_ident(m.name.as_deref(), ordinal)?,
+            struct_ident: op_mode_variant_struct_ident(device_struct, m.name.as_deref(), ordinal)?,
+            rx_indices,
+            tx_indices,
         });
     }
-    Ok(ResolvedAltGroup {
-        field_ident: pdo_assignment_field_ident(label)?,
-        enum_ident: pdo_assignment_enum_ident(device_struct, label)?,
-        alternatives,
+
+    // Phase 2: dedup BOTH idents in lockstep, keyed on the struct ident base, so
+    // the SAME numeric suffix lands on the variant ident and the struct ident.
+    // This guarantees every struct_ident is unique BEFORE any direction is
+    // resolved, so all derived idents (In/Out direction structs and per-PDO
+    // sub-structs) pick up the suffix consistently.
+    dedup_planned(&mut planned);
+
+    // Phase 3: resolve directions from the FINAL (deduped) struct idents.
+    let mut out = Vec::with_capacity(planned.len());
+    for p in planned {
+        let outputs_src = collect_pdos(rx_pdos, &p.rx_indices);
+        let inputs_src = collect_pdos(tx_pdos, &p.tx_indices);
+        let (inputs, input_bits) = resolve_direction(&inputs_src, &p.struct_ident)?;
+        let (outputs, output_bits) = resolve_direction(&outputs_src, &p.struct_ident)?;
+        out.push(ResolvedAssignment {
+            variant_ident: p.variant_ident,
+            struct_ident: p.struct_ident,
+            inputs,
+            input_bits,
+            outputs,
+            output_bits,
+            rx_indices: p.rx_indices,
+            tx_indices: p.tx_indices,
+        });
+    }
+    Ok(out)
+}
+
+/// Build the single synthetic default assignment for a device with no
+/// `AlternativeSmMapping`: default set is PDOs with an `Sm=` attribute or
+/// `Mandatory` (issue #70: `Fixed` is orthogonal to assignment).
+fn resolve_default_assignment(
+    device_struct: &Ident,
+    tx_pdos: &[Pdo],
+    rx_pdos: &[Pdo],
+) -> Result<ResolvedAssignment, CodegenError> {
+    let in_default: Vec<&Pdo> = tx_pdos
+        .iter()
+        .filter(|p| p.sm.is_some() || p.mandatory)
+        .collect();
+    let out_default: Vec<&Pdo> = rx_pdos
+        .iter()
+        .filter(|p| p.sm.is_some() || p.mandatory)
+        .collect();
+    let rx_indices: Vec<u16> = out_default.iter().map(|p| p.index).collect();
+    let tx_indices: Vec<u16> = in_default.iter().map(|p| p.index).collect();
+    let variant_struct = op_mode_variant_struct_ident(device_struct, Some("Default"), 0)?;
+    let (inputs, input_bits) = resolve_direction(&in_default, &variant_struct)?;
+    let (outputs, output_bits) = resolve_direction(&out_default, &variant_struct)?;
+    Ok(ResolvedAssignment {
+        variant_ident: op_mode_variant_ident(Some("Default"), 0)?,
+        struct_ident: variant_struct,
+        inputs,
+        input_bits,
+        outputs,
+        output_bits,
+        rx_indices,
+        tx_indices,
     })
 }
 
-/// Resolve a direction's genuine alternative groups. Always-on PDOs (already
-/// resolved) occupy `base_offset` bits; the alternative group's variants start
-/// there.
+/// Gather the `&Pdo`s for a list of indices, in index order, skipping missing.
 ///
-/// `genuine` carries only ≥2-PDO groups (singleton candidates were already
-/// reclassified as always-on by [`classify_direction`]). The spec-required
-/// shape is at most one genuine group per direction (the master selects a
-/// single PDO assignment via 0x1C12/0x1C13), so the single group is unlabelled
-/// (bare `pdo` / `<Dev>PdoAssignment`). A direction with MORE THAN ONE genuine
-/// group is rejected with [`CodegenError::MultipleAlternativeGroups`] rather
-/// than miscompiled (see the inline `TODO`).
-fn resolve_alt_groups(
-    genuine: &[Vec<&Pdo>],
-    device_struct: &Ident,
-    base_offset: usize,
-    direction: &'static str,
-) -> Result<Vec<ResolvedAltGroup>, CodegenError> {
-    // TODO: support more than one alternative group per direction by sequencing
-    // each group's `base_offset` after the previous group's widest variant
-    // (instead of giving every group the same `base_offset`). Until then a
-    // multi-group direction is rejected: `direction_len` SUMS the widest-per-
-    // group while `resolve_alt_group` lays every group at the same offset, so
-    // two groups would alias the same bits (silent data corruption).
-    if genuine.len() > 1 {
-        return Err(CodegenError::MultipleAlternativeGroups {
-            device: device_struct.to_string(),
-            direction,
-        });
-    }
-    // Single genuine group (the only spec-required case) stays unlabelled: bare
-    // `pdo` / `<Dev>PdoAssignment`.
-    genuine
+/// Callers pre-validate that every index resolves to a member of `pool` (see
+/// `resolve_assignments`'s `UnknownAssignmentPdo` check and
+/// `resolve_default_assignment`, which derives indices directly from the pool),
+/// so a miss is currently impossible; the silent skip is defensive only.
+fn collect_pdos<'a>(pool: &'a [Pdo], indices: &[u16]) -> Vec<&'a Pdo> {
+    indices
         .iter()
-        .map(|group| resolve_alt_group(group, device_struct, base_offset, None))
+        .filter_map(|&idx| pool.iter().find(|p| p.index == idx))
         .collect()
 }
 
-/// The `self.<…>` access path for a field: bare `self.<field>` in the flat
-/// shape, or `self.<pdo>.<field>` when the direction is split into per-PDO
-/// sub-structs.
-fn access_path(pdo_field: Option<&Ident>, field: &Ident) -> TokenStream {
-    pdo_field.map_or_else(|| quote! { self.#field }, |pdo| quote! { self.#pdo.#field })
+/// A planned assignment's idents and index lists, computed BEFORE directions are
+/// resolved so the variant/struct idents can be deduped in lockstep first.
+struct Planned {
+    variant_ident: Ident,
+    struct_ident: Ident,
+    rx_indices: Vec<u16>,
+    tx_indices: Vec<u16>,
 }
 
-/// Build the per-field read expression assigning out of `bits` into the field's
-/// access path (`self.<field>` or `self.<pdo>.<field>`).
-fn read_stmt(pdo_field: Option<&Ident>, field: &ResolvedField) -> TokenStream {
-    read_into(&access_path(pdo_field, &field.ident), field)
-}
-
-/// Build the per-field write expression storing the field's access path into
-/// `bits`.
-fn write_stmt(pdo_field: Option<&Ident>, field: &ResolvedField) -> TokenStream {
-    write_from(&access_path(pdo_field, &field.ident), field)
+/// De-duplicate assignment idents that PascalCase-collide, applying the SAME
+/// numeric suffix to BOTH the `variant_ident` and the `struct_ident` so each
+/// stays paired and every `struct_ident` is unique. Keyed on the `struct_ident`
+/// base (the device-prefixed name); since both idents share the colliding name
+/// segment, one collision count drives both. Running this BEFORE
+/// `resolve_direction` ensures all derived idents (the In/Out direction structs
+/// and the per-PDO sub-structs built from `struct_ident`) inherit the suffix.
+fn dedup_planned(planned: &mut [Planned]) {
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for p in planned.iter_mut() {
+        let base = p.struct_ident.to_string();
+        let count = seen.entry(base).or_insert(0);
+        *count += 1;
+        if *count > 1 {
+            p.variant_ident = Ident::new(
+                &format!("{}{count}", p.variant_ident),
+                proc_macro2::Span::call_site(),
+            );
+            p.struct_ident = Ident::new(
+                &format!("{}{count}", p.struct_ident),
+                proc_macro2::Span::call_site(),
+            );
+        }
+    }
 }
 
 /// Read `field` out of `bits` into an arbitrary `target` lvalue token (e.g.
@@ -464,86 +392,43 @@ impl CodegenBackend for EthercrabBackend {
     fn emit_device(&self, device: &Device) -> Result<TokenStream, CodegenError> {
         let struct_ident = &device.struct_ident;
         let const_ident = &device.const_ident;
-
-        // Classify each direction: the always-on set is `Fixed || Mandatory`
-        // PDOs PLUS any non-fixed/non-mandatory PDO that is the lone candidate
-        // in its sync-manager (or `<Exclude>`) group — such a singleton is not
-        // an alternative, just a default PDO whose mapping is reconfigurable.
-        // Only a group of ≥2 genuinely-competing PDOs becomes a closed sum type
-        // the master chooses among at bring-up (0x1C12/0x1C13; REQ_0523/0524).
-        let (in_always_on, in_genuine) = classify_direction(device.tx_pdos);
-        let (out_always_on, out_genuine) = classify_direction(device.rx_pdos);
-
-        let (inputs, input_base_bits) = resolve_direction(&in_always_on, struct_ident)?;
-        let (outputs, output_base_bits) = resolve_direction(&out_always_on, struct_ident)?;
-
-        let in_groups = resolve_alt_groups(&in_genuine, struct_ident, input_base_bits, "Tx")?;
-        let out_groups = resolve_alt_groups(&out_genuine, struct_ident, output_base_bits, "Rx")?;
-
-        // A direction with more than one always-on PDO is split into per-PDO
-        // sub-structs so that entry names repeated across channels (e.g. each
-        // EL2004 channel's `Output`) no longer collide; a single-PDO direction
-        // stays flat, keeping the bullet-1 device byte-identical.
-        let inputs_flat = inputs.len() <= 1;
-        let outputs_flat = outputs.len() <= 1;
-
-        // Sub-struct type definitions for every split always-on direction.
-        let mut sub_structs = TokenStream::new();
-        for pdo in &inputs {
-            if !inputs_flat {
-                sub_structs.extend(emit_sub_struct(pdo));
-            }
-        }
-        for pdo in &outputs {
-            if !outputs_flat {
-                sub_structs.extend(emit_sub_struct(pdo));
-            }
-        }
-
-        // Per-variant structs and the choice enum (+ manual Default) for every
-        // alternative group, in both directions.
-        let mut alt_defs = TokenStream::new();
-        for group in in_groups.iter().chain(&out_groups) {
-            alt_defs.extend(emit_alt_group_types(group)?);
-        }
-
-        // Device-struct fields: flat directions contribute their entry fields
-        // directly; split directions contribute one sub-struct field per PDO;
-        // each alternative group contributes one enum-typed field.
-        let mut device_fields = TokenStream::new();
-        device_fields.extend(direction_device_fields(&inputs, inputs_flat));
-        device_fields.extend(direction_device_fields(&outputs, outputs_flat));
-        for group in in_groups.iter().chain(&out_groups) {
-            let field = &group.field_ident;
-            let ty = &group.enum_ident;
-            device_fields.extend(quote! { pub #field: #ty, });
-        }
-
+        let enum_ident = op_mode_enum_ident(struct_ident)?;
+        let assigns = resolve_assignments(
+            struct_ident,
+            device.tx_pdos,
+            device.rx_pdos,
+            device.alt_sm_mappings,
+        )?;
+        let variant_types: TokenStream = assigns.iter().map(emit_variant_types).collect();
+        let enum_def = emit_op_mode_enum(&enum_ident, &assigns);
         let Identity {
             vendor_id,
             product_code,
             revision,
         } = device.identity;
-
-        // Lengths: the always-on portion is fixed; an alternative group's
-        // contribution is the active variant's width, reported at runtime via
-        // the variant's own length guard. `input_len`/`output_len` advertise the
-        // largest layout so the rt allocates a sufficient buffer.
-        let input_len = direction_len(input_base_bits, &in_groups);
-        let output_len = direction_len(output_base_bits, &out_groups);
-
-        let decode_body = decode_body(&inputs, inputs_flat, &in_groups, input_base_bits);
-        let encode_body = encode_body(&outputs, outputs_flat, &out_groups, output_base_bits);
-
+        let input_len = emit_len(&enum_ident, &assigns, true);
+        let output_len = emit_len(&enum_ident, &assigns, false);
+        let decode_body = emit_decode(&enum_ident, &assigns);
+        let encode_body = emit_encode(&enum_ident, &assigns);
+        let pdo_assignment_body = emit_pdo_assignment(&enum_ident, &assigns);
         Ok(quote! {
-            #sub_structs
+            #variant_types
 
-            #alt_defs
+            #enum_def
 
             #[allow(non_camel_case_types)]
             #[derive(Debug, Default, Clone)]
             pub struct #struct_ident {
-                #device_fields
+                pub mode: #enum_ident,
+            }
+
+            impl #struct_ident {
+                /// The Rx/Tx PDO-assignment index lists (0x1C12/0x1C13) for the
+                /// active mode. (issue #70)
+                #[must_use]
+                pub fn pdo_assignment(&self) -> PdoAssignment<'static> {
+                    #pdo_assignment_body
+                }
             }
 
             pub const #const_ident: taktora_ethercat_esi_rt::Identity =
@@ -603,6 +488,14 @@ impl CodegenBackend for EthercrabBackend {
         });
 
         Ok(quote! {
+            /// Rx/Tx PDO-assignment index lists (0x1C12/0x1C13) for a device's
+            /// active mode. Returned by each device's `pdo_assignment()`.
+            #[derive(Debug, Clone, Copy)]
+            pub struct PdoAssignment<'a> {
+                pub rx: &'a [u16],
+                pub tx: &'a [u16],
+            }
+
             /// All devices generated in this module, keyed by EtherCAT identity.
             /// A linear scan over this slice is reducible to a `HashMap` lookup.
             pub static REGISTRY: &[(
@@ -646,188 +539,209 @@ fn emit_sub_struct(pdo: &ResolvedPdo) -> TokenStream {
     }
 }
 
-/// Emit the type definitions for one alternative group (`REQ_0523`/`REQ_0524`):
-///
-/// 1. one `<Dev>Pdo<Variant>` data struct per alternative, holding that
-///    variant's typed entries;
-/// 2. the `<Dev>PdoAssignment[<Label>]` choice enum, one tuple variant per
-///    alternative embedding its struct — so "two alternatives at once" is
-///    unrepresentable (`ADR_0072`);
-/// 3. a manual `impl Default` selecting the first alternative (the enum has
-///    non-unit variants, so `#[derive(Default)]` is unavailable).
-fn emit_alt_group_types(group: &ResolvedAltGroup) -> Result<TokenStream, CodegenError> {
-    let enum_ident = &group.enum_ident;
-
-    // Per-variant structs.
-    let mut structs = TokenStream::new();
-    for alt in &group.alternatives {
-        let ident = &alt.struct_ident;
-        let field_defs = alt.fields.iter().map(field_decl);
-        structs.extend(quote! {
-            #[allow(non_camel_case_types)]
-            #[derive(Debug, Default, Clone)]
-            pub struct #ident {
-                #(#field_defs,)*
-            }
-        });
+/// Emit `<Dev><Variant>` = `{ inputs, outputs }` plus its two direction
+/// sub-structs (issue #70).
+fn emit_variant_types(a: &ResolvedAssignment) -> TokenStream {
+    let in_ident = direction_struct_ident(&a.struct_ident, "In");
+    let out_ident = direction_struct_ident(&a.struct_ident, "Out");
+    let variant = &a.struct_ident;
+    let in_defs = emit_direction_struct(&in_ident, &a.inputs);
+    let out_defs = emit_direction_struct(&out_ident, &a.outputs);
+    quote! {
+        #in_defs
+        #out_defs
+        #[allow(non_camel_case_types)]
+        #[derive(Debug, Default, Clone)]
+        pub struct #variant {
+            pub inputs: #in_ident,
+            pub outputs: #out_ident,
+        }
     }
+}
 
-    // Enum variants embedding each per-variant struct.
-    let variants = group.alternatives.iter().map(|alt| {
-        let v = &alt.variant_ident;
-        let s = &alt.struct_ident;
+/// `<Variant>In` / `<Variant>Out` direction-struct ident.
+fn direction_struct_ident(variant: &Ident, suffix: &str) -> Ident {
+    Ident::new(
+        &format!("{variant}{suffix}"),
+        proc_macro2::Span::call_site(),
+    )
+}
+
+/// Emit one direction struct (flat fields when <=1 PDO, else one sub-struct
+/// field per PDO) plus nested PDO sub-struct definitions.
+fn emit_direction_struct(ident: &Ident, pdos: &[ResolvedPdo]) -> TokenStream {
+    let flat = pdos.len() <= 1;
+    let mut nested = TokenStream::new();
+    if !flat {
+        for p in pdos {
+            nested.extend(emit_sub_struct(p));
+        }
+    }
+    let fields = direction_device_fields(pdos, flat);
+    quote! {
+        #nested
+        #[allow(non_camel_case_types)]
+        #[derive(Debug, Default, Clone)]
+        pub struct #ident {
+            #fields
+        }
+    }
+}
+
+/// Emit the `<Dev>OpMode` enum + manual `Default` (first variant).
+fn emit_op_mode_enum(enum_ident: &Ident, assigns: &[ResolvedAssignment]) -> TokenStream {
+    let variants = assigns.iter().map(|a| {
+        let v = &a.variant_ident;
+        let s = &a.struct_ident;
         quote! { #v(#s) }
     });
-
-    // Manual Default → first declared alternative.
-    let first = group
-        .alternatives
-        .first()
-        .ok_or_else(|| CodegenError::EmptyAlternativeGroup {
-            enum_ident: enum_ident.to_string(),
-        })?;
-    let first_variant = &first.variant_ident;
-
-    Ok(quote! {
-        #structs
-
+    let first = &assigns[0].variant_ident;
+    quote! {
         #[allow(non_camel_case_types)]
         #[derive(Debug, Clone)]
         pub enum #enum_ident {
             #(#variants,)*
         }
-
         impl Default for #enum_ident {
-            fn default() -> Self {
-                Self::#first_variant(Default::default())
-            }
-        }
-    })
-}
-
-/// Emit the `decode_inputs` block for one input alternative group: `match` the
-/// enum field, and in each arm read that variant's entries (already laid out at
-/// the post-always-on `base_offset`) into the bound inner struct, after an
-/// active-variant length guard.
-fn emit_alt_decode(group: &ResolvedAltGroup, base_offset: usize) -> TokenStream {
-    let field = &group.field_ident;
-    let enum_ident = &group.enum_ident;
-    let arms = group.alternatives.iter().map(|alt| {
-        let v = &alt.variant_ident;
-        let guard = length_guard(base_offset + alt.bits);
-        let reads: Vec<TokenStream> = alt
-            .fields
-            .iter()
-            .map(|f| {
-                let fi = &f.ident;
-                read_into(&quote! { v.#fi }, f)
-            })
-            .collect();
-        quote! {
-            #enum_ident::#v(v) => {
-                #guard
-                #(#reads)*
-            }
-        }
-    });
-    quote! {
-        match &mut self.#field {
-            #(#arms)*
+            fn default() -> Self { Self::#first(Default::default()) }
         }
     }
 }
 
-/// Emit the `encode_outputs` block for one output alternative group: `match` the
-/// enum field (by shared ref), and in each arm write that variant's entries from
-/// the bound inner struct, after an active-variant length guard.
-fn emit_alt_encode(group: &ResolvedAltGroup, base_offset: usize) -> TokenStream {
-    let field = &group.field_ident;
-    let enum_ident = &group.enum_ident;
-    let arms = group.alternatives.iter().map(|alt| {
-        let v = &alt.variant_ident;
-        let guard = length_guard(base_offset + alt.bits);
-        let writes: Vec<TokenStream> = alt
-            .fields
-            .iter()
-            .map(|f| {
-                let fi = &f.ident;
-                write_from(&quote! { v.#fi }, f)
-            })
-            .collect();
-        quote! {
-            #enum_ident::#v(v) => {
-                #guard
-                #(#writes)*
-            }
-        }
+/// Emit the `decode_inputs` body: `match` the active mode, in each arm guard the
+/// buffer length then read that mode's inputs.
+fn emit_decode(enum_ident: &Ident, assigns: &[ResolvedAssignment]) -> TokenStream {
+    let import = bitfield_import_for_assigns(assigns, |a| &a.inputs);
+    let arms = assigns.iter().map(|a| {
+        let v = &a.variant_ident;
+        let guard = length_guard(a.input_bits);
+        let reads = direction_member_stmts(&a.inputs, "inputs", read_member);
+        let binding = if reads.is_empty() {
+            quote!(_)
+        } else {
+            quote!(m)
+        };
+        quote! { #enum_ident::#v(#binding) => { #guard #(#reads)* } }
     });
-    quote! {
-        match &self.#field {
-            #(#arms)*
-        }
-    }
-}
-
-/// Assemble the `decode_inputs` body: the always-on length guard, the always-on
-/// reads, then one `match` block per input alternative group. The `BitField`
-/// import is emitted iff any read is a multi-bit `load_le`.
-fn decode_body(
-    inputs: &[ResolvedPdo],
-    inputs_flat: bool,
-    in_groups: &[ResolvedAltGroup],
-    input_base_bits: usize,
-) -> TokenStream {
-    let read_stmts = direction_stmts(inputs, inputs_flat, read_stmt);
-    let alt_reads = in_groups
-        .iter()
-        .map(|g| emit_alt_decode(g, input_base_bits));
-    let import = bitfield_import_with_alts(inputs, in_groups);
-    let guard = length_guard(input_base_bits);
     quote! {
         #import
-        #guard
-        #(#read_stmts)*
-        #(#alt_reads)*
+        match &mut self.mode {
+            #(#arms)*
+        }
         Ok(())
     }
 }
 
-/// Assemble the `encode_outputs` body. A device with no `RxPdo` and no output
-/// alternative group emits a no-op (suppressing the unused-`bits` warning);
-/// otherwise the always-on guard + writes, then one `match` per output group.
-fn encode_body(
-    outputs: &[ResolvedPdo],
-    outputs_flat: bool,
-    out_groups: &[ResolvedAltGroup],
-    output_base_bits: usize,
-) -> TokenStream {
-    if outputs.is_empty() && out_groups.is_empty() {
-        return quote! { let _ = bits; Ok(()) };
-    }
-    let write_stmts = direction_stmts(outputs, outputs_flat, write_stmt);
-    let alt_writes = out_groups
-        .iter()
-        .map(|g| emit_alt_encode(g, output_base_bits));
-    let import = bitfield_import_with_alts(outputs, out_groups);
-    let guard = length_guard(output_base_bits);
+/// Emit the `encode_outputs` body: `match` the active mode (shared ref), in each
+/// arm guard the buffer length then write that mode's outputs.
+fn emit_encode(enum_ident: &Ident, assigns: &[ResolvedAssignment]) -> TokenStream {
+    let import = bitfield_import_for_assigns(assigns, |a| &a.outputs);
+    let arms = assigns.iter().map(|a| {
+        let v = &a.variant_ident;
+        let guard = length_guard(a.output_bits);
+        let writes = direction_member_stmts(&a.outputs, "outputs", write_member);
+        let binding = if writes.is_empty() {
+            quote!(_)
+        } else {
+            quote!(m)
+        };
+        quote! { #enum_ident::#v(#binding) => { #guard #(#writes)* } }
+    });
     quote! {
         #import
-        #guard
-        #(#write_stmts)*
-        #(#alt_writes)*
+        match &self.mode {
+            #(#arms)*
+        }
         Ok(())
     }
 }
 
-/// The advertised byte length for one direction: the always-on base plus the
-/// widest alternative across all groups (the rt allocates the largest layout;
-/// the active-variant guard checks the actual need at decode/encode time).
-fn direction_len(base_bits: usize, groups: &[ResolvedAltGroup]) -> usize {
-    let alt_bits: usize = groups
-        .iter()
-        .map(|g| g.alternatives.iter().map(|a| a.bits).max().unwrap_or(0))
-        .sum();
-    (base_bits + alt_bits).div_ceil(8)
+/// Emit the per-mode `input_len`/`output_len` body (byte count of the active
+/// mode's direction).
+fn emit_len(enum_ident: &Ident, assigns: &[ResolvedAssignment], inputs: bool) -> TokenStream {
+    let arms = assigns.iter().map(|a| {
+        let v = &a.variant_ident;
+        let bytes = (if inputs { a.input_bits } else { a.output_bits }).div_ceil(8);
+        quote! { #enum_ident::#v(_) => #bytes }
+    });
+    quote! {
+        match &self.mode {
+            #(#arms,)*
+        }
+    }
+}
+
+/// Emit the `pdo_assignment()` body: per-mode Rx/Tx index lists.
+fn emit_pdo_assignment(enum_ident: &Ident, assigns: &[ResolvedAssignment]) -> TokenStream {
+    let arms = assigns.iter().map(|a| {
+        let v = &a.variant_ident;
+        let rx = &a.rx_indices;
+        let tx = &a.tx_indices;
+        quote! {
+            #enum_ident::#v(_) => PdoAssignment {
+                rx: &[#(#rx),*],
+                tx: &[#(#tx),*],
+            }
+        }
+    });
+    quote! {
+        match &self.mode {
+            #(#arms,)*
+        }
+    }
+}
+
+/// Per-field read/write into a match-bound `m.<inputs|outputs>` member path.
+fn direction_member_stmts(
+    pdos: &[ResolvedPdo],
+    member: &str,
+    f: fn(&TokenStream, &ResolvedField) -> TokenStream,
+) -> Vec<TokenStream> {
+    let flat = pdos.len() <= 1;
+    let member_ident = Ident::new(member, proc_macro2::Span::call_site());
+    let mut out = Vec::new();
+    for pdo in pdos {
+        for field in &pdo.fields {
+            let fi = &field.ident;
+            let path = if flat {
+                quote! { m.#member_ident.#fi }
+            } else {
+                let p = &pdo.field_ident;
+                quote! { m.#member_ident.#p.#fi }
+            };
+            out.push(f(&path, field));
+        }
+    }
+    out
+}
+
+/// Read a field out of `bits` into a match-bound member path.
+fn read_member(path: &TokenStream, field: &ResolvedField) -> TokenStream {
+    read_into(path, field)
+}
+
+/// Write a field from a match-bound member path into `bits`.
+fn write_member(path: &TokenStream, field: &ResolvedField) -> TokenStream {
+    write_from(path, field)
+}
+
+/// Emit the `BitField` trait import iff any field in the selected direction of
+/// any assignment needs a multi-bit `load_le`/`store_le`.
+fn bitfield_import_for_assigns(
+    assigns: &[ResolvedAssignment],
+    dir: fn(&ResolvedAssignment) -> &Vec<ResolvedPdo>,
+) -> TokenStream {
+    let needs = assigns.iter().any(|a| {
+        dir(a)
+            .iter()
+            .flat_map(|p| p.fields.iter())
+            .any(|f| layout_uses_bitfield(f.layout))
+    });
+    if needs {
+        quote! { use bitvec::field::BitField as _; }
+    } else {
+        TokenStream::new()
+    }
 }
 
 /// Whether a layout's decode/encode emits a `load_le`/`store_le` call (and so
@@ -835,17 +749,6 @@ fn direction_len(base_bits: usize, groups: &[ResolvedAltGroup]) -> usize {
 /// and opaque byte arrays do; single-bit `Bool`s do not.
 const fn layout_uses_bitfield(layout: Layout) -> bool {
     matches!(layout, Layout::Field { .. } | Layout::Bytes { .. })
-}
-
-/// Whether any alternative across the given groups has a field needing the
-/// `BitField` import.
-fn alt_groups_need_bitfield(groups: &[ResolvedAltGroup]) -> bool {
-    groups.iter().any(|g| {
-        g.alternatives
-            .iter()
-            .flat_map(|a| a.fields.iter())
-            .any(|f| layout_uses_bitfield(f.layout))
-    })
 }
 
 /// The device-struct field declarations for one direction: flat → one field per
@@ -864,39 +767,6 @@ fn direction_device_fields(pdos: &[ResolvedPdo], flat: bool) -> TokenStream {
             quote! { pub #field: #ty, }
         });
         quote! { #(#defs)* }
-    }
-}
-
-/// The per-field read/write statements for one direction, choosing the access
-/// path: flat → `self.<field>`; split → `self.<pdo>.<field>`.
-fn direction_stmts(
-    pdos: &[ResolvedPdo],
-    flat: bool,
-    stmt: fn(Option<&Ident>, &ResolvedField) -> TokenStream,
-) -> Vec<TokenStream> {
-    let mut out = Vec::new();
-    for pdo in pdos {
-        let prefix = if flat { None } else { Some(&pdo.field_ident) };
-        for field in &pdo.fields {
-            out.push(stmt(prefix, field));
-        }
-    }
-    out
-}
-
-/// Emit the `BitField` trait import iff either the always-on PDOs or any
-/// alternative group needs a multi-bit `load_le`/`store_le`. A single `use`
-/// covers the whole body (always-on stmts and every match arm).
-fn bitfield_import_with_alts(pdos: &[ResolvedPdo], groups: &[ResolvedAltGroup]) -> TokenStream {
-    let needs = pdos
-        .iter()
-        .flat_map(|p| p.fields.iter())
-        .any(|f| layout_uses_bitfield(f.layout))
-        || alt_groups_need_bitfield(groups);
-    if needs {
-        quote! { use bitvec::field::BitField as _; }
-    } else {
-        TokenStream::new()
     }
 }
 
@@ -1151,232 +1021,5 @@ mod tests {
         assert_eq!(offset, 16);
         // The byte field lands at offset 8 (after the pad).
         assert!(matches!(fields[1].layout, Layout::Field { offset: 8, .. }));
-    }
-
-    // -----------------------------------------------------------------------
-    // Grouping rule (T9, REQ_0523/0524): always-on vs alternatives, and how
-    // alternative candidates partition into groups.
-    // -----------------------------------------------------------------------
-
-    /// A fully-specified PDO for grouping tests.
-    fn alt_pdo(
-        index: u16,
-        name: &str,
-        sm: Option<u8>,
-        fixed: bool,
-        mandatory: bool,
-        exclude: Vec<u16>,
-    ) -> Pdo {
-        Pdo {
-            index,
-            name: Some(name.to_owned()),
-            sm,
-            fixed,
-            mandatory,
-            exclude,
-            entries: vec![entry(0x6000, 1, 8, Some("Value"), DataType::U8)],
-        }
-    }
-
-    /// `Fixed` OR `Mandatory` PDOs are always-on (kept as the existing flat/
-    /// sub-struct treatment); only non-fixed, non-mandatory PDOs are alternative
-    /// candidates.
-    #[test]
-    fn partition_splits_fixed_or_mandatory_from_alternatives() {
-        let pdos = vec![
-            alt_pdo(0x1A00, "Fixed", Some(3), true, false, vec![]),
-            alt_pdo(0x1A01, "Mandatory", Some(3), false, true, vec![]),
-            alt_pdo(0x1A02, "AltA", Some(3), false, false, vec![]),
-            alt_pdo(0x1A03, "AltB", Some(3), false, false, vec![]),
-        ];
-        let (always_on, candidates) = partition_pdos(&pdos);
-        let names = |v: &[&Pdo]| -> Vec<u16> { v.iter().map(|p| p.index).collect() };
-        assert_eq!(names(&always_on), vec![0x1A00, 0x1A01]);
-        assert_eq!(names(&candidates), vec![0x1A02, 0x1A03]);
-    }
-
-    /// Two non-fixed, non-mandatory PDOs sharing a sync manager form ONE
-    /// alternative group (the synthetic ALT case).
-    #[test]
-    fn shared_sm_candidates_form_one_group() {
-        let pdos = vec![
-            alt_pdo(0x1A00, "Standard", Some(3), false, false, vec![]),
-            alt_pdo(0x1A01, "Compact", Some(3), false, false, vec![]),
-        ];
-        let (_, candidates) = partition_pdos(&pdos);
-        let groups = group_alternatives(&candidates);
-        assert_eq!(groups.len(), 1, "shared Sm should yield a single group");
-        assert_eq!(groups[0].len(), 2);
-    }
-
-    /// Candidates on distinct sync managers (and no `<Exclude>` linking them)
-    /// land in separate alternative groups.
-    #[test]
-    fn distinct_sm_candidates_form_separate_groups() {
-        let pdos = vec![
-            alt_pdo(0x1A00, "InA", Some(3), false, false, vec![]),
-            alt_pdo(0x1A01, "InB", Some(3), false, false, vec![]),
-            alt_pdo(0x1600, "OutA", Some(2), false, false, vec![]),
-        ];
-        let (_, candidates) = partition_pdos(&pdos);
-        let groups = group_alternatives(&candidates);
-        assert_eq!(groups.len(), 2, "two SMs → two groups");
-    }
-
-    /// A direction that resolves to MORE THAN ONE alternative group is rejected
-    /// with [`CodegenError::MultipleAlternativeGroups`] rather than miscompiled.
-    /// Shape: two non-fixed/non-mandatory PDOs on Sm 3 linked by `<Exclude>`
-    /// (group A) plus two more on Sm 4 with no cross-exclude (group B) — two
-    /// distinct SM groups in the same Tx direction.
-    #[test]
-    fn multiple_alt_groups_in_one_direction_are_rejected() {
-        let tx_pdos = vec![
-            // Group A: Sm 3, A0 <-> A1 exclude each other.
-            alt_pdo(0x1A00, "A0", Some(3), false, false, vec![0x1A01]),
-            alt_pdo(0x1A01, "A1", Some(3), false, false, vec![0x1A00]),
-            // Group B: Sm 4, no cross-exclude into group A.
-            alt_pdo(0x1A10, "B0", Some(4), false, false, vec![]),
-            alt_pdo(0x1A11, "B1", Some(4), false, false, vec![]),
-        ];
-        // Sanity: the grouping rule resolves this shape to exactly two groups.
-        let (_, candidates) = partition_pdos(&tx_pdos);
-        assert_eq!(
-            group_alternatives(&candidates).len(),
-            2,
-            "expected 2 groups"
-        );
-
-        let device = Device {
-            struct_ident: field_ident("multi_alt").expect("ident"),
-            const_ident: field_ident("MULTI_ALT").expect("ident"),
-            identity: Identity {
-                vendor_id: 0x0000_0002,
-                product_code: 0x0001_0000,
-                revision: 0x0000_0001,
-            },
-            name: Some("MultiAlt"),
-            tx_pdos: &tx_pdos,
-            rx_pdos: &[],
-        };
-
-        let err = EthercrabBackend
-            .emit_device(&device)
-            .expect_err("two Tx alternative groups must be rejected");
-        match err {
-            CodegenError::MultipleAlternativeGroups { device, direction } => {
-                assert_eq!(device, "multi_alt");
-                assert_eq!(direction, "Tx");
-            }
-            other => panic!("expected MultipleAlternativeGroups, got {other:?}"),
-        }
-    }
-
-    /// `<Exclude>` connected components refine grouping: PDOs that exclude each
-    /// other are merged even across the union-find seed, and the merge is
-    /// transitive.
-    #[test]
-    fn exclude_edges_merge_into_one_component() {
-        // No shared Sm (each None → singleton seed), but A excludes B and B
-        // excludes C → all three transitively in one group.
-        let pdos = vec![
-            alt_pdo(0x1A00, "A", None, false, false, vec![0x1A01]),
-            alt_pdo(0x1A01, "B", None, false, false, vec![0x1A02]),
-            alt_pdo(0x1A02, "C", None, false, false, vec![]),
-        ];
-        let (_, candidates) = partition_pdos(&pdos);
-        let groups = group_alternatives(&candidates);
-        assert_eq!(groups.len(), 1, "exclude chain merges A-B-C");
-        assert_eq!(groups[0].len(), 3);
-    }
-
-    // -----------------------------------------------------------------------
-    // Classification (refined T9): a candidate group of size 1 is NOT an
-    // alternative — it is an always-on PDO whose mapping happens to be
-    // reconfigurable. Only groups of >= 2 candidates are genuine alternatives.
-    // -----------------------------------------------------------------------
-
-    /// A single non-fixed/non-mandatory candidate (the only one in its Sm group)
-    /// is reclassified as always-on, not a 1-variant alternative. No genuine
-    /// alternative group survives.
-    #[test]
-    fn singleton_candidate_is_reclassified_as_always_on() {
-        let candidates = [alt_pdo(0x1A00, "Solo", Some(3), false, false, vec![])];
-        let refs: Vec<&Pdo> = candidates.iter().collect();
-        let (singletons, genuine) = classify_alternatives(&refs);
-        assert_eq!(
-            singletons.iter().map(|p| p.index).collect::<Vec<_>>(),
-            vec![0x1A00],
-            "the lone candidate is reclassified as always-on"
-        );
-        assert!(genuine.is_empty(), "no genuine (>=2) alternative group");
-    }
-
-    /// Two candidates on the SAME Sm (the ALT shape) stay a genuine alternative
-    /// group; nothing is reclassified as always-on.
-    #[test]
-    fn shared_sm_pair_stays_a_genuine_alternative() {
-        let candidates = [
-            alt_pdo(0x1A00, "Standard", Some(3), false, false, vec![]),
-            alt_pdo(0x1A01, "Compact", Some(3), false, false, vec![]),
-        ];
-        let refs: Vec<&Pdo> = candidates.iter().collect();
-        let (singletons, genuine) = classify_alternatives(&refs);
-        assert!(singletons.is_empty(), "no singleton reclassified");
-        assert_eq!(genuine.len(), 1, "one genuine alternative group");
-        assert_eq!(genuine[0].len(), 2);
-    }
-
-    /// The EL1262 shape: two candidates on DISTINCT Sm (3 and 4), no Exclude →
-    /// two singleton groups → BOTH reclassified as always-on, NO genuine
-    /// alternative group. Declaration order is preserved.
-    #[test]
-    fn distinct_sm_singletons_are_both_always_on() {
-        let candidates = [
-            alt_pdo(0x1A00, "ChA", Some(3), false, false, vec![]),
-            alt_pdo(0x1A01, "ChB", Some(4), false, false, vec![]),
-        ];
-        let refs: Vec<&Pdo> = candidates.iter().collect();
-        let (singletons, genuine) = classify_alternatives(&refs);
-        assert_eq!(
-            singletons.iter().map(|p| p.index).collect::<Vec<_>>(),
-            vec![0x1A00, 0x1A01],
-            "both lone candidates reclassified as always-on, in declaration order"
-        );
-        assert!(genuine.is_empty(), "no genuine alternative group");
-    }
-
-    /// Two genuine (>=2) groups in one direction survive classification as two
-    /// genuine groups (still rejected downstream by `MultipleAlternativeGroups`).
-    #[test]
-    fn two_multi_pdo_groups_both_genuine() {
-        let candidates = [
-            alt_pdo(0x1A00, "A0", Some(3), false, false, vec![]),
-            alt_pdo(0x1A01, "A1", Some(3), false, false, vec![]),
-            alt_pdo(0x1A10, "B0", Some(4), false, false, vec![]),
-            alt_pdo(0x1A11, "B1", Some(4), false, false, vec![]),
-        ];
-        let refs: Vec<&Pdo> = candidates.iter().collect();
-        let (singletons, genuine) = classify_alternatives(&refs);
-        assert!(singletons.is_empty(), "nothing reclassified");
-        assert_eq!(genuine.len(), 2, "two genuine alternative groups");
-    }
-
-    /// A mix: one genuine pair (Sm 3) plus one lone candidate (Sm 4). The lone
-    /// candidate becomes always-on; the pair stays a genuine group.
-    #[test]
-    fn mixed_singleton_and_genuine_group() {
-        let candidates = [
-            alt_pdo(0x1A00, "Pair0", Some(3), false, false, vec![]),
-            alt_pdo(0x1A01, "Pair1", Some(3), false, false, vec![]),
-            alt_pdo(0x1A10, "Solo", Some(4), false, false, vec![]),
-        ];
-        let refs: Vec<&Pdo> = candidates.iter().collect();
-        let (singletons, genuine) = classify_alternatives(&refs);
-        assert_eq!(
-            singletons.iter().map(|p| p.index).collect::<Vec<_>>(),
-            vec![0x1A10]
-        );
-        assert_eq!(genuine.len(), 1);
-        assert_eq!(genuine[0].len(), 2);
     }
 }

@@ -5,9 +5,11 @@
 //! Motion uses the Beckhoff **positioning interface** (NOT CiA 402): each
 //! index press fires a relative move whose trapezoid the terminal runs itself.
 //! Enable = STM Control bit0; move = Target/Velocity/Start-type in the POS
-//! Control PDO plus an Execute edge. The EL7047 process image is hand-written
-//! and host-unit-tested in `el7047.rs` because the ESI codegen cannot model
-//! this device's selectable PDO assignments; EL1008/EL2004 stay codegen-typed.
+//! Control PDO plus an Execute edge. All three terminals are driven through
+//! the ESI-generated typed device drivers: the EL7047 runs in its generated
+//! `PositioningInterface` mode, mapped to/from the domain control/status
+//! types by `el7047_adapter`; EL1008/EL2004 ride their generated `Default`
+//! modes.
 //!
 //! Topology assumption: `ethercrab` assigns configured station addresses
 //! starting at `0x1000` — EK1100 = `0x1000` (bus coupler, no PDI), then
@@ -33,29 +35,9 @@ use taktora_connector_host::Connector;
 use taktora_ethercat_esi_rt::{EsiDevice, Lsb0};
 use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
 
-mod codec;
-mod control;
-mod el7047;
-
-use codec::RawImageCodec;
-use control::{Controller, MoveParams};
-
-/// ESI-generated typed device drivers. `build.rs` runs
-/// `taktora-ethercat-esi-build` over `esi/*.xml` and writes
-/// `$OUT_DIR/devices.rs`; this module `include!`s it. The `allow`s mirror the
-/// codegen landing-pad crate — generated code is not held to this binary's
-/// lint bar.
-#[allow(
-    missing_docs,
-    non_camel_case_types,
-    dead_code,
-    clippy::all,
-    clippy::pedantic,
-    clippy::nursery
-)]
-mod generated {
-    include!(concat!(env!("OUT_DIR"), "/devices.rs"));
-}
+use ethercat_stepper::codec::RawImageCodec;
+use ethercat_stepper::control::{Controller, MoveParams};
+use ethercat_stepper::{el7047_adapter, el7047_domain, generated};
 
 /// Channel capacity (iceoryx2 service buffer slots).
 const N: usize = 256;
@@ -73,48 +55,6 @@ const SUBDEV_EL7047: u16 = 0x1003;
 const ROUTING_BITS_EL1008: u16 = 8;
 /// EL2004: 4 digital output bits, one PDI byte.
 const ROUTING_BITS_EL2004: u16 = 4;
-/// EL7047 positioning-interface output image: 22 bytes = 176 bits.
-const ROUTING_BITS_EL7047_OUT: u16 = (el7047::OUTPUT_LEN * 8) as u16;
-/// EL7047 positioning-interface input image: 24 bytes = 192 bits.
-const ROUTING_BITS_EL7047_IN: u16 = (el7047::INPUT_LEN * 8) as u16;
-
-// EL7047 "Positioning interface" PDO assignment. `pdo_sdo_writes` reads only
-// `entry.index` for the `0x1C12`/`0x1C13` SM assignment, so bit_offset and
-// bit_length are left at 0 here.
-static EL7047_RX: &[PdoEntry] = &[
-    PdoEntry {
-        index: 0x1601,
-        bit_offset: 0,
-        bit_length: 0,
-    }, // ENC Control (unused)
-    PdoEntry {
-        index: 0x1602,
-        bit_offset: 0,
-        bit_length: 0,
-    }, // STM Control
-    PdoEntry {
-        index: 0x1606,
-        bit_offset: 0,
-        bit_length: 0,
-    }, // POS Control
-];
-static EL7047_TX: &[PdoEntry] = &[
-    PdoEntry {
-        index: 0x1a01,
-        bit_offset: 0,
-        bit_length: 0,
-    }, // ENC Status (unused)
-    PdoEntry {
-        index: 0x1a03,
-        bit_offset: 0,
-        bit_length: 0,
-    }, // STM Status
-    PdoEntry {
-        index: 0x1a07,
-        bit_offset: 0,
-        bit_length: 0,
-    }, // POS Status
-];
 
 /// Operator-declared startup SDOs: stepper motor current limits, written in
 /// PRE-OP before PDO assignment (REQ_0853). Units = mA. Tune for your motor;
@@ -130,20 +70,6 @@ static EL7047_STARTUP: &[StartupSdo] = &[
         subindex: 0x02,
         value: SdoValue::U16(900),
     }, // standby current
-];
-
-/// Working-counter mapping for WKC-based health (`REQ_0329`). EL1008 (input)
-/// = +2, EL2004 (output) = +1, EL7047 (read+write) = +3 (best-guess; verify
-/// observed WKC on the Pi). The EL2004 and EL7047 are output-bearing, so per
-/// AOU_0016 their SM watchdog is enabled with a 50 ms timeout (≤ FTTI/2) so
-/// they drop to safe state within that window on a master stop.
-static PDO_MAP: &[SubDeviceMap] = &[
-    SubDeviceMap::new(SUBDEV_EL1008, &[], &[], 2),
-    SubDeviceMap::new(SUBDEV_EL2004, &[], &[], 1)
-        .with_sm_watchdog(SmWatchdog::from_timeout_us(50_000)),
-    SubDeviceMap::new(SUBDEV_EL7047, EL7047_RX, EL7047_TX, 3)
-        .with_sm_watchdog(SmWatchdog::from_timeout_us(50_000))
-        .with_startup_sdos(EL7047_STARTUP),
 ];
 
 /// Control-loop cadence.
@@ -189,11 +115,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         deceleration: cli.decel,
     };
 
+    // 0. EL7047 PDO assignment, derived from the generated device rather than
+    //    hand-listed PdoEntry arrays. Pinning the mode selects the
+    //    "Positioning interface" assignment (Rx 0x1601/0x1602/0x1606,
+    //    Tx 0x1A01/0x1A03/0x1A07); `pdo_assignment()` returns those index
+    //    lists and `output_len()`/`input_len()` the image sizes. The connector
+    //    only reads `PdoEntry::index` for the 0x1C12/0x1C13 SM assignment, so
+    //    bit_offset/bit_length are left 0 (the image is one contiguous block).
+    let el7047 = generated::EL7047 {
+        mode: generated::EL7047OpMode::PositioningInterface(Default::default()),
+    };
+    let assign = el7047.pdo_assignment();
+    let el7047_rx: Vec<PdoEntry> = assign
+        .rx
+        .iter()
+        .map(|&index| PdoEntry {
+            index,
+            bit_offset: 0,
+            bit_length: 0,
+        })
+        .collect();
+    let el7047_tx: Vec<PdoEntry> = assign
+        .tx
+        .iter()
+        .map(|&index| PdoEntry {
+            index,
+            bit_offset: 0,
+            bit_length: 0,
+        })
+        .collect();
+    let routing_bits_el7047_out = (el7047.output_len() * 8) as u16;
+    let routing_bits_el7047_in = (el7047.input_len() * 8) as u16;
+
+    // `EthercatConnectorOptions::pdo_map` and `SubDeviceMap::new` both want
+    // `&'static [_]`; the runtime-derived lists therefore become `'static` via
+    // a deliberate one-shot `Vec::leak` at startup. This leaks a few dozen
+    // bytes exactly once for the process lifetime (the maps live as long as the
+    // connector, i.e. until exit) — not a per-cycle allocation.
+    //
+    // Working-counter mapping for WKC-based health (`REQ_0329`): EL1008 (input)
+    // = +2, EL2004 (output) = +1, EL7047 (read+write) = +3 (best-guess; verify
+    // observed WKC on the Pi). The EL2004 and EL7047 are output-bearing, so per
+    // AOU_0016 their SM watchdog is enabled with a 50 ms timeout (≤ FTTI/2) so
+    // they drop to safe state within that window on a master stop.
+    let el7047_rx: &'static [PdoEntry] = el7047_rx.leak();
+    let el7047_tx: &'static [PdoEntry] = el7047_tx.leak();
+    let pdo_map: &'static [SubDeviceMap] = vec![
+        SubDeviceMap::new(SUBDEV_EL1008, &[], &[], 2),
+        SubDeviceMap::new(SUBDEV_EL2004, &[], &[], 1)
+            .with_sm_watchdog(SmWatchdog::from_timeout_us(50_000)),
+        SubDeviceMap::new(SUBDEV_EL7047, el7047_rx, el7047_tx, 3)
+            .with_sm_watchdog(SmWatchdog::from_timeout_us(50_000))
+            .with_startup_sdos(EL7047_STARTUP),
+    ]
+    .leak();
+
     // 1. Options.
     let opts = EthercatConnectorOptions::builder()
         .network_interface(&cli.nic)
         .cycle_time(Duration::from_millis(2))
-        .pdo_map(PDO_MAP)
+        .pdo_map(pdo_map)
         .build();
 
     // 2. Driver. EthercrabBusDriver wraps `ethercrab::MainDevice` behind the
@@ -224,19 +205,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     //    EL7047 output image @ 0x1003 (Rx), bit offset 0, 176 bits.
     let el7047_out_routing =
-        EthercatRouting::new(SUBDEV_EL7047, PdoDirection::Rx, 0, ROUTING_BITS_EL7047_OUT);
+        EthercatRouting::new(SUBDEV_EL7047, PdoDirection::Rx, 0, routing_bits_el7047_out);
     let el7047_out_desc = ChannelDescriptor::<EthercatRouting, N>::new(
         "ethercat.el7047.control",
         el7047_out_routing,
     )?;
-    let writer_el7047 = connector.create_writer::<[u8; el7047::OUTPUT_LEN], N>(&el7047_out_desc)?;
+    let writer_el7047 =
+        connector.create_writer::<[u8; el7047_domain::OUTPUT_LEN], N>(&el7047_out_desc)?;
 
     //    EL7047 input image @ 0x1003 (Tx), bit offset 0, 192 bits.
     let el7047_in_routing =
-        EthercatRouting::new(SUBDEV_EL7047, PdoDirection::Tx, 0, ROUTING_BITS_EL7047_IN);
+        EthercatRouting::new(SUBDEV_EL7047, PdoDirection::Tx, 0, routing_bits_el7047_in);
     let el7047_in_desc =
         ChannelDescriptor::<EthercatRouting, N>::new("ethercat.el7047.status", el7047_in_routing)?;
-    let reader_el7047 = connector.create_reader::<[u8; el7047::INPUT_LEN], N>(&el7047_in_desc)?;
+    let reader_el7047 =
+        connector.create_reader::<[u8; el7047_domain::INPUT_LEN], N>(&el7047_in_desc)?;
 
     // 5. Executor.
     let mut exec = Executor::builder().worker_threads(1).build()?;
@@ -253,7 +236,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let healthy_for_control = Arc::clone(&healthy);
     let mut controller = Controller::default();
     // Latest decoded EL7047 status; held across cycles for logging on change.
-    let last_logged: Arc<Mutex<Option<el7047::El7047Status>>> = Arc::new(Mutex::new(None));
+    let last_logged: Arc<Mutex<Option<el7047_domain::El7047Status>>> = Arc::new(Mutex::new(None));
     let last_logged_for_item = Arc::clone(&last_logged);
     // Fault-lamp blink state, toggled on a sub-cadence of the control loop so
     // the blink is actually visible.
@@ -263,6 +246,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // (250 ms) gives a ~2 Hz blink the eye can resolve.
     const BLINK_TOGGLE_CYCLES: u32 = 25;
 
+    // Generated EL7047 device, pinned to the positioning-interface mode, reused
+    // across cycles: input images decode into it, output images encode out of
+    // it. The domain control/status surface is mapped via `el7047_adapter`.
+    let mut el7047_dev = el7047;
+
     exec.add(item_with_triggers(
         |d| -> Result<(), ExecutorError> {
             d.interval(CONTROL_PERIOD);
@@ -271,12 +259,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         move |_ctx| -> ExecuteResult {
             let healthy_now = healthy_for_control.load(Ordering::Relaxed);
 
-            // Drain the EL7047 status reader, keeping the latest image.
-            let mut status = el7047::El7047Status::default();
+            // Drain the EL7047 status reader, keeping the latest image. Decode
+            // it through the generated positioning-interface device, then map to
+            // the domain status via the adapter so the controller stays
+            // codegen-agnostic.
+            let mut status = el7047_domain::El7047Status::default();
             let mut got_status = false;
             while let Ok(Some(env)) = reader_el7047.try_recv() {
-                if let Some(decoded) = el7047::decode_status(&env.value) {
-                    status = decoded;
+                let img: [u8; el7047_domain::INPUT_LEN] = env.value;
+                if el7047_dev.decode_inputs(img.view_bits::<Lsb0>()).is_ok() {
+                    status = el7047_adapter::read_status(&el7047_dev);
                     got_status = true;
                 }
             }
@@ -291,14 +283,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // codegen-agnostic (it sees buttons, not generated types).
                 buttons = match dev.decode_inputs(img.view_bits::<Lsb0>()) {
                     Ok(()) => {
-                        (u8::from(dev.channel_1.input))
-                            | (u8::from(dev.channel_2.input) << 1)
-                            | (u8::from(dev.channel_3.input) << 2)
-                            | (u8::from(dev.channel_4.input) << 3)
-                            | (u8::from(dev.channel_5.input) << 4)
-                            | (u8::from(dev.channel_6.input) << 5)
-                            | (u8::from(dev.channel_7.input) << 6)
-                            | (u8::from(dev.channel_8.input) << 7)
+                        // EL1008OpMode has a single `Default` variant.
+                        let generated::EL1008OpMode::Default(m) = &dev.mode;
+                        (u8::from(m.inputs.channel_1.input))
+                            | (u8::from(m.inputs.channel_2.input) << 1)
+                            | (u8::from(m.inputs.channel_3.input) << 2)
+                            | (u8::from(m.inputs.channel_4.input) << 3)
+                            | (u8::from(m.inputs.channel_5.input) << 4)
+                            | (u8::from(m.inputs.channel_6.input) << 5)
+                            | (u8::from(m.inputs.channel_7.input) << 6)
+                            | (u8::from(m.inputs.channel_8.input) << 7)
                     }
                     // Decode failure: fall back to the raw byte rather than
                     // panic in the hot loop.
@@ -306,9 +300,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
 
-            // Run the controller and send the EL7047 control image.
+            // Run the controller, map the domain control into the generated
+            // device, encode the output image, and send it.
             let ctrl = controller.step(buttons, &status, params, healthy_now);
-            let _ = writer_el7047.send(&el7047::encode_control(&ctrl));
+            el7047_adapter::apply_control(&mut el7047_dev, &ctrl);
+            let mut out = [0u8; el7047_domain::OUTPUT_LEN];
+            match el7047_dev.encode_outputs(out.view_bits_mut::<Lsb0>()) {
+                Ok(()) => {
+                    let _ = writer_el7047.send(&out);
+                }
+                Err(e) => eprintln!("EL7047 encode failed: {e}"),
+            }
 
             // Log EL7047 status transitions (never panic in the loop).
             if got_status {
@@ -339,8 +341,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 lamp_blink = !lamp_blink;
             }
             let mut el2004 = generated::EL2004::default();
-            el2004.channel_1.output = status.ready && healthy_now;
-            el2004.channel_2.output = status.error && lamp_blink;
+            // EL2004OpMode has a single `Default` variant.
+            let generated::EL2004OpMode::Default(m) = &mut el2004.mode;
+            m.outputs.channel_1.output = status.ready && healthy_now;
+            m.outputs.channel_2.output = status.error && lamp_blink;
             let mut buf = [0u8; 1];
             match el2004.encode_outputs(buf.view_bits_mut::<Lsb0>()) {
                 Ok(()) => {

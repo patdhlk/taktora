@@ -43,6 +43,21 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
    resolved graph. Implemented as a CI shell check that greps
    the output and fails on match.
 
+.. test:: AlternativeSmMapping parsing
+   :id: TEST_0871
+   :status: implemented
+   :verifies: REQ_0529
+
+   Unit tests in
+   ``crates/taktora-ethercat-esi/tests/alt_sm_mapping.rs`` parse inline
+   ESI documents whose ``<Info><VendorSpecific><TwinCAT>`` declares one
+   or more ``<AlternativeSmMapping>`` elements, and assert the typed IR
+   captures each mapping's name, default flag, and per-sync-manager
+   ordered PDO-index lists with their optional ``ChannelNo`` — faithfully
+   and without resolving a process image (:need:`REQ_0529`). A device
+   that declares no ``<AlternativeSmMapping>`` yields an empty set rather
+   than a fabricated default.
+
 .. test:: Vendor-specific elements survive as RawXml
    :id: TEST_0403
    :status: open

@@ -80,7 +80,7 @@ pub fn base_ident(device: &esi::EsiDevice) -> String {
 /// (`REQ_0511`).
 ///
 /// The raw name is lower-cased and word-segmented, then char-sanitised and
-/// keyword-escaped through the same [`sanitise_ident`] rules used for type
+/// keyword-escaped through the same `sanitise_ident` rules used for type
 /// names, so the result is always a valid, bare Rust identifier.
 ///
 /// Word boundaries are inserted on a lower→upper transition (`UnderRange`
@@ -132,7 +132,11 @@ pub fn pdo_field_string(name: Option<&str>, index: u16) -> String {
 /// capitalised (`"Channel 1"` → `Channel1`, `"AI Inputs Channel 2"` →
 /// `AiInputsChannel2`); an unnamed PDO falls back to its mapping index
 /// (`0x1A00` → `Pdo1a00`). The result is char-sanitised so the concatenation
-/// `<Dev><Segment>` stays a valid identifier.
+/// `<Dev><Segment>` stays a valid identifier. Backs [`pdo_struct_ident`]; the
+/// underlying `pascal_segment` is also shared by the `op_mode_*` naming so
+/// segments render consistently across both.
+///
+/// [`pdo_struct_ident`]: crate::pdo_struct_ident
 pub fn pdo_struct_segment(name: Option<&str>, index: u16) -> String {
     let raw = name.map_or_else(|| format!("Pdo{index:04x}"), pascal_segment);
     sanitise_ident(&raw)
@@ -160,22 +164,27 @@ fn pascal_segment(raw: &str) -> String {
     out
 }
 
-/// `PascalCase` a raw label string for use as an identifier segment (e.g. a
-/// multi-group disambiguator like `Sm3`). Shares the segmentation used for PDO
-/// struct/variant segments so labels render consistently.
-pub fn pdo_struct_segment_raw(raw: &str) -> String {
-    sanitise_ident(&pascal_segment(raw))
-}
-
-/// The PascalCase-ish variant segment for one alternative PDO inside a
-/// `<Dev>PdoAssignment` enum (`REQ_0523`).
+/// `PascalCase` variant segment for a `<Dev>OpMode` enum variant.
 ///
-/// Named PDOs derive from their `<Name>` (`"Standard"` → `Standard`,
-/// `"Compact"` → `Compact`); an unnamed PDO falls back to its mapping index
-/// (`0x1A00` → `Pdo1a00`). Shares the segmentation used for sub-struct idents,
-/// so a variant and its embedded struct segment agree.
-pub fn pdo_variant_segment(name: Option<&str>, index: u16) -> String {
-    pdo_struct_segment(name, index)
+/// Derives from an `AlternativeSmMapping` `<Name>` (`REQ_0523`). Unnamed
+/// mappings AND names that sanitise to nothing (all-separator characters such
+/// as `"---"` or `"   "`) fall back to `Mode<ordinal+1>` (1-based, stable in
+/// document order). The `"_"` sentinel that `pascal_segment` returns for
+/// all-separator inputs is treated the same as empty, so no variant is ever
+/// literally named `_`. Collisions among the resulting segments are
+/// de-duplicated by the caller (it has the full set).
+pub fn op_mode_variant_segment(name: Option<&str>, ordinal: usize) -> String {
+    name.map_or_else(
+        || format!("Mode{}", ordinal + 1),
+        |n| {
+            let seg = pascal_segment(n);
+            if seg.is_empty() || seg == "_" {
+                format!("Mode{}", ordinal + 1)
+            } else {
+                seg
+            }
+        },
+    )
 }
 
 /// The full-width revision suffix for a revision number (`REQ_0512`): `REV{rev:08X}`.
@@ -192,9 +201,10 @@ pub fn const_ident_string(device: &esi::EsiDevice) -> String {
     )
 }
 
-/// The struct identifier for a device given whether its base ident collides
-/// with another device in the set. On collision the `_REV<rev:08X>` suffix is
-/// appended; otherwise the bare sanitised base ident is used.
+/// The struct identifier for a device given whether its base ident collides.
+///
+/// On collision the `_REV<rev:08X>` suffix is appended; otherwise the bare
+/// sanitised base ident is used.
 pub fn struct_ident_string(device: &esi::EsiDevice, collides: bool) -> String {
     let base = base_ident(device);
     if collides {
@@ -281,6 +291,7 @@ mod tests {
             dictionary: Vec::new(),
             eeprom: None,
             slots: None,
+            alt_sm_mappings: Vec::new(),
             vendor_extensions: Vec::new(),
         }
     }

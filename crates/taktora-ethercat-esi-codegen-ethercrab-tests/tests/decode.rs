@@ -6,7 +6,7 @@
 //! against a known PDI bit-pattern.
 
 use bitvec::view::BitView;
-use taktora_ethercat_esi_codegen_ethercrab_tests::generated::EL3001_like;
+use taktora_ethercat_esi_codegen_ethercrab_tests::generated::{EL3001_like, EL3001_likeOpMode};
 use taktora_ethercat_esi_rt::{BitSlice, EsiDevice, EsiError, Identity, Lsb0};
 
 /// The identity the codegen derives from `el3001_like.xml`.
@@ -27,9 +27,12 @@ fn decode_round_trip() {
 
     dev.decode_inputs(bits).expect("decode should succeed");
 
-    assert!(dev.underrange, "underrange bit should decode to true");
+    // The single TxPdo resolves to one `Default` OpMode variant with flat
+    // inputs (`underrange`, `value`) on the `inputs` sub-struct.
+    let EL3001_likeOpMode::Default(ref m) = dev.mode;
+    assert!(m.inputs.underrange, "underrange bit should decode to true");
     // bits 8..24 little-endian: 0x34 | (0x12 << 8) == 0x1234.
-    assert_eq!(dev.value, 0x1234, "value should decode to 0x1234");
+    assert_eq!(m.inputs.value, 0x1234, "value should decode to 0x1234");
 
     assert_eq!(dev.identity(), EXPECTED_IDENTITY);
     assert_eq!(dev.input_len(), 3);

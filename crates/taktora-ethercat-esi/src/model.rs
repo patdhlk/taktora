@@ -58,6 +58,10 @@ pub struct EsiDevice {
     pub eeprom: Option<Eeprom>,
     /// MDP slot constraints (`<Slots>`), when the device is modular.
     pub slots: Option<Slots>,
+    /// Predefined PDO-assignment combinations (`TwinCAT` `<AlternativeSmMapping>`
+    /// under `<Info><VendorSpecific>`), in document order. Empty when the
+    /// device declares none (a single fixed assignment).
+    pub alt_sm_mappings: Vec<AlternativeSmMapping>,
     /// Unrecognised device-level vendor extension elements, captured verbatim.
     pub vendor_extensions: Vec<RawXml>,
 }
@@ -153,6 +157,46 @@ pub struct PdoEntry {
     pub name: Option<String>,
     /// Entry data type, when present.
     pub data_type: Option<DataType>,
+}
+
+/// One predefined PDO-assignment combination a device offers (a `TwinCAT`
+/// `<AlternativeSmMapping>`).
+///
+/// Captured faithfully — *not* resolved: which PDO each index refers to, and
+/// the resulting process image, is consumer (codegen) work.
+///
+/// `Fixed="1"` on a PDO means its entry list is not editable; it says nothing
+/// about whether the PDO is assigned. The assignment is described here (and by
+/// the per-PDO `Sm=` attribute for the default mapping).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlternativeSmMapping {
+    /// Human-readable mode name (`<Name>`), when present (e.g. "Positioning
+    /// interface").
+    pub name: Option<String>,
+    /// Whether this mapping is the device default (`Default="1"`). Exactly one
+    /// mapping is expected to carry it; the parser does not enforce that.
+    pub default: bool,
+    /// Per-sync-manager PDO-index assignments, in document order.
+    pub sm_assignments: Vec<SmAssignment>,
+}
+
+/// The PDOs assigned to one sync manager within an [`AlternativeSmMapping`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmAssignment {
+    /// Sync-manager number (`<Sm No="2">`).
+    pub sm: u8,
+    /// Assigned PDO references, in document (assignment) order.
+    pub pdos: Vec<AltPdoRef>,
+}
+
+/// One PDO reference inside a [`SmAssignment`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AltPdoRef {
+    /// PDO mapping-object index (e.g. `0x1601`).
+    pub index: u16,
+    /// `ChannelNo` attribute, when present (multi-axis terminals). Single-axis
+    /// codegen ignores it; captured for faithfulness.
+    pub channel_no: Option<u32>,
 }
 
 /// Mailbox configuration.

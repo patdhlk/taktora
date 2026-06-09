@@ -1637,7 +1637,7 @@ dependencies = [
 
 [[package]]
 name = "taktora-ethercat-esi"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "quick-xml",
  "serde",
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "taktora-ethercat-esi-build"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "encoding_rs",
  "glob",
@@ -1661,7 +1661,7 @@ dependencies = [
 
 [[package]]
 name = "taktora-ethercat-esi-codegen"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1672,7 +1672,7 @@ dependencies = [
 
 [[package]]
 name = "taktora-ethercat-esi-codegen-ethercrab"
-version = "0.1.3"
+version = "0.1.5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "taktora-ethercat-esi-rt"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bitvec",
  "taktora-fieldbus-od-core",
@@ -1710,7 +1710,7 @@ dependencies = [
 
 [[package]]
 name = "taktora-fieldbus-od-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
 ]

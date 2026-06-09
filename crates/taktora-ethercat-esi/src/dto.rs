@@ -7,8 +7,9 @@ use taktora_fieldbus_od_core::{DataType, Identity};
 
 use crate::error::EsiError;
 use crate::model::{
-    CoeInfo, DcOpMode, DistributedClock, EsiDevice, EsiFile, InitCmd, Mailbox, Module, Pdo,
-    PdoEntry, Slot, SlotModuleIdent, Slots, Transition, Vendor,
+    AltPdoRef, AlternativeSmMapping, CoeInfo, DcOpMode, DistributedClock, EsiDevice, EsiFile,
+    InitCmd, Mailbox, Module, Pdo, PdoEntry, Slot, SlotModuleIdent, Slots, SmAssignment,
+    Transition, Vendor,
 };
 
 // ── integer / bool helpers ────────────────────────────────────────────────────
@@ -134,6 +135,8 @@ struct DeviceDto {
     eeprom: Option<EepromDto>,
     #[serde(rename = "Slots", default)]
     slots: Option<SlotsDto>,
+    #[serde(rename = "Info", default)]
+    info: Option<DeviceInfoDto>,
 }
 
 #[derive(Deserialize)]
@@ -154,6 +157,55 @@ struct TypeDto {
     revision_no: Option<String>,
     #[serde(rename = "$text", default)]
     text: Option<String>,
+}
+
+// ── device-level Info / AlternativeSmMapping DTOs ─────────────────────────────
+
+/// Device-level `<Info>` element. Only the `<VendorSpecific>` child is read;
+/// everything else (Electrical, Mailbox timeouts, …) is tolerated and ignored.
+#[derive(Deserialize)]
+struct DeviceInfoDto {
+    #[serde(rename = "VendorSpecific", default)]
+    vendor_specific: Option<VendorSpecificDto>,
+}
+
+#[derive(Deserialize)]
+struct VendorSpecificDto {
+    #[serde(rename = "TwinCAT", default)]
+    twin_cat: Option<TwinCatDto>,
+}
+
+#[derive(Deserialize)]
+struct TwinCatDto {
+    #[serde(rename = "AlternativeSmMapping", default)]
+    alternative_sm_mapping: Vec<AltSmMappingDto>,
+}
+
+#[derive(Deserialize)]
+struct AltSmMappingDto {
+    #[serde(rename = "@Default", default)]
+    default: Option<String>,
+    // <AlternativeSmMapping><Name> is single-locale in Beckhoff ESI; Option<String> is deliberate (not Vec<NameDto>).
+    #[serde(rename = "Name", default)]
+    name: Option<String>,
+    #[serde(rename = "Sm", default)]
+    sm: Vec<AltSmDto>,
+}
+
+#[derive(Deserialize)]
+struct AltSmDto {
+    #[serde(rename = "@No")]
+    no: String,
+    #[serde(rename = "Pdo", default)]
+    pdo: Vec<AltPdoDto>,
+}
+
+#[derive(Deserialize)]
+struct AltPdoDto {
+    #[serde(rename = "@ChannelNo", default)]
+    channel_no: Option<String>,
+    #[serde(rename = "$text")]
+    index: String,
 }
 
 // ── FMMU DTO ─────────────────────────────────────────────────────────────────
@@ -891,6 +943,45 @@ fn dictionary_from_profile(
     Ok(out)
 }
 
+// ── AlternativeSmMapping conversion ──────────────────────────────────────────
+
+/// Convert the parsed `<Info><VendorSpecific><TwinCAT>` `AlternativeSmMapping`
+/// DTOs into the public IR. Returns an empty Vec when the chain is absent.
+fn alt_sm_mappings_from_info(
+    info: Option<&DeviceInfoDto>,
+) -> Result<Vec<AlternativeSmMapping>, EsiError> {
+    let Some(tc) = info
+        .and_then(|i| i.vendor_specific.as_ref())
+        .and_then(|v| v.twin_cat.as_ref())
+    else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::with_capacity(tc.alternative_sm_mapping.len());
+    for m in &tc.alternative_sm_mapping {
+        let mut sm_assignments = Vec::with_capacity(m.sm.len());
+        for sm in &m.sm {
+            let no = parse_esi_u8(&sm.no, "AlternativeSmMapping.Sm.No")?;
+            let mut pdos = Vec::with_capacity(sm.pdo.len());
+            for p in &sm.pdo {
+                let index = parse_esi_u16(&p.index, "AlternativeSmMapping.Sm.Pdo")?;
+                let channel_no = p
+                    .channel_no
+                    .as_deref()
+                    .map(|c| parse_esi_uint(c, "AlternativeSmMapping.Sm.Pdo.ChannelNo"))
+                    .transpose()?;
+                pdos.push(AltPdoRef { index, channel_no });
+            }
+            sm_assignments.push(SmAssignment { sm: no, pdos });
+        }
+        out.push(AlternativeSmMapping {
+            name: m.name.clone(),
+            default: parse_esi_bool(m.default.as_ref()),
+            sm_assignments,
+        });
+    }
+    Ok(out)
+}
+
 // ── device conversion ─────────────────────────────────────────────────────────
 
 /// Convert one [`DeviceDto`] into an [`EsiDevice`], stamping the file-level
@@ -922,6 +1013,7 @@ fn device_from_dto(dev: DeviceDto, vendor_id: u32) -> Result<EsiDevice, EsiError
     // IMPORTANT: pass &dev.profile (borrow) — the dictionary pass also reads it.
     let mailbox = mailbox_from_dtos(dev.mailbox, dev.profile.as_ref())?;
     let dc = dev.dc.map(dc_from_dto).transpose()?;
+    let alt_sm_mappings = alt_sm_mappings_from_info(dev.info.as_ref())?;
 
     Ok(EsiDevice {
         identity,
@@ -937,6 +1029,7 @@ fn device_from_dto(dev: DeviceDto, vendor_id: u32) -> Result<EsiDevice, EsiError
         dictionary: dictionary_from_profile(dev.profile.as_ref())?,
         eeprom: dev.eeprom.as_ref().map(eeprom_from_dto).transpose()?,
         slots: dev.slots.map(slots_from_dto).transpose()?,
+        alt_sm_mappings,
         vendor_extensions: Vec::new(),
     })
 }

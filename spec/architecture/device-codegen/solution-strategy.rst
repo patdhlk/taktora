@@ -81,6 +81,52 @@ the requirement or feature it answers.
    per device (one enum + N structs instead of one struct).
    Negligible at the device counts in scope (<100).
 
+.. arch-decision:: Joint per-device OpMode enum supersedes per-direction PDO-assignment alternatives
+   :id: ADR_0104
+   :status: accepted
+   :refines: ADR_0072
+   :links: REQ_0523
+
+   **Context.** :need:`ADR_0072` modelled PDO-assignment choice
+   per-direction, on the assumption that an ESI device offers a small
+   menu of interchangeable RxPDO / TxPDO alternatives. Two facts about
+   real Beckhoff ESI break that model. First, Beckhoff marks selectable
+   PDOs ``Fixed="1"`` — which the original codegen read as "always
+   assigned", when ``Fixed`` actually means only that the PDO's *entry
+   list is not editable* (orthogonal to whether the PDO is assigned to a
+   sync manager). Second, a valid sync-manager assignment is a **set
+   spanning both directions at once**, not an independent per-direction
+   pick: the EL7047 "Positioning interface" mode assigns
+   SM2 = {0x1601, 0x1602, 0x1606} **and** SM3 = {0x1a01, 0x1a03,
+   0x1a07} as one indivisible choice. A per-direction sum type can
+   represent neither a multi-PDO assignment within one direction nor the
+   SM2↔SM3 pairing that makes the choice coherent.
+
+   **Decision.** Resolve each device to a *set of selectable
+   assignments* (one per ``<AlternativeSmMapping>``, else a single
+   default) and emit one **joint** ``<Dev>OpMode`` enum — one variant
+   per assignment, each variant carrying the complete
+   ``{ inputs, outputs }`` for that mode (:need:`REQ_0523`,
+   :need:`REQ_0524`). The per-direction ``classify_alternatives`` /
+   ``MultipleAlternativeGroups`` machinery and the
+   ``<IDENT>PdoAssignment`` sum type are retired. This **refines**
+   :need:`ADR_0072`'s "make illegal states unrepresentable" principle,
+   moving its granularity from per-direction to per-device: the illegal
+   state now ruled out is "two operating modes active at once", and the
+   pairing between an RxPDO set and its TxPDO set is captured by
+   construction.
+
+   **Consequences.** ✅ ``Fixed`` is decoupled from "always-on": the
+   default assignment derives from ``Sm=`` / ``Mandatory``, not
+   ``Fixed`` (:need:`REQ_0527`). ✅ Every device is uniformly
+   ``struct <Dev> { mode: <Dev>OpMode }``; a single-mode device simply
+   gets a one-variant ``Default`` enum, so there is no special case for
+   "non-selectable" devices. ✅ Multi-PDO and cross-direction
+   assignments are now expressible. ❌ This is pre-v1.0 churn: the
+   golden snapshot output changes for **every** device, since even
+   single-mode devices move from a bare struct to the
+   ``struct { mode }`` shape. Acceptable before the first release.
+
 .. arch-decision:: Future CANopen support via shared OD IR
    :id: ADR_0073
    :status: accepted

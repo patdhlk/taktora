@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<EtherCATInfo>
+  <Vendor><Id>#x2</Id><Name>Beckhoff</Name></Vendor>
+  <Descriptions>
+    <Devices>
+      <Device>
+        <Type ProductCode="#x1b873052" RevisionNo="#x170000">EL7047</Type>
+        <Name>EL7047</Name>
+        <Info>
+          <VendorSpecific>
+            <TwinCAT>
+              <AlternativeSmMapping Default="1">
+                <Name>Velocity control compact</Name>
+                <Sm No="2"><Pdo ChannelNo="1">#x1600</Pdo></Sm>
+                <Sm No="3"><Pdo ChannelNo="1">#x1a00</Pdo></Sm>
+              </AlternativeSmMapping>
+              <AlternativeSmMapping>
+                <Name>Positioning interface</Name>
+                <Sm No="2"><Pdo ChannelNo="1">#x1601</Pdo><Pdo>#x1611</Pdo></Sm>
+                <Sm No="3"><Pdo ChannelNo="1">#x1a01</Pdo></Sm>
+              </AlternativeSmMapping>
+            </TwinCAT>
+          </VendorSpecific>
+        </Info>
+        <Sm StartAddress="#x1100" ControlByte="#x24" Enable="1">Outputs</Sm>
+        <Sm StartAddress="#x1180" ControlByte="#x20" Enable="1">Inputs</Sm>
+        <RxPdo Fixed="1" Sm="2"><Index>#x1600</Index><Name>Vel compact</Name>
+          <Entry><Index>#x7000</Index><SubIndex>1</SubIndex><BitLen>16</BitLen><Name>V</Name><DataType>INT</DataType></Entry>
+        </RxPdo>
+        <RxPdo Fixed="1"><Index>#x1601</Index><Name>Pos if</Name>
+          <Entry><Index>#x7010</Index><SubIndex>1</SubIndex><BitLen>32</BitLen><Name>Target</Name><DataType>DINT</DataType></Entry>
+        </RxPdo>
+        <RxPdo Fixed="1"><Index>#x1611</Index><Name>Pos if ext</Name>
+          <Entry><Index>#x7010</Index><SubIndex>2</SubIndex><BitLen>32</BitLen><Name>Velocity</Name><DataType>DINT</DataType></Entry>
+        </RxPdo>
+        <TxPdo Fixed="1" Sm="3"><Index>#x1a00</Index><Name>Vel status</Name>
+          <Entry><Index>#x6000</Index><SubIndex>1</SubIndex><BitLen>16</BitLen><Name>S</Name><DataType>UINT</DataType></Entry>
+        </TxPdo>
+        <TxPdo Fixed="1"><Index>#x1a01</Index><Name>Pos status</Name>
+          <Entry><Index>#x6010</Index><SubIndex>1</SubIndex><BitLen>32</BitLen><Name>Actual</Name><DataType>DINT</DataType></Entry>
+        </TxPdo>
+      </Device>
+    </Devices>
+  </Descriptions>
+</EtherCATInfo>

@@ -6,6 +6,18 @@ publish     = false
 description = "taktora integration example: executor + ethercat connector driving a Beckhoff EL7047 stepper off EL1008 inputs"
 license     = "Apache-2.0 OR MIT"
 
+# Split into a library + a thin binary. The library exposes the modules
+# (`generated`, `el7047_domain`, `el7047_adapter`, ...) so that integration
+# tests under `tests/` can import them as `ethercat_stepper::...`. `main.rs`
+# is a thin binary that `use`s the same library.
+[lib]
+name = "ethercat_stepper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ethercat-stepper"
+path = "src/main.rs"
+
 [workspace]
 # Empty — opt out of parent workspace discovery so this crate's
 # location (potentially inside `.claude/worktrees/...`) doesn't get
