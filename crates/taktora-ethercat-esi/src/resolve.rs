@@ -35,7 +35,7 @@ pub enum ResolveError {
     MappingNotFound {
         /// The requested mode name.
         requested: String,
-        /// Names of the mappings the device does declare.
+        /// Named mappings the device does declare.
         available: Vec<String>,
     },
     /// `name` was omitted and no mapping carries `Default="1"`.
@@ -74,9 +74,11 @@ pub fn classify_assignment(
 }
 
 fn pdo_total_bits(pool: &[Pdo], index: u16) -> u16 {
-    pool.iter()
-        .find(|p| p.index == index)
-        .map_or(0, |p| p.entries.iter().map(|e| e.bit_length).sum())
+    pool.iter().find(|p| p.index == index).map_or(0, |p| {
+        p.entries
+            .iter()
+            .fold(0u16, |acc, e| acc.saturating_add(e.bit_length))
+    })
 }
 
 fn entries_for(pool: &[Pdo], indices: &[u16]) -> Vec<ResolvedPdoEntry> {
@@ -317,6 +319,22 @@ mod tests {
         assert_eq!(
             a.tx.iter().map(|e| e.index).collect::<Vec<_>>(),
             vec![0x1a00, 0x1a01]
+        );
+        // Cumulative offset: 0x1600 totals 8+8=16 bits, so 0x1601 starts at 16.
+        assert_eq!(a.rx[0].bit_offset, 0);
+        assert_eq!(a.rx[1].bit_offset, 16);
+        assert_eq!(a.tx[1].bit_offset, a.tx[0].bit_length);
+    }
+
+    #[test]
+    fn no_default_among_mappings_errors() {
+        let mut dev = el7047_like();
+        for m in &mut dev.alt_sm_mappings {
+            m.default = false;
+        }
+        assert_eq!(
+            dev.resolve_assignment(None).unwrap_err(),
+            ResolveError::NoDefaultMapping
         );
     }
 }
