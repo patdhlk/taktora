@@ -21,6 +21,21 @@ pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/devices.rs"));
 }
 
+/// netcfg-generated bus configuration. `build.rs` runs
+/// `taktora-ethercat-netcfg-build` over `network.yaml` and writes
+/// `$OUT_DIR/network.rs`; this module `include!`s it.
+#[allow(
+    missing_docs,
+    non_camel_case_types,
+    dead_code,
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery
+)]
+pub mod generated_net {
+    include!(concat!(env!("OUT_DIR"), "/network.rs"));
+}
+
 pub mod codec;
 pub mod control;
 pub mod el7047_adapter;
