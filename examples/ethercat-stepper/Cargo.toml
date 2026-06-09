@@ -7,10 +7,9 @@ description = "taktora integration example: executor + ethercat connector drivin
 license     = "Apache-2.0 OR MIT"
 
 # Split into a library + a thin binary. The library exposes the modules
-# (`generated`, `el7047`, `el7047_adapter`, ...) so that integration tests
-# under `tests/` — notably the transitional `differential.rs` gate — can
-# import them as `ethercat_stepper::...`. `main.rs` is a thin binary that
-# `use`s the same library.
+# (`generated`, `el7047_domain`, `el7047_adapter`, ...) so that integration
+# tests under `tests/` can import them as `ethercat_stepper::...`. `main.rs`
+# is a thin binary that `use`s the same library.
 [lib]
 name = "ethercat_stepper"
 path = "src/lib.rs"

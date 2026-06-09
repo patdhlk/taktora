@@ -9,9 +9,7 @@
 //! the ESI-generated typed device drivers: the EL7047 runs in its generated
 //! `PositioningInterface` mode, mapped to/from the domain control/status
 //! types by `el7047_adapter`; EL1008/EL2004 ride their generated `Default`
-//! modes. The transitional `tests/differential.rs` gate proves the generated
-//! EL7047 codec is byte-identical to the (still-present) hand-rolled
-//! `el7047.rs` before that file is removed.
+//! modes.
 //!
 //! Topology assumption: `ethercrab` assigns configured station addresses
 //! starting at `0x1000` — EK1100 = `0x1000` (bus coupler, no PDI), then
@@ -39,7 +37,7 @@ use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item
 
 use ethercat_stepper::codec::RawImageCodec;
 use ethercat_stepper::control::{Controller, MoveParams};
-use ethercat_stepper::{el7047, el7047_adapter, generated};
+use ethercat_stepper::{el7047_adapter, el7047_domain, generated};
 
 /// Channel capacity (iceoryx2 service buffer slots).
 const N: usize = 256;
@@ -212,14 +210,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "ethercat.el7047.control",
         el7047_out_routing,
     )?;
-    let writer_el7047 = connector.create_writer::<[u8; el7047::OUTPUT_LEN], N>(&el7047_out_desc)?;
+    let writer_el7047 =
+        connector.create_writer::<[u8; el7047_domain::OUTPUT_LEN], N>(&el7047_out_desc)?;
 
     //    EL7047 input image @ 0x1003 (Tx), bit offset 0, 192 bits.
     let el7047_in_routing =
         EthercatRouting::new(SUBDEV_EL7047, PdoDirection::Tx, 0, routing_bits_el7047_in);
     let el7047_in_desc =
         ChannelDescriptor::<EthercatRouting, N>::new("ethercat.el7047.status", el7047_in_routing)?;
-    let reader_el7047 = connector.create_reader::<[u8; el7047::INPUT_LEN], N>(&el7047_in_desc)?;
+    let reader_el7047 =
+        connector.create_reader::<[u8; el7047_domain::INPUT_LEN], N>(&el7047_in_desc)?;
 
     // 5. Executor.
     let mut exec = Executor::builder().worker_threads(1).build()?;
@@ -236,7 +236,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let healthy_for_control = Arc::clone(&healthy);
     let mut controller = Controller::default();
     // Latest decoded EL7047 status; held across cycles for logging on change.
-    let last_logged: Arc<Mutex<Option<el7047::El7047Status>>> = Arc::new(Mutex::new(None));
+    let last_logged: Arc<Mutex<Option<el7047_domain::El7047Status>>> = Arc::new(Mutex::new(None));
     let last_logged_for_item = Arc::clone(&last_logged);
     // Fault-lamp blink state, toggled on a sub-cadence of the control loop so
     // the blink is actually visible.
@@ -263,10 +263,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // it through the generated positioning-interface device, then map to
             // the domain status via the adapter so the controller stays
             // codegen-agnostic.
-            let mut status = el7047::El7047Status::default();
+            let mut status = el7047_domain::El7047Status::default();
             let mut got_status = false;
             while let Ok(Some(env)) = reader_el7047.try_recv() {
-                let img: [u8; el7047::INPUT_LEN] = env.value;
+                let img: [u8; el7047_domain::INPUT_LEN] = env.value;
                 if el7047_dev.decode_inputs(img.view_bits::<Lsb0>()).is_ok() {
                     status = el7047_adapter::read_status(&el7047_dev);
                     got_status = true;
@@ -304,7 +304,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // device, encode the output image, and send it.
             let ctrl = controller.step(buttons, &status, params, healthy_now);
             el7047_adapter::apply_control(&mut el7047_dev, &ctrl);
-            let mut out = [0u8; el7047::OUTPUT_LEN];
+            let mut out = [0u8; el7047_domain::OUTPUT_LEN];
             match el7047_dev.encode_outputs(out.view_bits_mut::<Lsb0>()) {
                 Ok(()) => {
                     let _ = writer_el7047.send(&out);

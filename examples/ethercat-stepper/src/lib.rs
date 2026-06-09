@@ -2,10 +2,7 @@
 //!
 //! The example is shipped as a thin binary (`main.rs`) on top of this
 //! library so that integration tests under `tests/` can import the
-//! modules directly as `ethercat_stepper::...`. The transitional
-//! [`differential`](../tests/differential.rs) test proves the generated
-//! EL7047 positioning-interface codec is byte/field-identical to the
-//! hand-rolled [`el7047`] codec before the latter is removed.
+//! modules directly as `ethercat_stepper::...`.
 
 /// ESI-generated typed device drivers. `build.rs` runs
 /// `taktora-ethercat-esi-build` over `esi/*.xml` and writes
@@ -26,5 +23,5 @@ pub mod generated {
 
 pub mod codec;
 pub mod control;
-pub mod el7047;
 pub mod el7047_adapter;
+pub mod el7047_domain;

@@ -10,7 +10,7 @@
 //! position counter at the current spot). Jog overrides the index moves while
 //! held and stops on release or stall (e.g. reaching a hard block).
 
-use crate::el7047::{El7047Control, El7047Status, start_type};
+use crate::el7047_domain::{El7047Control, El7047Status, start_type};
 
 /// Per-cycle motion parameters from the CLI.
 #[derive(Clone, Copy, Debug)]

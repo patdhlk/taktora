@@ -1,13 +1,11 @@
-//! Adapter between the domain control/status types in [`crate::el7047`] and
-//! the ESI-generated [`EL7047`] device in its `PositioningInterface` mode.
+//! Adapter between the domain control/status types in [`crate::el7047_domain`]
+//! and the ESI-generated [`EL7047`] device in its `PositioningInterface` mode.
 //!
 //! The domain types ([`El7047Control`]/[`El7047Status`]) keep the pure
 //! [`crate::control`] controller codegen-agnostic; this module is the only
-//! place that touches the generated positioning-interface leaves. The
-//! mapping is proven byte/field-identical to the hand-rolled codec by the
-//! transitional `tests/differential.rs` gate.
+//! place that touches the generated positioning-interface leaves.
 
-use crate::el7047::{El7047Control, El7047Status};
+use crate::el7047_domain::{El7047Control, El7047Status};
 use crate::generated::{EL7047, EL7047OpMode};
 
 /// Write the domain control surface into the device's `PositioningInterface`
