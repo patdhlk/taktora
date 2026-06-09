@@ -132,7 +132,11 @@ pub fn pdo_field_string(name: Option<&str>, index: u16) -> String {
 /// capitalised (`"Channel 1"` → `Channel1`, `"AI Inputs Channel 2"` →
 /// `AiInputsChannel2`); an unnamed PDO falls back to its mapping index
 /// (`0x1A00` → `Pdo1a00`). The result is char-sanitised so the concatenation
-/// `<Dev><Segment>` stays a valid identifier.
+/// `<Dev><Segment>` stays a valid identifier. Backs [`pdo_struct_ident`]; the
+/// underlying [`pascal_segment`] is also shared by the `op_mode_*` naming so
+/// segments render consistently across both.
+///
+/// [`pdo_struct_ident`]: crate::pdo_struct_ident
 pub fn pdo_struct_segment(name: Option<&str>, index: u16) -> String {
     let raw = name.map_or_else(|| format!("Pdo{index:04x}"), pascal_segment);
     sanitise_ident(&raw)
@@ -158,25 +162,6 @@ fn pascal_segment(raw: &str) -> String {
         out.push('_');
     }
     out
-}
-
-/// `PascalCase` a raw label string for use as an identifier segment.
-///
-/// Example: a multi-group disambiguator like `Sm3`. Shares the segmentation
-/// used for PDO struct/variant segments so labels render consistently.
-pub fn pdo_struct_segment_raw(raw: &str) -> String {
-    sanitise_ident(&pascal_segment(raw))
-}
-
-/// The PascalCase-ish variant segment for one alternative PDO inside a
-/// `<Dev>PdoAssignment` enum (`REQ_0523`).
-///
-/// Named PDOs derive from their `<Name>` (`"Standard"` → `Standard`,
-/// `"Compact"` → `Compact`); an unnamed PDO falls back to its mapping index
-/// (`0x1A00` → `Pdo1a00`). Shares the segmentation used for sub-struct idents,
-/// so a variant and its embedded struct segment agree.
-pub fn pdo_variant_segment(name: Option<&str>, index: u16) -> String {
-    pdo_struct_segment(name, index)
 }
 
 /// `PascalCase` variant segment for a `<Dev>OpMode` enum variant.

@@ -6,71 +6,7 @@ use std::cell::RefCell;
 use proc_macro2::TokenStream;
 use quote::quote;
 use taktora_ethercat_esi as esi;
-use taktora_ethercat_esi_codegen::{
-    CodegenBackend, CodegenError, Device, generate, pdo_assignment_enum_ident,
-    pdo_assignment_field_ident, pdo_variant_ident, pdo_variant_struct_ident,
-};
-
-#[test]
-fn pdo_assignment_idents_for_single_and_multi_group() {
-    let dev = proc_macro2::Ident::new("ALT", proc_macro2::Span::call_site());
-
-    // Single group: bare `<Dev>PdoAssignment` enum and a `pdo` field.
-    assert_eq!(
-        pdo_assignment_enum_ident(&dev, None).unwrap().to_string(),
-        "ALTPdoAssignment"
-    );
-    assert_eq!(pdo_assignment_field_ident(None).unwrap().to_string(), "pdo");
-
-    // Multi-group: label-disambiguated enum + field.
-    assert_eq!(
-        pdo_assignment_enum_ident(&dev, Some("Sm3"))
-            .unwrap()
-            .to_string(),
-        "ALTPdoAssignmentSm3"
-    );
-    assert_eq!(
-        pdo_assignment_field_ident(Some("sm3")).unwrap().to_string(),
-        "pdo_sm3"
-    );
-}
-
-#[test]
-fn pdo_variant_idents_from_name_and_index() {
-    let dev = proc_macro2::Ident::new("ALT", proc_macro2::Span::call_site());
-
-    assert_eq!(
-        pdo_variant_ident(Some("Standard"), 0x1A00)
-            .unwrap()
-            .to_string(),
-        "Standard"
-    );
-    assert_eq!(
-        pdo_variant_ident(Some("Compact"), 0x1A01)
-            .unwrap()
-            .to_string(),
-        "Compact"
-    );
-    // Unnamed → index fallback.
-    assert_eq!(
-        pdo_variant_ident(None, 0x1A02).unwrap().to_string(),
-        "Pdo1a02"
-    );
-
-    // Per-variant struct ident is `<Dev>Pdo<Variant>`.
-    assert_eq!(
-        pdo_variant_struct_ident(&dev, Some("Standard"), 0x1A00)
-            .unwrap()
-            .to_string(),
-        "ALTPdoStandard"
-    );
-    assert_eq!(
-        pdo_variant_struct_ident(&dev, Some("Compact"), 0x1A01)
-            .unwrap()
-            .to_string(),
-        "ALTPdoCompact"
-    );
-}
+use taktora_ethercat_esi_codegen::{CodegenBackend, CodegenError, Device, generate};
 
 /// A no-op backend that records the resolved struct idents it saw, so tests can
 /// assert ordering and the module-root call without inspecting emitted tokens.
