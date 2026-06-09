@@ -508,7 +508,7 @@ struct CycleTimeDto {
 /// Convert a vec of [`SmDto`]s into [`SyncManager`]s, assigning 0-based
 /// indices from declaration order.
 ///
-/// Direction is derived from control-byte bits 2..3
+/// Direction is derived from control-byte bits 2..=3
 /// (`(control_byte >> 2) & 0x3`):
 /// - `0b01` → [`SmDirection::Output`] (master writes the SM, i.e. master → `SubDevice`)
 /// - `0b00` → [`SmDirection::Input`] (master reads the SM, i.e. `SubDevice` → master)
