@@ -205,6 +205,19 @@ fn esi_disabled_sm_without_attestation_still_fails() {
     );
 }
 
+/// FAIL — same ESI (watchdog trigger DISABLED, `#x04`) with an EXPLICIT
+/// `sm_watchdog_enabled: false`. An explicit opt-out is not attestation, so the
+/// gate stays closed (pins that the override is `== Some(true)`, not truthy).
+#[test]
+fn esi_disabled_sm_attested_false_still_fails() {
+    let (_esi, yaml) = esi_yaml_attested(&esi_with_output_sm("#x04"), Some(false));
+    let err = parse(&yaml).expect_err("explicit sm_watchdog_enabled: false must still fail");
+    assert!(
+        matches!(err, NetcfgError::SmWatchdogDisabled { ref label } if label == "outputs"),
+        "expected SmWatchdogDisabled for `outputs`, got {err:?}"
+    );
+}
+
 // ---- Inline-sourced enable attestation ----------------------------------
 
 /// Build an inline-source one-device network.yaml with rx PDOs and an

@@ -67,10 +67,13 @@ pub struct DeviceInstance {
     /// Optional per-device SM-watchdog timeout override. Absent → the
     /// device inherits FTTI/2 (`REQ_0844`). YAML: `sm_watchdog_timeout_ms`.
     pub sm_watchdog_timeout: Option<Duration>,
-    /// Explicit attestation, for [`DeviceSource::Inline`] output devices,
-    /// that the device's SM watchdog is (will be) enabled (`REQ_0845`).
-    /// Inline sources carry no ESI control byte to read the enable bit
-    /// from, so the integrator must attest it. YAML: `sm_watchdog_enabled`.
+    /// Explicit attestation that this output device's SM watchdog is (will
+    /// be) enabled (`REQ_0845`). Required for [`DeviceSource::Inline`] output
+    /// devices (no ESI control byte to read the enable bit from). Also
+    /// accepted for [`DeviceSource::Esi`] output devices whose ESI output SM
+    /// does not declare the watchdog trigger — the operator takes
+    /// responsibility; the driver programs `0x0400`/`0x0420` unconditionally
+    /// at bring-up (`AOU_0016`). YAML: `sm_watchdog_enabled`.
     pub sm_watchdog_enabled: Option<bool>,
     /// Resolved SM-watchdog register values for this device, present iff
     /// the device carries output (rx) PDOs (`REQ_0844`). Codegen emits
@@ -395,7 +398,8 @@ pub enum NetcfgError {
     /// manager(s) have the watchdog trigger DISABLED in the ESI control
     /// byte (`AOU_0016` / `REQ_0845`). The watchdog is the sole mechanism
     /// that drives outputs to their safe state on a silently-stopped
-    /// master, so a disabled trigger is a config error.
+    /// master, so a disabled trigger is a config error. Bypass by setting
+    /// `sm_watchdog_enabled: true` on the device (operator attestation).
     #[error(
         "device `{label}` is an output device but its ESI declares the SM watchdog trigger disabled on an output sync manager; set `sm_watchdog_enabled: true` to attest the watchdog is programmed at runtime"
     )]
