@@ -16,9 +16,33 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # 0. Classify the diff. This connector CI is all Rust, so every job below is
+  #    gated on `code` — README-only and spec-only PRs skip the whole matrix.
+  #    main has no required status checks, so skipped jobs never block a merge.
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      spec: ${{ steps.classify.outputs.spec }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: ./scripts/classify-changes.sh
+
   # 1. Default-feature build + test across the three tier-1 OSes.
   #    fail-fast disabled so macOS / Windows red doesn't mask linux green.
   build-test-default:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: build+test (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -40,6 +64,8 @@ jobs:
   #    out to be required, add them here (currently zenoh 1.x crates do
   #    not need additional system libs on ubuntu-latest).
   feature-zenoh-integration-linux:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: feature zenoh-integration (linux)
     runs-on: ubuntu-latest
     steps:
@@ -53,6 +79,8 @@ jobs:
   #    crate's Cargo.toml does not leak zenoh-only deps into default
   #    features (REQ_0444 / REQ_0445).
   dep-gating:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: dep gating (TEST_0310)
     runs-on: ubuntu-latest
     steps:
@@ -68,6 +96,8 @@ jobs:
   #    `cargo test`, while +nightly remains available for the rustdoc
   #    invocation cargo-public-api spawns.
   public-api-tests:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: public-api tests (TEST_0309, TEST_0314)
     runs-on: ubuntu-latest
     steps:
@@ -90,6 +120,8 @@ jobs:
   #    job exercises default features and zenoh-integration explicitly so
   #    feature-gated code paths are linted in isolation.
   clippy-zenoh:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: clippy (taktora-connector-zenoh)
     runs-on: ubuntu-latest
     steps:

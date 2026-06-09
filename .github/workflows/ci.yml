@@ -6,7 +6,32 @@ on:
   pull_request:
 
 jobs:
+  # Classify the diff so doc-only (README.md) and spec-only changes can skip the
+  # Rust pipeline. `code` is true unless every changed file is README.md or under
+  # spec/; `spec` is true when spec/ changed. main has no required status checks,
+  # so gated-out jobs (reported as "skipped") never block a merge.
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      spec: ${{ steps.classify.outputs.spec }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: ./scripts/classify-changes.sh
+
   test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +60,8 @@ jobs:
         run: cargo test --workspace ${{ matrix.features }} -- --test-threads=1
 
   clippy:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -46,6 +73,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   doc:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -57,6 +86,8 @@ jobs:
         run: cargo doc --workspace --all-features --no-deps
 
   fmt:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -66,6 +97,8 @@ jobs:
       - run: cargo fmt --all -- --check
 
   publish-deps:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Publish dependency order guard
     runs-on: ubuntu-latest
     steps:
@@ -75,6 +108,8 @@ jobs:
         run: ./scripts/check-publish-deps.sh
 
   examples:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Examples (compile + mock-run)
     runs-on: ubuntu-latest
     steps:
@@ -95,6 +130,8 @@ jobs:
         run: ./scripts/check-examples.sh
 
   complexity:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Complexity gate (rust-code-analysis)
     runs-on: ubuntu-latest
     steps:
@@ -113,6 +150,10 @@ jobs:
         run: ./scripts/check-complexity.sh
 
   spec:
+    needs: changes
+    # Validate the spec on any spec change, and on code changes (codelinks /
+    # traceability can break from code edits). Skipped only for README-only PRs.
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.spec == 'true'
     name: Build specification
     runs-on: ubuntu-latest
     steps:
