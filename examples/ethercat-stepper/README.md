@@ -9,8 +9,10 @@ trapezoid itself.
 
 The control loop runs at 10 ms: it reads the EL1008 inputs, decides the
 next EL7047 control word with an edge-triggered state machine
-(`src/control.rs`), encodes the positioning-interface image
-(`src/el7047.rs`), and updates the EL2004 status lamp.
+(`src/control.rs`), writes it into the ESI-codegen-generated EL7047
+device through a thin domain adapter (`src/el7047_adapter.rs`), and
+updates the EL2004 status lamp. The wire codec is **generated**, not
+hand-written — see *Generated EL7047 codec* below.
 
 ## Motion model: the Beckhoff positioning interface (NOT CiA 402)
 
@@ -34,6 +36,32 @@ Enabling is automatic: while the connector is healthy and no
 emergency-stop is asserted, the controller holds the STM **Enable** bit
 set, and the drive walks itself to **Ready** at startup. There is no
 homing or absolute reference — positions are relative.
+
+## Generated EL7047 codec
+
+The wire codec is produced by the ESI device-codegen toolchain from
+[`esi/beckhoff_el7047.xml`](esi/beckhoff_el7047.xml) (the example's
+`build.rs` runs `taktora-ethercat-esi-build`), not hand-written. The
+EL7047 declares several selectable PDO assignments, so the generated
+device models them as a joint `EL7047OpMode` enum — one variant per
+assignment — and the device is `struct EL7047 { mode: EL7047OpMode }`
+(issue #70). The example pins the **`PositioningInterface`** variant:
+
+- **Domain types** (`src/el7047_domain.rs`) — `El7047Control` /
+  `El7047Status`, the example's hardware-agnostic control surface that
+  `src/control.rs` reasons about.
+- **Adapter** (`src/el7047_adapter.rs`) — maps those domain types onto
+  the generated `PositioningInterface` variant's typed fields
+  (`enc_control` / `stm_control` / `pos_control`, etc.). The actual
+  encode/decode is the generated `EL7047::encode_outputs` /
+  `decode_inputs`.
+- **PDO map** — the EL7047's `0x1C12`/`0x1C13` Rx/Tx assignment lists
+  are taken at startup from the generated `pdo_assignment()` for the
+  active mode, so a single source of truth (the ESI) drives both the
+  codec and the SM-assignment programming.
+
+EL1008 and EL2004 are generated the same way (each a single-variant
+`Default` mode). There is no hand-written PDO codec in this example.
 
 ## Hardware required
 
@@ -226,14 +254,17 @@ the toggle is active. From a clean checkout the trimmed ESI fixtures in
 ## What this shows
 
 - The Beckhoff positioning interface end-to-end over the workspace
-  connector stack: a hand-written PDO codec (`src/el7047.rs`), an
-  edge-triggered button→motion state machine (`src/control.rs`), and
-  the connector's reader/writer channels carrying fixed-size images.
+  connector stack: the ESI-codegen-generated EL7047 driving its
+  selectable `PositioningInterface` PDO assignment via a thin domain
+  adapter (`src/el7047_adapter.rs`), an edge-triggered button→motion
+  state machine (`src/control.rs`), and the connector's reader/writer
+  channels carrying fixed-size images.
 - `SubDeviceMap::with_startup_sdos(...)` — operator-declared startup
   SDOs (motor current) applied in PRE-OP before PDO assignment
   (`REQ_0853`).
 - `SubDeviceMap::with_sm_watchdog(...)` — the 50 ms FTTI/2 safe-state
   watchdog on the output-bearing terminals (AOU_0016 / `REQ_0846`).
-- Codegen-typed EL1008/EL2004 (`EL1008::decode_inputs` /
-  `EL2004::encode_outputs`) sitting alongside the hand-written EL7047
-  codec on the same `RawImageCodec` channel surface.
+- All three terminals codegen-typed on the same `RawImageCodec` channel
+  surface (`EL1008::decode_inputs`, `EL2004::encode_outputs`, and the
+  EL7047's per-mode `decode_inputs`/`encode_outputs`), with the EL7047
+  PDO map derived at runtime from the generated `pdo_assignment()`.
