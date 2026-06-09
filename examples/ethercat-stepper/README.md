@@ -37,15 +37,40 @@ emergency-stop is asserted, the controller holds the STM **Enable** bit
 set, and the drive walks itself to **Ready** at startup. There is no
 homing or absolute reference — positions are relative.
 
+## Two-layer codegen: `esi/*.xml` + `network.yaml`
+
+`build.rs` runs **two** independent code-generation passes; neither
+produces hand-written codec or wiring code:
+
+1. **Per-device ESI codegen** (`taktora-ethercat-esi-build`) reads every
+   `esi/*.xml` and emits `generated::*` — one typed struct per terminal
+   (`EL7047`, `EL1008`, `EL2004`), each with a joint `*OpMode` enum
+   over its selectable PDO assignments, plus `encode_outputs` /
+   `decode_inputs` for every mode.
+
+2. **Per-bus netcfg codegen** (`taktora-ethercat-netcfg-build`) reads
+   `network.yaml` and emits `generated_net::*` — the `PDO_MAP` for the
+   full bus, `EXPECTED_IDENTITIES` (vendor/product IDs in bus order,
+   currently logged at startup; runtime enforcement is not yet wired),
+   and per-channel routing consts (`ETHERCAT_EL1008_INPUTS`,
+   `ETHERCAT_EL2004_OUTPUTS`, `ETHERCAT_EL7047_CONTROL`,
+   `ETHERCAT_EL7047_STATUS`) that carry byte-offset and bit-length into
+   the shared PDO image.
+
+`main.rs` consumes both: `generated::EL7047 { mode: EL7047OpMode::PositioningInterface(…) }`
+for encoding/decoding, and `generated_net::PDO_MAP` / the routing consts
+for image slicing.
+
 ## Generated EL7047 codec
 
 The wire codec is produced by the ESI device-codegen toolchain from
-[`esi/beckhoff_el7047.xml`](esi/beckhoff_el7047.xml) (the example's
-`build.rs` runs `taktora-ethercat-esi-build`), not hand-written. The
-EL7047 declares several selectable PDO assignments, so the generated
+[`esi/beckhoff_el7047.xml`](esi/beckhoff_el7047.xml), not hand-written.
+The EL7047 declares several selectable PDO assignments, so the generated
 device models them as a joint `EL7047OpMode` enum — one variant per
 assignment — and the device is `struct EL7047 { mode: EL7047OpMode }`
-(issue #70). The example pins the **`PositioningInterface`** variant:
+(issue #70). The example pins the **`PositioningInterface`** variant
+(declared in `network.yaml` via `op_mode: "Positioning interface"` — see
+*Two-layer codegen* above):
 
 - **Domain types** (`src/el7047_domain.rs`) — `El7047Control` /
   `El7047Status`, the example's hardware-agnostic control surface that
@@ -55,10 +80,11 @@ assignment — and the device is `struct EL7047 { mode: EL7047OpMode }`
   (`enc_control` / `stm_control` / `pos_control`, etc.). The actual
   encode/decode is the generated `EL7047::encode_outputs` /
   `decode_inputs`.
-- **PDO map** — the EL7047's `0x1C12`/`0x1C13` Rx/Tx assignment lists
-  are taken at startup from the generated `pdo_assignment()` for the
-  active mode, so a single source of truth (the ESI) drives both the
-  codec and the SM-assignment programming.
+- **PDO map** — the bus-wide `PDO_MAP` (including the EL7047's
+  `0x1C12`/`0x1C13` assignment lists) is emitted by the netcfg codegen
+  from `network.yaml`; the ESI codegen drives the codec. Both layers stay
+  in sync because `network.yaml`'s `op_mode` selects the same ESI
+  AlternativeSmMapping variant that the codec was generated from.
 
 EL1008 and EL2004 are generated the same way (each a single-variant
 `Default` mode). There is no hand-written PDO codec in this example.
@@ -81,14 +107,14 @@ EL1008 and EL2004 are generated the same way (each a single-variant
 
 > **Topology assumption.** The example pins each terminal to its
 > EtherCAT configured station address. `ethercrab` auto-assigns these
-> starting at `0x1000` in bus-scan order, so with the canonical layout:
-> EK1100 = `0x1000`, **EL1008 = `0x1001`**, **EL2004 = `0x1002`**,
-> **EL7047 = `0x1003`** (i.e. physical left-to-right order right of the
-> coupler). The driver matches on the configured station address, not a
-> topology index. If your physical order differs (or you have extra
-> terminals in between), edit the `SUBDEV_EL1008` / `SUBDEV_EL2004` /
-> `SUBDEV_EL7047` constants in `src/main.rs` — **if the EL7047 address
-> is wrong, every routing and PDO-map entry for it is off.** Run with
+> starting at `0x1000` in bus-scan order. The `devices:` order in
+> `network.yaml` defines bus order: EK1100 = `0x1000` (coupler, no
+> PDI), **EL1008 = `0x1001`**, **EL2004 = `0x1002`**, **EL7047 =
+> `0x1003`** — i.e. physical left-to-right order right of the coupler.
+> The routing consts and PDO map are generated from that order. **If
+> your physical layout differs, reorder the `devices:` list in
+> `network.yaml`** (do not edit code) and rebuild — the generated
+> addresses and image offsets update automatically. Run with
 > `RUST_LOG=ethercrab=debug` to see the scanned addresses.
 
 ## Button map (EL1008)
@@ -145,13 +171,17 @@ Behaviour notes:
 
 Set via two startup SDOs written in PRE-OP, before the PDO mapping is
 committed (the connector's `with_startup_sdos` path, `REQ_0853`). Units
-are **mA**:
+are **mA**. They live in `network.yaml` under `el7047.startup_sdos`:
 
-- `0x8010:01` — **maximum** current = `1800` mA.
-- `0x8010:02` — **standby** (reduced) current = `900` mA.
+```yaml
+startup_sdos:
+  - { index: 0x8010, subindex: 0x01, type: u16, value: 1800 }  # max current, mA
+  - { index: 0x8010, subindex: 0x02, type: u16, value: 900 }   # standby current, mA
+```
 
-To match a different motor, edit `EL7047_STARTUP` in `src/main.rs`.
-**Do not** run with limits above your motor's rating.
+To match a different motor, edit those `value:` fields in `network.yaml`
+and rebuild — no code change required. **Do not** run with limits above
+your motor's rating.
 
 ## Safe state on fault / cable pull
 
@@ -159,11 +189,11 @@ Two layers stop the motor if the master goes away:
 
 - **Hardware (SM watchdog).** The EL7047 and EL2004 are output-bearing,
   so the PDO map programs a **50 ms** SyncManager watchdog on each
-  (`SmWatchdog::from_timeout_us(50_000)` — AOU_0016's FTTI/2 bound,
-  programmed and read-back-verified by the driver at bring-up). On a
-  master crash or cable pull the terminal stops receiving process data
-  and drops to safe state — the motor stops within ~50 ms with no
-  software involvement.
+  (set via `sm_watchdog_timeout_ms: 50` in `network.yaml` — AOU_0016's
+  FTTI/2 bound, programmed and read-back-verified by the driver at
+  bring-up). On a master crash or cable pull the terminal stops
+  receiving process data and drops to safe state — the motor stops
+  within ~50 ms with no software involvement.
 - **Software reaction.** When the connector reports `Degraded` or
   `Down`, the control loop clears Enable and refuses new moves. This is
   belt-and-braces on top of the hardware watchdog.
@@ -249,22 +279,29 @@ the toggle is active. From a clean checkout the trimmed ESI fixtures in
   EL2004 ch2 blinks). Press ch4 to reset once the cause is cleared.
 - **Wrong terminal addresses.** If the EL7047 image looks wrong or
   bring-up fails on the mapping, your physical order differs from the
-  `0x1001/0x1002/0x1003` assumption — adjust the `SUBDEV_*` constants.
+  `0x1001/0x1002/0x1003` assumption — reorder the `devices:` list in
+  `network.yaml` to match the physical bus, then rebuild.
 
 ## What this shows
 
 - The Beckhoff positioning interface end-to-end over the workspace
   connector stack: the ESI-codegen-generated EL7047 driving its
-  selectable `PositioningInterface` PDO assignment via a thin domain
-  adapter (`src/el7047_adapter.rs`), an edge-triggered button→motion
-  state machine (`src/control.rs`), and the connector's reader/writer
-  channels carrying fixed-size images.
-- `SubDeviceMap::with_startup_sdos(...)` — operator-declared startup
-  SDOs (motor current) applied in PRE-OP before PDO assignment
-  (`REQ_0853`).
-- `SubDeviceMap::with_sm_watchdog(...)` — the 50 ms FTTI/2 safe-state
-  watchdog on the output-bearing terminals (AOU_0016 / `REQ_0846`).
+  selectable `PositioningInterface` PDO assignment (chosen in
+  `network.yaml` via `op_mode: "Positioning interface"`) via a thin
+  domain adapter (`src/el7047_adapter.rs`), an edge-triggered
+  button→motion state machine (`src/control.rs`), and the connector's
+  reader/writer channels carrying fixed-size images.
+- Declarative bus configuration in `network.yaml` compiled to
+  `generated_net::PDO_MAP` and routing consts by
+  `taktora-ethercat-netcfg-build` — topology, PDO assignment, SM
+  watchdogs, working-counter, and startup SDOs declared once and never
+  hand-coded.
+- Operator-declared startup SDOs (motor current limits) in
+  `network.yaml` applied in PRE-OP before PDO assignment (`REQ_0853`).
+- The 50 ms FTTI/2 safe-state SM watchdog on the output-bearing
+  terminals declared via `sm_watchdog_timeout_ms:` in `network.yaml`
+  (AOU_0016 / `REQ_0846`).
 - All three terminals codegen-typed on the same `RawImageCodec` channel
   surface (`EL1008::decode_inputs`, `EL2004::encode_outputs`, and the
-  EL7047's per-mode `decode_inputs`/`encode_outputs`), with the EL7047
-  PDO map derived at runtime from the generated `pdo_assignment()`.
+  EL7047's per-mode `decode_inputs`/`encode_outputs`), image offsets
+  carried by the `generated_net` routing consts.
