@@ -64,6 +64,26 @@ pub fn pdo_sdo_writes(map: &SubDeviceMap) -> Vec<SdoWrite> {
     out
 }
 
+/// Emit the operator-declared startup-configuration SDO writes for one
+/// [`SubDeviceMap`]. `REQ_0853`.
+///
+/// Each entry becomes one [`SdoWrite`] in declaration order, stamped
+/// with the map's address. Applied during PRE-OP **before** the
+/// PDO-assignment writes from [`pdo_sdo_writes`] so config (e.g. motor
+/// current) is in place before the mapping is committed.
+#[must_use]
+pub fn startup_sdo_writes(map: &SubDeviceMap) -> Vec<SdoWrite> {
+    map.startup_sdos
+        .iter()
+        .map(|s| SdoWrite {
+            subdevice_address: map.address,
+            index: s.index,
+            subindex: s.subindex,
+            value: s.value,
+        })
+        .collect()
+}
+
 fn push_direction(out: &mut Vec<SdoWrite>, address: u16, sm_index: u16, entries: &[PdoEntry]) {
     if entries.is_empty() {
         return;
@@ -98,4 +118,51 @@ fn push_direction(out: &mut Vec<SdoWrite>, address: u16, sm_index: u16, entries:
         subindex: 0,
         value: SdoValue::U8(count),
     });
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+    use crate::options::{StartupSdo, SubDeviceMap};
+
+    #[test]
+    fn startup_writes_carry_map_address_and_order() {
+        static STARTUP: &[StartupSdo] = &[
+            StartupSdo {
+                index: 0x8010,
+                subindex: 0x01,
+                value: SdoValue::U16(1800),
+            },
+            StartupSdo {
+                index: 0x8010,
+                subindex: 0x02,
+                value: SdoValue::U16(900),
+            },
+        ];
+        let map = SubDeviceMap::new(0x1003, &[], &[], 3).with_startup_sdos(STARTUP);
+        let writes = startup_sdo_writes(&map);
+        assert_eq!(
+            writes,
+            vec![
+                SdoWrite {
+                    subdevice_address: 0x1003,
+                    index: 0x8010,
+                    subindex: 0x01,
+                    value: SdoValue::U16(1800)
+                },
+                SdoWrite {
+                    subdevice_address: 0x1003,
+                    index: 0x8010,
+                    subindex: 0x02,
+                    value: SdoValue::U16(900)
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_startup_sdos_produce_no_writes() {
+        let map = SubDeviceMap::new(0x1003, &[], &[], 3);
+        assert!(startup_sdo_writes(&map).is_empty());
+    }
 }

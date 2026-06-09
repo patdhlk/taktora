@@ -39,7 +39,7 @@ use crate::op_transition::{
     OP_WAIT_MAX_SPINS, OP_WAIT_SPIN_INTERVAL, OpWaitAction, op_wait_action,
 };
 use crate::options::EthercatConnectorOptions;
-use crate::sdo::{SdoValue, pdo_sdo_writes};
+use crate::sdo::{SdoValue, pdo_sdo_writes, startup_sdo_writes};
 
 /// Production [`BusDriver`] wrapping `ethercrab::MainDevice`.
 ///
@@ -356,7 +356,8 @@ async fn apply_pdo_mapping_for_subdevice<const MAX_SUBDEVICES: usize, const MAX_
     group: &SubDeviceGroup<MAX_SUBDEVICES, MAX_PDI, DefaultLock, PreOp>,
     map: crate::options::SubDeviceMap,
 ) -> Result<(), ConnectorError> {
-    let writes = pdo_sdo_writes(&map);
+    let mut writes = startup_sdo_writes(&map);
+    writes.extend(pdo_sdo_writes(&map));
     if writes.is_empty() {
         return Ok(());
     }

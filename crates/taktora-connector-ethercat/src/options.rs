@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use taktora_connector_core::{ExponentialBackoff, ReconnectPolicy};
 
+use crate::sdo::SdoValue;
 use crate::watchdog::SmWatchdog;
 
 /// Factory closure producing a fresh [`ReconnectPolicy`] instance per
@@ -52,6 +53,16 @@ pub struct SubDeviceMap {
     /// mismatch — the enforcement path for safety assumption
     /// `AOU_0016`.
     pub sm_watchdog: Option<SmWatchdog>,
+    /// Operator-declared configuration SDOs written in PRE-OP *before*
+    /// the PDO assignment. `REQ_0853`.
+    ///
+    /// These carry device-specific configuration that must take effect
+    /// ahead of the `0x1C12`/`0x1C13` PDO-assignment writes — for
+    /// example a stepper's motor current limit at `0x8010:01`. The
+    /// gateway emits one SDO write per entry, in declaration order,
+    /// then the PDO-assignment sequence. Defaults to the empty slice
+    /// (no configuration SDOs).
+    pub startup_sdos: &'static [StartupSdo],
 }
 
 impl SubDeviceMap {
@@ -75,6 +86,7 @@ impl SubDeviceMap {
             tx_pdos,
             expected_wkc,
             sm_watchdog: None,
+            startup_sdos: &[],
         }
     }
 
@@ -85,6 +97,30 @@ impl SubDeviceMap {
         self.sm_watchdog = Some(wd);
         self
     }
+
+    /// Attach operator-declared configuration SDOs to write in PRE-OP
+    /// before the PDO assignment. `REQ_0853`.
+    #[must_use]
+    pub const fn with_startup_sdos(mut self, sdos: &'static [StartupSdo]) -> Self {
+        self.startup_sdos = sdos;
+        self
+    }
+}
+
+/// One operator-declared configuration SDO written in PRE-OP before the
+/// PDO assignment. `REQ_0853`.
+///
+/// Application code declares an array of these as a `static` and chains
+/// [`SubDeviceMap::with_startup_sdos`] to attach them to a SubDevice's
+/// map.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StartupSdo {
+    /// SDO object dictionary index.
+    pub index: u16,
+    /// SDO object dictionary subindex.
+    pub subindex: u8,
+    /// Value to write.
+    pub value: SdoValue,
 }
 
 /// One mapped object within a PDO. `index` is the SDO index of the
@@ -368,5 +404,24 @@ impl EthercatConnectorOptionsBuilder {
 impl Default for EthercatConnectorOptionsBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_sdos_default_empty_and_builder_sets_them() {
+        static S: &[StartupSdo] = &[StartupSdo {
+            index: 0x8010,
+            subindex: 1,
+            value: SdoValue::U16(1800),
+        }];
+        let base = SubDeviceMap::new(0x1003, &[], &[], 3);
+        assert!(base.startup_sdos.is_empty());
+        let cfg = base.with_startup_sdos(S);
+        assert_eq!(cfg.startup_sdos.len(), 1);
+        assert_eq!(cfg.startup_sdos[0].index, 0x8010);
     }
 }
