@@ -33,9 +33,9 @@ pub struct SdoWrite {
     pub index: u16,
     /// SDO object dictionary subindex.
     pub subindex: u8,
-    /// Value to write. PDO assignment uses only `u8` (count) and
-    /// `u16` (entry-index) values; broader types are not needed for
-    /// `REQ_0315`.
+    /// Value to write. PDO-assignment writes use only `U8` (count) and
+    /// `U16` (entry-index); startup-SDO writes (`REQ_0853`) may use any
+    /// [`SdoValue`] variant.
     pub value: SdoValue,
 }
 
@@ -203,6 +203,7 @@ mod startup_tests {
         assert_eq!(writes.len(), 4);
         assert_eq!(writes[0].value, SdoValue::U32(100_000));
         assert_eq!(writes[1].value, SdoValue::I32(-5));
+        assert_eq!(writes[2].value, SdoValue::I16(-1));
         assert_eq!(writes[3].value, SdoValue::I8(-128));
     }
 }
