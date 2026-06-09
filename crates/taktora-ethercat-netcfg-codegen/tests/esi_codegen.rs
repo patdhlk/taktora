@@ -2,12 +2,14 @@
 //! full **ESI → netcfg → codegen** chain.
 //!
 //! A real single-device ESI XML fixture (vendor `#x00000021`, product
-//! `#x07500354`, rev `#x00000001`) with one `TxPDO` entry (`#x6000`/8) and one
-//! `RxPDO` entry (`#x7000`/8) is written to a temp file, referenced from a
-//! `network.yaml` via `esi:`, parsed by `taktora_ethercat_netcfg::parse`, and fed to
+//! `#x07500354`, rev `#x00000001`) with one `TxPDO` (`#x1a00`, one inner
+//! entry of 8 bits) and one `RxPDO` (`#x1600`, one inner entry of 8 bits) is
+//! written to a temp file, referenced from a `network.yaml` via `esi:`, parsed
+//! by `taktora_ethercat_netcfg::parse`, and fed to
 //! `taktora_ethercat_netcfg_codegen::generate`. The generated `PDO_MAP` and routing
-//! consts must carry the ESI-resolved PDOs verbatim: both directions present
-//! → `expected_wkc == 3`, Tx entry `0x6000`, Rx entry `0x7000`.
+//! consts must carry the ESI-resolved PDOs at PDO-mapping-object granularity:
+//! both directions present → `expected_wkc == 3`, Tx PDO index `0x1a00`/8 bits,
+//! Rx PDO index `0x1600`/8 bits.
 
 use std::io::Write as _;
 
@@ -22,7 +24,7 @@ const ESI_XML: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
         <Type ProductCode="#x07500354" RevisionNo="#x00000001">Coupler</Type>
         <Name>Coupler</Name>
         <Sm StartAddress="#x1000" ControlByte="#x40" Enable="1">Outputs</Sm>
-        <TxPdo>
+        <TxPdo Sm="3">
           <Index>#x1a00</Index>
           <Entry><Index>#x6000</Index><SubIndex>1</SubIndex><BitLen>8</BitLen></Entry>
         </TxPdo>
@@ -208,18 +210,20 @@ channels:
         "both ESI directions present → wkc = Rx(1) + Tx(2)"
     );
 
-    // tx_pdos carries the ESI TxPDO entry (#x6000 = 24576, BitLen 8).
+    // tx_pdos carries one entry per TxPDO at PDO-mapping-object granularity:
+    // the TxPDO mapping-object index #x1a00 with summed inner-entry bits = 8.
     assert_eq!(
         pdo_entries(field(map, "tx_pdos")),
-        vec![(0x6000, 8)],
-        "tx_pdos carry the ESI TxPDO entry (index 0x6000/24576, bit_length 8)"
+        vec![(0x1a00, 8)],
+        "tx_pdos carry the TxPDO mapping-object index 0x1a00 with bit_length 8"
     );
 
-    // rx_pdos carries the ESI RxPDO entry (#x7000 = 28672, BitLen 8).
+    // rx_pdos carries one entry per RxPDO at PDO-mapping-object granularity:
+    // the RxPDO mapping-object index #x1600 with summed inner-entry bits = 8.
     assert_eq!(
         pdo_entries(field(map, "rx_pdos")),
-        vec![(0x7000, 8)],
-        "rx_pdos carry the ESI RxPDO entry (index 0x7000/28672, bit_length 8)"
+        vec![(0x1600, 8)],
+        "rx_pdos carry the RxPDO mapping-object index 0x1600 with bit_length 8"
     );
 
     // Routing consts: both at address 0x1000, correct directions.

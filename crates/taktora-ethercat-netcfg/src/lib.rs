@@ -297,7 +297,7 @@ pub enum NetcfgError {
     },
 
     /// `op_mode` named a mapping that does not exist on the device.
-    #[error("device `{label}` op_mode `{requested}` not found; available: {}", available.join(", "))]
+    #[error("device `{label}` op_mode `{requested}` not found; available: {}", if available.is_empty() { String::from("(none)") } else { available.join(", ") })]
     OpModeNotFound {
         /// Offending device label.
         label: String,
@@ -306,8 +306,12 @@ pub enum NetcfgError {
         /// Mapping names the device declares.
         available: Vec<String>,
     },
-    /// `op_mode` was set on a device that declares no `AlternativeSmMapping`.
-    #[error("device `{label}` sets op_mode but its ESI declares no selectable PDO mappings")]
+    /// `op_mode` was set on a device that has no selectable PDO mappings — either
+    /// because no `esi:` reference was given at all, or because the referenced
+    /// ESI declares no `AlternativeSmMapping`.
+    #[error(
+        "device `{label}` sets op_mode but has no selectable PDO mappings (no esi: reference, or the referenced ESI declares no AlternativeSmMapping)"
+    )]
     OpModeOnFlatDevice {
         /// Offending device label.
         label: String,
@@ -695,6 +699,8 @@ mod dto {
                         .next()
                         .expect("checked count == 1");
 
+                    // op_mode selects the PDO mapping and is not retained in
+                    // the IR; the resolved PDOs in `assignment` are the only output.
                     let assignment =
                         device.resolve_assignment(op_mode.as_deref()).map_err(|e| {
                             use taktora_ethercat_esi::ResolveError as R;
@@ -731,7 +737,9 @@ mod dto {
                     // If the device ALSO carries inline pdos:, the two
                     // descriptions must agree. The ESI is the source of
                     // truth, so an exact match is redundant-but-legal and a
-                    // mismatch is a contradiction (REQ_0824).
+                    // mismatch is a contradiction (REQ_0824). The ESI side is
+                    // the op_mode-resolved mapping (if op_mode is set), so
+                    // inline pdos: must match the selected mapping's PDOs.
                     let has_inline = !pdos.rx.is_empty() || !pdos.tx.is_empty();
                     if has_inline && (pdos.rx != rx || pdos.tx != tx) {
                         return Err(NetcfgError::EsiContradiction { label });
