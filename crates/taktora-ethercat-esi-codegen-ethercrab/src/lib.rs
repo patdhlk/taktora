@@ -176,22 +176,23 @@ fn resolve_assignments(
     let mut planned = Vec::with_capacity(order.len());
     for (ordinal, &mi) in order.iter().enumerate() {
         let m = &mappings[mi];
-        let mut rx_indices = Vec::new();
-        let mut tx_indices = Vec::new();
-        for sm in &m.sm_assignments {
-            for p in &sm.pdos {
-                if rx_pdos.iter().any(|q| q.index == p.index) {
-                    rx_indices.push(p.index);
-                } else if tx_pdos.iter().any(|q| q.index == p.index) {
-                    tx_indices.push(p.index);
-                } else {
-                    return Err(CodegenError::UnknownAssignmentPdo {
-                        device: device_struct.to_string(),
-                        index: p.index,
-                    });
+        let (rx_indices, tx_indices) = taktora_ethercat_esi::classify_assignment(
+            m, rx_pdos, tx_pdos,
+        )
+        .map_err(|e| match e {
+            taktora_ethercat_esi::ResolveError::UnknownAssignmentPdo { index } => {
+                CodegenError::UnknownAssignmentPdo {
+                    device: device_struct.to_string(),
+                    index,
                 }
             }
-        }
+            // Phase 1 classifies one concrete mapping; the name/default
+            // selection errors cannot arise here.
+            _ => CodegenError::UnknownAssignmentPdo {
+                device: device_struct.to_string(),
+                index: 0,
+            },
+        })?;
         planned.push(Planned {
             variant_ident: op_mode_variant_ident(m.name.as_deref(), ordinal)?,
             struct_ident: op_mode_variant_struct_ident(device_struct, m.name.as_deref(), ordinal)?,
