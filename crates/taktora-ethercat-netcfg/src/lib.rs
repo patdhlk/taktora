@@ -397,7 +397,7 @@ pub enum NetcfgError {
     /// that drives outputs to their safe state on a silently-stopped
     /// master, so a disabled trigger is a config error.
     #[error(
-        "device `{label}` is an output device but its ESI declares the SM watchdog trigger disabled on an output sync manager"
+        "device `{label}` is an output device but its ESI declares the SM watchdog trigger disabled on an output sync manager; set `sm_watchdog_enabled: true` to attest the watchdog is programmed at runtime"
     )]
     SmWatchdogDisabled {
         /// Label of the offending output device.
@@ -692,10 +692,14 @@ mod dto {
         // 4: the watchdog must be enabled.
         match &device.source {
             DeviceSource::Esi { .. } => {
-                // `Some(false)` (an output SM disables the trigger) or
-                // `None` (the ESI declares no output SM for an rx-carrying
-                // device) both fail the enable check.
-                if esi_output_watchdog_enabled != Some(true) {
+                // Enabled if the ESI's output SM declares the trigger, OR the
+                // operator attests it via `sm_watchdog_enabled: true`. The
+                // driver programs 0x0400/0x0420 regardless; the attestation
+                // lets an integrator accept responsibility for an ESI whose
+                // output SM does not declare the trigger (common on real
+                // Beckhoff devices). AOU_0016 / REQ_0845.
+                let attested = device.sm_watchdog_enabled == Some(true);
+                if esi_output_watchdog_enabled != Some(true) && !attested {
                     return Err(NetcfgError::SmWatchdogDisabled {
                         label: device.label.clone(),
                     });

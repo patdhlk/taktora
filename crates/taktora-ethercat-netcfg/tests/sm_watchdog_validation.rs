@@ -146,6 +146,65 @@ fn esi_disabled_output_sm_fails() {
     );
 }
 
+/// Write an ESI string to a temp file and build a one-device network.yaml
+/// referencing it, with an optional per-device timeout override, FTTI, and
+/// operator attestation (`sm_watchdog_enabled`).
+fn esi_yaml_attested(
+    esi_xml: &str,
+    sm_watchdog_enabled: Option<bool>,
+) -> (tempfile::NamedTempFile, String) {
+    let mut esi = tempfile::Builder::new()
+        .suffix(".xml")
+        .tempfile()
+        .expect("create temp ESI file");
+    esi.write_all(esi_xml.as_bytes())
+        .expect("write ESI fixture");
+    let esi_path = esi.path().to_str().expect("ESI path is UTF-8").to_owned();
+
+    let attest_line =
+        sm_watchdog_enabled.map_or(String::new(), |b| format!("\n    sm_watchdog_enabled: {b}"));
+    let yaml = format!(
+        r#"
+schema_version: 1
+bus: {{ cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_bytes: 256 }}
+devices:
+  - label: outputs{attest_line}
+    esi: "{esi_path}"
+channels: []
+"#
+    );
+    (esi, yaml)
+}
+
+/// PASS — ESI output SM has the watchdog trigger DISABLED (`#x04`) but the
+/// operator attests `sm_watchdog_enabled: true`, taking responsibility. The
+/// connector programs `0x0400`/`0x0420` regardless; attestation is the
+/// deliberate escape hatch for real devices (e.g. Beckhoff EL7047) whose ESI
+/// does not set the trigger bit even though the watchdog operates at runtime.
+#[test]
+fn esi_disabled_sm_with_operator_attestation_passes() {
+    let (_esi, yaml) = esi_yaml_attested(&esi_with_output_sm("#x04"), Some(true));
+    let cfg = parse(&yaml).expect("ESI-disabled SM + operator attestation must pass");
+    let dev = cfg.devices.iter().find(|d| d.label == "outputs").unwrap();
+    assert!(
+        dev.sm_watchdog.is_some(),
+        "resolved sm_watchdog must be Some(..) when attestation opens the gate"
+    );
+}
+
+/// FAIL — same ESI (watchdog trigger DISABLED, `#x04`) but NO operator
+/// attestation. Must still error `SmWatchdogDisabled`; default-deny is
+/// unchanged when neither ESI evidence nor explicit attestation is present.
+#[test]
+fn esi_disabled_sm_without_attestation_still_fails() {
+    let (_esi, yaml) = esi_yaml_attested(&esi_with_output_sm("#x04"), None);
+    let err = parse(&yaml).expect_err("ESI-disabled SM without attestation must still fail");
+    assert!(
+        matches!(err, NetcfgError::SmWatchdogDisabled { ref label } if label == "outputs"),
+        "expected SmWatchdogDisabled for `outputs`, got {err:?}"
+    );
+}
+
 // ---- Inline-sourced enable attestation ----------------------------------
 
 /// Build an inline-source one-device network.yaml with rx PDOs and an
