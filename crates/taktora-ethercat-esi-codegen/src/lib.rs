@@ -18,7 +18,7 @@ use taktora_ethercat_esi::{AlternativeSmMapping, EsiFile, Pdo};
 
 pub use taktora_fieldbus_od_core::Identity;
 
-mod naming;
+pub mod naming;
 
 /// A resolved, borrowing codegen IR for one device: parser data with all naming
 /// and revision policy already applied.
@@ -262,6 +262,43 @@ pub fn pdo_variant_struct_ident(
 ) -> Result<Ident, CodegenError> {
     let segment = naming::pdo_variant_segment(name, index);
     make_ident(&format!("{device_struct}Pdo{segment}"))
+}
+
+/// The `<Dev>OpMode` enum identifier for a device's PDO-assignment set.
+///
+/// # Errors
+///
+/// Returns [`CodegenError::InvalidIdent`] if the concatenation does not lex to
+/// exactly one identifier token (the sanitisation policy prevents this).
+pub fn op_mode_enum_ident(device_struct: &Ident) -> Result<Ident, CodegenError> {
+    make_ident(&format!("{device_struct}OpMode"))
+}
+
+/// The enum-variant identifier for one assignment (`<Dev>OpMode::<Variant>`).
+///
+/// # Errors
+///
+/// Returns [`CodegenError::InvalidIdent`] if the rendered segment does not lex to
+/// exactly one identifier token (the sanitisation policy prevents this).
+pub fn op_mode_variant_ident(name: Option<&str>, ordinal: usize) -> Result<Ident, CodegenError> {
+    make_ident(&naming::op_mode_variant_segment(name, ordinal))
+}
+
+/// The per-variant data-struct identifier (`<Dev><Variant>`).
+///
+/// # Errors
+///
+/// Returns [`CodegenError::InvalidIdent`] if the concatenation does not lex to
+/// exactly one identifier token (the sanitisation policy prevents this).
+pub fn op_mode_variant_struct_ident(
+    device_struct: &Ident,
+    name: Option<&str>,
+    ordinal: usize,
+) -> Result<Ident, CodegenError> {
+    make_ident(&format!(
+        "{device_struct}{}",
+        naming::op_mode_variant_segment(name, ordinal)
+    ))
 }
 
 /// Whether every resolved device has a distinct `const_ident`. Used only by the

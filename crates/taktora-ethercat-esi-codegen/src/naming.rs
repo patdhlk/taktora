@@ -160,9 +160,10 @@ fn pascal_segment(raw: &str) -> String {
     out
 }
 
-/// `PascalCase` a raw label string for use as an identifier segment (e.g. a
-/// multi-group disambiguator like `Sm3`). Shares the segmentation used for PDO
-/// struct/variant segments so labels render consistently.
+/// `PascalCase` a raw label string for use as an identifier segment.
+///
+/// Example: a multi-group disambiguator like `Sm3`. Shares the segmentation
+/// used for PDO struct/variant segments so labels render consistently.
 pub fn pdo_struct_segment_raw(raw: &str) -> String {
     sanitise_ident(&pascal_segment(raw))
 }
@@ -176,6 +177,29 @@ pub fn pdo_struct_segment_raw(raw: &str) -> String {
 /// so a variant and its embedded struct segment agree.
 pub fn pdo_variant_segment(name: Option<&str>, index: u16) -> String {
     pdo_struct_segment(name, index)
+}
+
+/// `PascalCase` variant segment for a `<Dev>OpMode` enum variant.
+///
+/// Derives from an `AlternativeSmMapping` `<Name>` (`REQ_0523`). Unnamed
+/// mappings AND names that sanitise to nothing (all-separator characters such
+/// as `"---"` or `"   "`) fall back to `Mode<ordinal+1>` (1-based, stable in
+/// document order). The `"_"` sentinel that [`pascal_segment`] returns for
+/// all-separator inputs is treated the same as empty, so no variant is ever
+/// literally named `_`. Collisions among the resulting segments are
+/// de-duplicated by the caller (it has the full set).
+pub fn op_mode_variant_segment(name: Option<&str>, ordinal: usize) -> String {
+    name.map_or_else(
+        || format!("Mode{}", ordinal + 1),
+        |n| {
+            let seg = pascal_segment(n);
+            if seg.is_empty() || seg == "_" {
+                format!("Mode{}", ordinal + 1)
+            } else {
+                seg
+            }
+        },
+    )
 }
 
 /// The full-width revision suffix for a revision number (`REQ_0512`): `REV{rev:08X}`.
@@ -192,9 +216,10 @@ pub fn const_ident_string(device: &esi::EsiDevice) -> String {
     )
 }
 
-/// The struct identifier for a device given whether its base ident collides
-/// with another device in the set. On collision the `_REV<rev:08X>` suffix is
-/// appended; otherwise the bare sanitised base ident is used.
+/// The struct identifier for a device given whether its base ident collides.
+///
+/// On collision the `_REV<rev:08X>` suffix is appended; otherwise the bare
+/// sanitised base ident is used.
 pub fn struct_ident_string(device: &esi::EsiDevice, collides: bool) -> String {
     let base = base_ident(device);
     if collides {
@@ -281,6 +306,7 @@ mod tests {
             dictionary: Vec::new(),
             eeprom: None,
             slots: None,
+            alt_sm_mappings: Vec::new(),
             vendor_extensions: Vec::new(),
         }
     }

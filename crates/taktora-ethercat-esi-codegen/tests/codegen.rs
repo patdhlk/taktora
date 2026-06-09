@@ -221,6 +221,48 @@ fn generated_tokens_parse_as_rust() {
     let _file: syn::File = syn::parse2(ts).expect("emitted tokens parse as a Rust file");
 }
 
+#[test]
+fn op_mode_variant_segment_pascalizes_name() {
+    use taktora_ethercat_esi_codegen::naming;
+    assert_eq!(
+        naming::op_mode_variant_segment(Some("Positioning interface"), 0),
+        "PositioningInterface"
+    );
+    assert_eq!(
+        naming::op_mode_variant_segment(Some("Velocity control compact"), 0),
+        "VelocityControlCompact"
+    );
+    // Unnamed mapping falls back to a stable ordinal.
+    assert_eq!(naming::op_mode_variant_segment(None, 3), "Mode4");
+    // Names that sanitise to nothing fall back to the ordinal (no "_" variant).
+    assert_eq!(naming::op_mode_variant_segment(Some("---"), 0), "Mode1");
+    assert_eq!(naming::op_mode_variant_segment(Some("   "), 2), "Mode3");
+}
+
+#[test]
+fn op_mode_idents_build_expected_names() {
+    use taktora_ethercat_esi_codegen::{
+        op_mode_enum_ident, op_mode_variant_ident, op_mode_variant_struct_ident,
+    };
+    let dev = proc_macro2::Ident::new("EL7047", proc_macro2::Span::call_site());
+    assert_eq!(
+        op_mode_enum_ident(&dev).unwrap().to_string(),
+        "EL7047OpMode"
+    );
+    assert_eq!(
+        op_mode_variant_ident(Some("Positioning interface"), 0)
+            .unwrap()
+            .to_string(),
+        "PositioningInterface"
+    );
+    assert_eq!(
+        op_mode_variant_struct_ident(&dev, Some("Positioning interface"), 0)
+            .unwrap()
+            .to_string(),
+        "EL7047PositioningInterface"
+    );
+}
+
 /// A device whose `<Type>` sanitises to a Rust keyword (`match`) must resolve to
 /// a keyword-escaped struct ident (`match_`) so that `pub struct #ident;` is
 /// valid Rust rather than a parse error.
