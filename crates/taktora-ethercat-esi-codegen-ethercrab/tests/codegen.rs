@@ -158,11 +158,15 @@ fn emits_lengths_and_noop_encode() {
     // input_len/output_len are now per-mode matches; the single Default arm
     // reports 3 input bytes (24 bits) and 0 output bytes.
     assert!(
-        sq.contains("fninput_len(&self)->usize{match&self.mode{EL3001_likeOpMode::Default(_)=>3usize,}}"),
+        sq.contains(
+            "fninput_len(&self)->usize{match&self.mode{EL3001_likeOpMode::Default(_)=>3usize,}}"
+        ),
         "input_len Default arm should be 3 bytes:\n{src}"
     );
     assert!(
-        sq.contains("fnoutput_len(&self)->usize{match&self.mode{EL3001_likeOpMode::Default(_)=>0usize,}}"),
+        sq.contains(
+            "fnoutput_len(&self)->usize{match&self.mode{EL3001_likeOpMode::Default(_)=>0usize,}}"
+        ),
         "output_len Default arm should be 0:\n{src}"
     );
     // No RxPdo → encode_outputs writes nothing in the Default arm.

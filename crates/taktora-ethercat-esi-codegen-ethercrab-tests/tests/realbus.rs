@@ -14,8 +14,8 @@
 
 use bitvec::view::BitView;
 use taktora_ethercat_esi_codegen_ethercrab_tests::generated::{
-    EL1008, EL1008OpMode, EL1008_REV00100000, EL2004, EL2004OpMode, EL2004_REV00000000, EL3602,
-    EL3602OpMode, EL3602_REV00100000, REGISTRY, device_for,
+    EL1008, EL1008_REV00100000, EL1008OpMode, EL2004, EL2004_REV00000000, EL2004OpMode, EL3602,
+    EL3602_REV00100000, EL3602OpMode, REGISTRY, device_for,
 };
 use taktora_ethercat_esi_rt::{BitSlice, EsiDevice, EsiError, Identity, Lsb0};
 

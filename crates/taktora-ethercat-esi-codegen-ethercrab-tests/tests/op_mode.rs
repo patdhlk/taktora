@@ -32,7 +32,11 @@ fn el7047_has_nine_modes() {
         EL7047OpMode::PositioningInterfaceAutoStart(Default::default()),
         EL7047OpMode::PositioningInterfaceAutoStartWithInfoData(Default::default()),
     ];
-    assert_eq!(modes.len(), 9, "EL7047 should resolve to nine OpMode variants");
+    assert_eq!(
+        modes.len(),
+        9,
+        "EL7047 should resolve to nine OpMode variants"
+    );
 }
 
 /// The Positioning-interface mode advertises its exact PDI widths via the
