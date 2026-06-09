@@ -1,0 +1,55 @@
+# Declarative EtherCAT bus for the stepper example. `build.rs` compiles this to
+# generated_net::{PDO_MAP, routing consts, EXPECTED_IDENTITIES} via
+# taktora-ethercat-netcfg-build. Device order = bus order: ethercrab assigns
+# configured station addresses 0x1000 + n in this order.
+#
+# Topology: EK1100 coupler (0x1000, no PDI) -> EL1008 (0x1001) -> EL2004
+# (0x1002) -> EL7047 (0x1003). If your physical order differs, reorder here.
+schema_version: 1
+
+bus:
+  cycle_time_ms: 2
+  distributed_clocks: false
+  max_subdevices: 16
+  max_pdi_bytes: 256
+  ftti_ms: 100
+
+devices:
+  # EK1100 bus coupler: no process data. Present only so the EL* terminals
+  # line up at 0x1001+ (address = 0x1000 + position).
+  - label: coupler
+
+  # EL1008: 8 digital inputs. Single fixed mapping -> default assignment;
+  # input-only, so no SM watchdog.
+  - label: el1008
+    esi: esi/beckhoff_el1008.xml
+
+  # EL2004: 4 digital outputs (status lamp). Output device -> SM watchdog
+  # (its ESI output SM declares the trigger). 50 ms is <= FTTI/2.
+  - label: el2004
+    esi: esi/beckhoff_el2004.xml
+    sm_watchdog_timeout_ms: 50
+
+  # EL7047 stepper. The default ESI mapping is "Velocity control compact"; we
+  # explicitly select the positioning interface (Rx 0x1601/0x1602/0x1606,
+  # Tx 0x1A01/0x1A03/0x1A07). The ESI output SM does not declare the watchdog
+  # trigger, so we attest it (sm_watchdog_enabled: true) — the connector
+  # programs the watchdog registers at bring-up. Motor-current limits are
+  # written in PRE-OP via startup SDOs.
+  - label: el7047
+    esi: esi/beckhoff_el7047.xml
+    op_mode: "Positioning interface"
+    sm_watchdog_timeout_ms: 50
+    sm_watchdog_enabled: true
+    startup_sdos:
+      - { index: 0x8010, subindex: 0x01, type: u16, value: 1800 }  # max current, mA
+      - { index: 0x8010, subindex: 0x02, type: u16, value: 900 }   # standby current, mA
+
+channels:
+  # element_type is per-element metadata; it is unused for these raw-image
+  # channels (the example routes whole [u8; N] images). bit_length is what
+  # the routing const carries.
+  - { name: "ethercat.el1008.inputs",  device: el1008, direction: tx, bit_offset: 0, bit_length: 8,   element_type: u8 }
+  - { name: "ethercat.el2004.outputs", device: el2004, direction: rx, bit_offset: 0, bit_length: 4,   element_type: u8 }
+  - { name: "ethercat.el7047.control", device: el7047, direction: rx, bit_offset: 0, bit_length: 176, element_type: u8 }
+  - { name: "ethercat.el7047.status",  device: el7047, direction: tx, bit_offset: 0, bit_length: 192, element_type: u8 }

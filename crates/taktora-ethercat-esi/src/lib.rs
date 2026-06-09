@@ -12,6 +12,7 @@ mod error;
 mod model;
 mod position;
 mod raw_xml;
+mod resolve;
 
 pub use error::{EsiError, Span};
 pub use model::{
@@ -20,6 +21,7 @@ pub use model::{
     Slots, SmAssignment, SmDirection, SyncManager, Transition, Vendor,
 };
 pub use raw_xml::RawXml;
+pub use resolve::{ResolveError, ResolvedAssignment, ResolvedPdoEntry, classify_assignment};
 pub use taktora_fieldbus_od_core::{Access, DataType, DictEntry, Identity};
 
 /// Parse an ESI XML document into an [`EsiFile`].

@@ -12,7 +12,8 @@ use std::collections::HashMap;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use taktora_ethercat_netcfg::{
-    ChannelBinding, DeviceInstance, NetworkConfig, PdoDirection, PdoEntry,
+    ChannelBinding, DeviceInstance, NetworkConfig, PdoDirection, PdoEntry, SdoValueSpec,
+    StartupSdoSpec,
 };
 
 /// Errors that can occur while [`generate`]-ing Rust source.
@@ -397,8 +398,22 @@ fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
         // Canonical EtherCAT LRW working-counter rule (REQ_0329): +1 per
         // SubDevice written to (RxPDOs / outputs), +2 per SubDevice read
         // from (TxPDOs / inputs). Derivation is the only source — no
-        // override path (ADR_0095 / REQ_0828).
+        // override path (ADR_0095 / REQ_0828). WKC is derived from the
+        // RESOLVED PDO presence regardless of whether the assignment is
+        // actually written below.
         let expected_wkc: u16 = u16::from(!rx.is_empty()) + 2 * u16::from(!tx.is_empty());
+
+        // PDO-assignment SDO writes (0x1C12/0x1C13) require a CoE mailbox.
+        // Simple terminals (no mailbox) must get an EMPTY assignment — they
+        // keep their fixed default mapping; writing 0x1C12 to them fails with
+        // `NoReadMailbox` on the bus. They still contribute `expected_wkc`
+        // above and their process data is routed via the channel consts.
+        let empty: &[taktora_ethercat_netcfg::PdoEntry] = &[];
+        let (rx, tx) = if device.supports_coe {
+            (rx, tx)
+        } else {
+            (empty, empty)
+        };
         let rx_entries = rx.iter().map(pdo_entry_tokens);
         let tx_entries = tx.iter().map(pdo_entry_tokens);
 
@@ -418,6 +433,15 @@ fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
             }
         });
 
+        let startup = if device.startup_sdos.is_empty() {
+            None
+        } else {
+            let sdos = device.startup_sdos.iter().map(startup_sdo_tokens);
+            Some(quote! {
+                .with_startup_sdos(&[ #(#sdos),* ])
+            })
+        };
+
         // `SubDeviceMap` is `#[non_exhaustive]`; out-of-crate generated
         // code must use the `new` constructor rather than a struct
         // literal. Argument order: address, rx_pdos, tx_pdos,
@@ -430,6 +454,7 @@ fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
                 #expected_wkc,
             )
             #watchdog
+            #startup
         }
     });
 
@@ -500,5 +525,31 @@ fn pdo_entry_tokens(entry: &PdoEntry) -> TokenStream {
             bit_offset: #bit_offset,
             bit_length: #bit_length,
         }
+    }
+}
+
+/// Emit one `taktora_connector_ethercat::StartupSdo` literal.
+fn startup_sdo_tokens(sdo: &StartupSdoSpec) -> TokenStream {
+    let index = sdo.index;
+    let subindex = sdo.subindex;
+    let value = sdo_value_tokens(sdo.value);
+    quote! {
+        taktora_connector_ethercat::StartupSdo {
+            index: #index,
+            subindex: #subindex,
+            value: #value,
+        }
+    }
+}
+
+/// Emit the `taktora_connector_ethercat::SdoValue::<V>(..)` literal.
+fn sdo_value_tokens(value: SdoValueSpec) -> TokenStream {
+    match value {
+        SdoValueSpec::U8(v) => quote!(taktora_connector_ethercat::SdoValue::U8(#v)),
+        SdoValueSpec::U16(v) => quote!(taktora_connector_ethercat::SdoValue::U16(#v)),
+        SdoValueSpec::U32(v) => quote!(taktora_connector_ethercat::SdoValue::U32(#v)),
+        SdoValueSpec::I8(v) => quote!(taktora_connector_ethercat::SdoValue::I8(#v)),
+        SdoValueSpec::I16(v) => quote!(taktora_connector_ethercat::SdoValue::I16(#v)),
+        SdoValueSpec::I32(v) => quote!(taktora_connector_ethercat::SdoValue::I32(#v)),
     }
 }

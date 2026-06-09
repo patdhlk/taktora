@@ -11,10 +11,11 @@
 //! types by `el7047_adapter`; EL1008/EL2004 ride their generated `Default`
 //! modes.
 //!
-//! Topology assumption: `ethercrab` assigns configured station addresses
-//! starting at `0x1000` — EK1100 = `0x1000` (bus coupler, no PDI), then
-//! EL1008 = `0x1001`, EL2004 = `0x1002`, EL7047 = `0x1003`. Adjust the
-//! `SUBDEV_*` constants below if your topology differs.
+//! Topology and PDO assignment are declared in `network.yaml` and compiled to
+//! `generated_net` by the build script. Device order in that file is bus order
+//! (`ethercrab` assigns 0x1000 + n): EK1100 = 0x1000, EL1008 = 0x1001,
+//! EL2004 = 0x1002, EL7047 = 0x1003. Reorder the `devices:` list if your bus
+//! differs.
 
 use core::time::Duration;
 use std::sync::{
@@ -27,8 +28,7 @@ use bitvec::view::BitView;
 use clap::Parser;
 use taktora_connector_core::ChannelDescriptor;
 use taktora_connector_ethercat::{
-    EthercatConnector, EthercatConnectorOptions, EthercatRouting, EthercrabBusDriver, PdoDirection,
-    PdoEntry, SdoValue, SmWatchdog, StartupSdo, SubDeviceMap, connector::EthercatState,
+    EthercatConnector, EthercatConnectorOptions, EthercrabBusDriver, connector::EthercatState,
     declare_pdu_storage,
 };
 use taktora_connector_host::Connector;
@@ -37,47 +37,19 @@ use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item
 
 use ethercat_stepper::codec::RawImageCodec;
 use ethercat_stepper::control::{Controller, MoveParams};
-use ethercat_stepper::{el7047_adapter, el7047_domain, generated};
+use ethercat_stepper::{el7047_adapter, el7047_domain, generated, generated_net};
 
 /// Channel capacity (iceoryx2 service buffer slots).
 const N: usize = 256;
-
-/// EL1008 (digital inputs) configured station address.
-const SUBDEV_EL1008: u16 = 0x1001;
-/// EL2004 (digital outputs / status lamp) configured station address.
-const SUBDEV_EL2004: u16 = 0x1002;
-/// EL7047 (stepper) configured station address. Assumes the EL7047 sits last
-/// on the bus — VERIFY on the Pi; if wrong, every routing/PDO_MAP address is
-/// off.
-const SUBDEV_EL7047: u16 = 0x1003;
-
-/// EL1008: 8 digital input bits, one PDI byte.
-const ROUTING_BITS_EL1008: u16 = 8;
-/// EL2004: 4 digital output bits, one PDI byte.
-const ROUTING_BITS_EL2004: u16 = 4;
-
-/// Operator-declared startup SDOs: stepper motor current limits, written in
-/// PRE-OP before PDO assignment (REQ_0853). Units = mA. Tune for your motor;
-/// see README.md.
-static EL7047_STARTUP: &[StartupSdo] = &[
-    StartupSdo {
-        index: 0x8010,
-        subindex: 0x01,
-        value: SdoValue::U16(1800),
-    }, // max current
-    StartupSdo {
-        index: 0x8010,
-        subindex: 0x02,
-        value: SdoValue::U16(900),
-    }, // standby current
-];
 
 /// Control-loop cadence.
 const CONTROL_PERIOD: Duration = Duration::from_millis(10);
 /// Lamp/health cadence.
 const LAMP_PERIOD: Duration = Duration::from_millis(250);
 
-/// Bus topology bounds passed to `EthercrabBusDriver`.
+/// Bus topology bounds passed to `EthercrabBusDriver`; keep in sync with
+/// `bus.max_subdevices` / `bus.max_pdi_bytes` in `network.yaml` (the codegen
+/// does not emit these as constants).
 const MAX_SUBDEVICES: usize = 16;
 const MAX_PDI: usize = 256;
 
@@ -115,109 +87,68 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         deceleration: cli.decel,
     };
 
-    // 0. EL7047 PDO assignment, derived from the generated device rather than
-    //    hand-listed PdoEntry arrays. Pinning the mode selects the
-    //    "Positioning interface" assignment (Rx 0x1601/0x1602/0x1606,
-    //    Tx 0x1A01/0x1A03/0x1A07); `pdo_assignment()` returns those index
-    //    lists and `output_len()`/`input_len()` the image sizes. The connector
-    //    only reads `PdoEntry::index` for the 0x1C12/0x1C13 SM assignment, so
-    //    bit_offset/bit_length are left 0 (the image is one contiguous block).
-    let el7047 = generated::EL7047 {
+    // 0. Generated EL7047 device, pinned to the positioning-interface mode and
+    //    reused across cycles (input images decode into it, output images encode
+    //    out of it; the domain control/status surface is mapped via
+    //    `el7047_adapter`). Used only for the byte-level codec — the bus PDO
+    //    assignment now comes from generated_net::PDO_MAP (network.yaml).
+    let mut el7047_dev = generated::EL7047 {
         mode: generated::EL7047OpMode::PositioningInterface(Default::default()),
     };
-    let assign = el7047.pdo_assignment();
-    let el7047_rx: Vec<PdoEntry> = assign
-        .rx
-        .iter()
-        .map(|&index| PdoEntry {
-            index,
-            bit_offset: 0,
-            bit_length: 0,
-        })
-        .collect();
-    let el7047_tx: Vec<PdoEntry> = assign
-        .tx
-        .iter()
-        .map(|&index| PdoEntry {
-            index,
-            bit_offset: 0,
-            bit_length: 0,
-        })
-        .collect();
-    let routing_bits_el7047_out = (el7047.output_len() * 8) as u16;
-    let routing_bits_el7047_in = (el7047.input_len() * 8) as u16;
 
-    // `EthercatConnectorOptions::pdo_map` and `SubDeviceMap::new` both want
-    // `&'static [_]`; the runtime-derived lists therefore become `'static` via
-    // a deliberate one-shot `Vec::leak` at startup. This leaks a few dozen
-    // bytes exactly once for the process lifetime (the maps live as long as the
-    // connector, i.e. until exit) — not a per-cycle allocation.
-    //
-    // Working-counter mapping for WKC-based health (`REQ_0329`): EL1008 (input)
-    // = +2, EL2004 (output) = +1, EL7047 (read+write) = +3 (best-guess; verify
-    // observed WKC on the Pi). The EL2004 and EL7047 are output-bearing, so per
-    // AOU_0016 their SM watchdog is enabled with a 50 ms timeout (≤ FTTI/2) so
-    // they drop to safe state within that window on a master stop.
-    let el7047_rx: &'static [PdoEntry] = el7047_rx.leak();
-    let el7047_tx: &'static [PdoEntry] = el7047_tx.leak();
-    let pdo_map: &'static [SubDeviceMap] = vec![
-        SubDeviceMap::new(SUBDEV_EL1008, &[], &[], 2),
-        SubDeviceMap::new(SUBDEV_EL2004, &[], &[], 1)
-            .with_sm_watchdog(SmWatchdog::from_timeout_us(50_000)),
-        SubDeviceMap::new(SUBDEV_EL7047, el7047_rx, el7047_tx, 3)
-            .with_sm_watchdog(SmWatchdog::from_timeout_us(50_000))
-            .with_startup_sdos(EL7047_STARTUP),
-    ]
-    .leak();
-
-    // 1. Options.
+    // 1. Options. PDO map, watchdogs, WKC, and startup SDOs are all generated
+    //    from network.yaml. Identity bring-up expectations are exposed as
+    //    generated_net::EXPECTED_IDENTITIES (logged below; runtime enforcement
+    //    is a connector TODO).
     let opts = EthercatConnectorOptions::builder()
         .network_interface(&cli.nic)
         .cycle_time(Duration::from_millis(2))
-        .pdo_map(pdo_map)
+        .pdo_map(generated_net::PDO_MAP)
         .build();
 
-    // 2. Driver. EthercrabBusDriver wraps `ethercrab::MainDevice` behind the
-    //    `bus-integration` cargo feature; PDU storage is the static above.
+    // Informational only: the connector has no identity-check API yet, so this
+    // logs (does not enforce) the expected per-device identities — a hardware
+    // mismatch is then visible in the terminal at startup.
+    for id in generated_net::EXPECTED_IDENTITIES {
+        eprintln!(
+            "expecting device @ {:#06x}: vendor={:#x} product={:#x} rev={:#x}",
+            id.address, id.vendor_id, id.product_code, id.revision
+        );
+    }
+
+    // 2. Driver.
     let driver =
         EthercrabBusDriver::<MAX_SUBDEVICES, MAX_PDI>::new(&EXAMPLE_PDU_STORAGE, opts.clone())?;
 
     // 3. Connector. ONE codec for every channel: RawImageCodec round-trips a
-    //    fixed-size `[u8; LEN]` image verbatim. EL1008/EL2004 ride it as
-    //    `[u8; 1]`; the EL7047 as its full positioning-interface image.
+    //    fixed-size `[u8; LEN]` image verbatim.
     let state = Arc::new(EthercatState::new(opts.clone()));
     let mut connector = EthercatConnector::new(state, driver, RawImageCodec)?;
 
-    // 4. Routing + channels.
-    //    EL1008 inputs: 8 bits @ 0x1001 (Tx — SubDevice writes, master reads).
-    let el1008_routing =
-        EthercatRouting::new(SUBDEV_EL1008, PdoDirection::Tx, 0, ROUTING_BITS_EL1008);
-    let el1008_desc =
-        ChannelDescriptor::<EthercatRouting, N>::new("ethercat.el1008.inputs", el1008_routing)?;
+    // 4. Routing + channels, from the generated routing consts.
+    let el1008_desc = ChannelDescriptor::<_, N>::new(
+        generated_net::ETHERCAT_EL1008_INPUTS_NAME,
+        generated_net::ETHERCAT_EL1008_INPUTS,
+    )?;
     let reader_el1008 = connector.create_reader::<[u8; 1], N>(&el1008_desc)?;
 
-    //    EL2004 outputs: 4 bits @ 0x1002 (Rx — master writes).
-    let el2004_routing =
-        EthercatRouting::new(SUBDEV_EL2004, PdoDirection::Rx, 0, ROUTING_BITS_EL2004);
-    let el2004_desc =
-        ChannelDescriptor::<EthercatRouting, N>::new("ethercat.el2004.outputs", el2004_routing)?;
+    let el2004_desc = ChannelDescriptor::<_, N>::new(
+        generated_net::ETHERCAT_EL2004_OUTPUTS_NAME,
+        generated_net::ETHERCAT_EL2004_OUTPUTS,
+    )?;
     let writer_el2004 = connector.create_writer::<[u8; 1], N>(&el2004_desc)?;
 
-    //    EL7047 output image @ 0x1003 (Rx), bit offset 0, 176 bits.
-    let el7047_out_routing =
-        EthercatRouting::new(SUBDEV_EL7047, PdoDirection::Rx, 0, routing_bits_el7047_out);
-    let el7047_out_desc = ChannelDescriptor::<EthercatRouting, N>::new(
-        "ethercat.el7047.control",
-        el7047_out_routing,
+    let el7047_out_desc = ChannelDescriptor::<_, N>::new(
+        generated_net::ETHERCAT_EL7047_CONTROL_NAME,
+        generated_net::ETHERCAT_EL7047_CONTROL,
     )?;
     let writer_el7047 =
         connector.create_writer::<[u8; el7047_domain::OUTPUT_LEN], N>(&el7047_out_desc)?;
 
-    //    EL7047 input image @ 0x1003 (Tx), bit offset 0, 192 bits.
-    let el7047_in_routing =
-        EthercatRouting::new(SUBDEV_EL7047, PdoDirection::Tx, 0, routing_bits_el7047_in);
-    let el7047_in_desc =
-        ChannelDescriptor::<EthercatRouting, N>::new("ethercat.el7047.status", el7047_in_routing)?;
+    let el7047_in_desc = ChannelDescriptor::<_, N>::new(
+        generated_net::ETHERCAT_EL7047_STATUS_NAME,
+        generated_net::ETHERCAT_EL7047_STATUS,
+    )?;
     let reader_el7047 =
         connector.create_reader::<[u8; el7047_domain::INPUT_LEN], N>(&el7047_in_desc)?;
 
@@ -245,11 +176,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Control loop runs at CONTROL_PERIOD (10 ms); toggling every 25 cycles
     // (250 ms) gives a ~2 Hz blink the eye can resolve.
     const BLINK_TOGGLE_CYCLES: u32 = 25;
-
-    // Generated EL7047 device, pinned to the positioning-interface mode, reused
-    // across cycles: input images decode into it, output images encode out of
-    // it. The domain control/status surface is mapped via `el7047_adapter`.
-    let mut el7047_dev = el7047;
 
     exec.add(item_with_triggers(
         |d| -> Result<(), ExecutorError> {

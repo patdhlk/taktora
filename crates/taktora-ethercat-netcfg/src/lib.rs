@@ -67,16 +67,30 @@ pub struct DeviceInstance {
     /// Optional per-device SM-watchdog timeout override. Absent → the
     /// device inherits FTTI/2 (`REQ_0844`). YAML: `sm_watchdog_timeout_ms`.
     pub sm_watchdog_timeout: Option<Duration>,
-    /// Explicit attestation, for [`DeviceSource::Inline`] output devices,
-    /// that the device's SM watchdog is (will be) enabled (`REQ_0845`).
-    /// Inline sources carry no ESI control byte to read the enable bit
-    /// from, so the integrator must attest it. YAML: `sm_watchdog_enabled`.
+    /// Explicit attestation that this output device's SM watchdog is (will
+    /// be) enabled (`REQ_0845`). Required for [`DeviceSource::Inline`] output
+    /// devices (no ESI control byte to read the enable bit from). Also
+    /// accepted for [`DeviceSource::Esi`] output devices whose ESI output SM
+    /// does not declare the watchdog trigger — the operator takes
+    /// responsibility; the driver programs `0x0400`/`0x0420` unconditionally
+    /// at bring-up (`AOU_0016`). YAML: `sm_watchdog_enabled`.
     pub sm_watchdog_enabled: Option<bool>,
     /// Resolved SM-watchdog register values for this device, present iff
     /// the device carries output (rx) PDOs (`REQ_0844`). Codegen emits
     /// these via `SubDeviceMap::with_sm_watchdog`; input-only devices
     /// carry `None` and emit no watchdog.
     pub sm_watchdog: Option<SmWatchdogRegisters>,
+    /// Operator-declared startup SDOs, in declaration order. Empty if none.
+    pub startup_sdos: Vec<StartupSdoSpec>,
+    /// Whether the device can accept `CoE` PDO-assignment SDO writes
+    /// (`0x1C12`/`0x1C13`). For an `esi:` device this reflects whether the ESI
+    /// declares a `CoE` mailbox; for an inline device it is `true` (the
+    /// integrator listed PDOs intending to assign them). Simple terminals
+    /// (e.g. EL1008/EL2004) have no mailbox, so writing a PDO assignment to
+    /// them fails with `NoReadMailbox` on the bus — codegen therefore emits an
+    /// EMPTY assignment for them (they use their fixed default mapping) while
+    /// still contributing their `expected_wkc`.
+    pub supports_coe: bool,
 }
 
 /// Resolved ESC SM-watchdog register values for one output device.
@@ -203,6 +217,35 @@ pub struct PdoEntry {
     pub bit_length: u16,
 }
 
+/// One operator-declared startup SDO, written in PRE-OP before PDO assignment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupSdoSpec {
+    /// SDO object-dictionary index.
+    pub index: u16,
+    /// SDO object-dictionary subindex.
+    pub subindex: u8,
+    /// Typed value to write.
+    pub value: SdoValueSpec,
+}
+
+/// A typed startup-SDO value. Mirrors `taktora_connector_ethercat::SdoValue`;
+/// codegen emits the matching connector variant as text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SdoValueSpec {
+    /// 8-bit unsigned.
+    U8(u8),
+    /// 16-bit unsigned.
+    U16(u16),
+    /// 32-bit unsigned.
+    U32(u32),
+    /// 8-bit signed.
+    I8(i8),
+    /// 16-bit signed.
+    I16(i16),
+    /// 32-bit signed.
+    I32(i32),
+}
+
 /// Direction of a process-data channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -296,6 +339,41 @@ pub enum NetcfgError {
         count: usize,
     },
 
+    /// `op_mode` named a mapping that does not exist on the device.
+    #[error("device `{label}` op_mode `{requested}` not found; available: {}", if available.is_empty() { String::from("(none)") } else { available.join(", ") })]
+    OpModeNotFound {
+        /// Offending device label.
+        label: String,
+        /// The requested mode name.
+        requested: String,
+        /// Mapping names the device declares.
+        available: Vec<String>,
+    },
+    /// `op_mode` was set on a device that has no selectable PDO mappings — either
+    /// because no `esi:` reference was given at all, or because the referenced
+    /// ESI declares no `AlternativeSmMapping`.
+    #[error(
+        "device `{label}` sets op_mode but has no selectable PDO mappings (no esi: reference, or the referenced ESI declares no AlternativeSmMapping)"
+    )]
+    OpModeOnFlatDevice {
+        /// Offending device label.
+        label: String,
+    },
+    /// `op_mode` omitted on a multi-mapping device with no Default=\"1\" mapping.
+    #[error("device `{label}` omits op_mode and its ESI declares no default PDO mapping")]
+    NoDefaultMapping {
+        /// Offending device label.
+        label: String,
+    },
+    /// A mapping references a PDO index present in neither rx nor tx PDOs.
+    #[error("device `{label}` mapping references unknown PDO index {index:#06x}")]
+    UnknownAssignmentPdo {
+        /// Offending device label.
+        label: String,
+        /// The dangling PDO index.
+        index: u16,
+    },
+
     /// An `esi:` reference is a remote (`http://` / `https://`) URL. Builds
     /// are hermetic and never fetch over the network at parse time
     /// (`REQ_0834`); the ESI must be vendored locally and referenced as a
@@ -329,9 +407,10 @@ pub enum NetcfgError {
     /// manager(s) have the watchdog trigger DISABLED in the ESI control
     /// byte (`AOU_0016` / `REQ_0845`). The watchdog is the sole mechanism
     /// that drives outputs to their safe state on a silently-stopped
-    /// master, so a disabled trigger is a config error.
+    /// master, so a disabled trigger is a config error. Bypass by setting
+    /// `sm_watchdog_enabled: true` on the device (operator attestation).
     #[error(
-        "device `{label}` is an output device but its ESI declares the SM watchdog trigger disabled on an output sync manager"
+        "device `{label}` is an output device but its ESI declares the SM watchdog trigger disabled on an output sync manager; set `sm_watchdog_enabled: true` to attest the watchdog is programmed at runtime"
     )]
     SmWatchdogDisabled {
         /// Label of the offending output device.
@@ -349,6 +428,23 @@ pub enum NetcfgError {
     SmWatchdogNotAttested {
         /// Label of the offending output device.
         label: String,
+    },
+
+    /// A startup-SDO `value` does not fit its declared `type`.
+    #[error(
+        "device `{label}` startup SDO {index:#06x}:{subindex:#04x} value {value} out of range for type {ty}"
+    )]
+    SdoValueOutOfRange {
+        /// Offending device label.
+        label: String,
+        /// SDO index.
+        index: u16,
+        /// SDO subindex.
+        subindex: u8,
+        /// Declared type name (e.g. "u16").
+        ty: String,
+        /// The out-of-range value as written.
+        value: i64,
     },
 }
 
@@ -381,7 +477,8 @@ pub fn parse(yaml: &str) -> Result<NetworkConfig, NetcfgError> {
 mod dto {
     use super::{
         BusConfig, ChannelBinding, DeviceInstance, DeviceSource, Identity, NetcfgError,
-        NetworkConfig, PdoEntry, SmWatchdogRegisters, sm_watchdog_intervals,
+        NetworkConfig, PdoEntry, SdoValueSpec, SmWatchdogRegisters, StartupSdoSpec,
+        sm_watchdog_intervals,
     };
     use core::time::Duration;
     use serde::Deserialize;
@@ -423,6 +520,8 @@ mod dto {
         #[serde(default)]
         esi: Option<String>,
         #[serde(default)]
+        op_mode: Option<String>,
+        #[serde(default)]
         pdos: PdosDto,
         #[serde(default)]
         identity: Option<Identity>,
@@ -434,6 +533,8 @@ mod dto {
         sm_watchdog_timeout_ms: Option<u64>,
         #[serde(default)]
         sm_watchdog_enabled: Option<bool>,
+        #[serde(default)]
+        startup_sdos: Vec<StartupSdoDto>,
     }
 
     #[derive(Deserialize, Default)]
@@ -442,6 +543,66 @@ mod dto {
         rx: Vec<PdoEntry>,
         #[serde(default)]
         tx: Vec<PdoEntry>,
+    }
+
+    #[derive(Deserialize, Clone, Copy)]
+    #[serde(rename_all = "lowercase")]
+    enum SdoTypeDto {
+        U8,
+        U16,
+        U32,
+        I8,
+        I16,
+        I32,
+    }
+
+    impl SdoTypeDto {
+        const fn name(self) -> &'static str {
+            match self {
+                Self::U8 => "u8",
+                Self::U16 => "u16",
+                Self::U32 => "u32",
+                Self::I8 => "i8",
+                Self::I16 => "i16",
+                Self::I32 => "i32",
+            }
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct StartupSdoDto {
+        index: u16,
+        subindex: u8,
+        #[serde(rename = "type")]
+        ty: SdoTypeDto,
+        value: i64,
+    }
+
+    fn convert_startup_sdo(
+        label: &str,
+        dto: &StartupSdoDto,
+    ) -> Result<StartupSdoSpec, NetcfgError> {
+        let v = dto.value;
+        let oor = || NetcfgError::SdoValueOutOfRange {
+            label: label.to_owned(),
+            index: dto.index,
+            subindex: dto.subindex,
+            ty: dto.ty.name().to_owned(),
+            value: v,
+        };
+        let value = match dto.ty {
+            SdoTypeDto::U8 => SdoValueSpec::U8(u8::try_from(v).map_err(|_| oor())?),
+            SdoTypeDto::U16 => SdoValueSpec::U16(u16::try_from(v).map_err(|_| oor())?),
+            SdoTypeDto::U32 => SdoValueSpec::U32(u32::try_from(v).map_err(|_| oor())?),
+            SdoTypeDto::I8 => SdoValueSpec::I8(i8::try_from(v).map_err(|_| oor())?),
+            SdoTypeDto::I16 => SdoValueSpec::I16(i16::try_from(v).map_err(|_| oor())?),
+            SdoTypeDto::I32 => SdoValueSpec::I32(i32::try_from(v).map_err(|_| oor())?),
+        };
+        Ok(StartupSdoSpec {
+            index: dto.index,
+            subindex: dto.subindex,
+            value,
+        })
     }
 
     /// A resolved device plus the ESI-derived watchdog-enable evidence the
@@ -544,10 +705,14 @@ mod dto {
         // 4: the watchdog must be enabled.
         match &device.source {
             DeviceSource::Esi { .. } => {
-                // `Some(false)` (an output SM disables the trigger) or
-                // `None` (the ESI declares no output SM for an rx-carrying
-                // device) both fail the enable check.
-                if esi_output_watchdog_enabled != Some(true) {
+                // Enabled if the ESI's output SM declares the trigger, OR the
+                // operator attests it via `sm_watchdog_enabled: true`. The
+                // driver programs 0x0400/0x0420 regardless; the attestation
+                // lets an integrator accept responsibility for an ESI whose
+                // output SM does not declare the trigger (common on real
+                // Beckhoff devices). AOU_0016 / REQ_0845.
+                let attested = device.sm_watchdog_enabled == Some(true);
+                if esi_output_watchdog_enabled != Some(true) && !attested {
                     return Err(NetcfgError::SmWatchdogDisabled {
                         label: device.label.clone(),
                     });
@@ -586,26 +751,6 @@ mod dto {
         Ok(PathBuf::from(reference))
     }
 
-    /// Flatten a device's structured ESI PDOs (one direction) into netcfg
-    /// process-image [`PdoEntry`]s, assigning cumulative bit offsets in
-    /// document order. Valid for single-assignment devices; alternative-aware
-    /// resolution is a codegen concern and out of scope for the parser layer.
-    fn flatten_esi_pdos(pdos: &[taktora_ethercat_esi::Pdo]) -> Vec<PdoEntry> {
-        let mut out = Vec::new();
-        let mut bit_offset: u16 = 0;
-        for pdo in pdos {
-            for entry in &pdo.entries {
-                out.push(PdoEntry {
-                    index: entry.index,
-                    bit_offset,
-                    bit_length: entry.bit_length,
-                });
-                bit_offset = bit_offset.saturating_add(entry.bit_length);
-            }
-        }
-        out
-    }
-
     impl From<BusConfigDto> for BusConfig {
         fn from(dto: BusConfigDto) -> Self {
             Self {
@@ -639,6 +784,34 @@ mod dto {
         saw_output.then_some(true)
     }
 
+    /// Map an ESI [`ResolveError`](taktora_ethercat_esi::ResolveError) to the
+    /// netcfg error for `label`, stamping the device label on each variant.
+    /// Extracted from [`DeviceInstanceDto::resolve`] to keep its cyclomatic
+    /// complexity within the project's gate.
+    fn map_resolve_error(label: &str, e: taktora_ethercat_esi::ResolveError) -> NetcfgError {
+        use taktora_ethercat_esi::ResolveError as R;
+        match e {
+            R::NoAlternativeMappings => NetcfgError::OpModeOnFlatDevice {
+                label: label.to_owned(),
+            },
+            R::MappingNotFound {
+                requested,
+                available,
+            } => NetcfgError::OpModeNotFound {
+                label: label.to_owned(),
+                requested,
+                available,
+            },
+            R::NoDefaultMapping => NetcfgError::NoDefaultMapping {
+                label: label.to_owned(),
+            },
+            R::UnknownAssignmentPdo { index } => NetcfgError::UnknownAssignmentPdo {
+                label: label.to_owned(),
+                index,
+            },
+        }
+    }
+
     impl DeviceInstanceDto {
         /// Convert into a [`DeviceInstance`], resolving an `esi:` reference
         /// (read file, parse, convert PDOs, map identity) when present, and
@@ -652,15 +825,27 @@ mod dto {
             let Self {
                 label,
                 esi,
+                op_mode,
                 pdos,
                 identity,
                 station_alias,
                 address_override,
                 sm_watchdog_timeout_ms,
                 sm_watchdog_enabled,
+                startup_sdos,
             } = self;
 
-            let (source, identity, esi_output_watchdog_enabled) = match esi {
+            if esi.is_none() && op_mode.is_some() {
+                return Err(NetcfgError::OpModeOnFlatDevice { label });
+            }
+
+            // Convert startup SDOs before `label` is moved into the DeviceInstance literal.
+            let startup_sdos = startup_sdos
+                .iter()
+                .map(|s| convert_startup_sdo(&label, s))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let (source, identity, esi_output_watchdog_enabled, supports_coe) = match esi {
                 Some(reference) => {
                     let path = esi_local_path(&reference)?;
                     let xml = std::fs::read_to_string(&path)?;
@@ -677,12 +862,35 @@ mod dto {
                         .next()
                         .expect("checked count == 1");
 
-                    let rx = flatten_esi_pdos(&device.rx_pdos);
-                    let tx = flatten_esi_pdos(&device.tx_pdos);
+                    // A CoE mailbox is required to accept PDO-assignment SDO
+                    // writes (0x1C12/0x1C13). Simple terminals with no mailbox
+                    // (EL1008/EL2004) must NOT be written to — codegen emits an
+                    // empty assignment for them and they keep their fixed
+                    // default mapping.
+                    let supports_coe = device
+                        .mailbox
+                        .as_ref()
+                        .and_then(|m| m.coe.as_ref())
+                        .is_some();
+
+                    // op_mode selects the PDO mapping and is not retained in
+                    // the IR; the resolved PDOs in `assignment` are the only output.
+                    let assignment = device
+                        .resolve_assignment(op_mode.as_deref())
+                        .map_err(|e| map_resolve_error(&label, e))?;
+                    let to_entry = |e: &taktora_ethercat_esi::ResolvedPdoEntry| PdoEntry {
+                        index: e.index,
+                        bit_offset: e.bit_offset,
+                        bit_length: e.bit_length,
+                    };
+                    let rx: Vec<PdoEntry> = assignment.rx.iter().map(to_entry).collect();
+                    let tx: Vec<PdoEntry> = assignment.tx.iter().map(to_entry).collect();
                     // If the device ALSO carries inline pdos:, the two
                     // descriptions must agree. The ESI is the source of
                     // truth, so an exact match is redundant-but-legal and a
-                    // mismatch is a contradiction (REQ_0824).
+                    // mismatch is a contradiction (REQ_0824). The ESI side is
+                    // the op_mode-resolved mapping (if op_mode is set), so
+                    // inline pdos: must match the selected mapping's PDOs.
                     let has_inline = !pdos.rx.is_empty() || !pdos.tx.is_empty();
                     if has_inline && (pdos.rx != rx || pdos.tx != tx) {
                         return Err(NetcfgError::EsiContradiction { label });
@@ -691,7 +899,12 @@ mod dto {
                     // Keep an explicit YAML identity; otherwise carry the
                     // ESI identity into the device (same type — od-core Identity).
                     let identity = identity.or(Some(device.identity));
-                    (DeviceSource::Esi { path, rx, tx }, identity, wd_enabled)
+                    (
+                        DeviceSource::Esi { path, rx, tx },
+                        identity,
+                        wd_enabled,
+                        supports_coe,
+                    )
                 }
                 None => (
                     DeviceSource::Inline {
@@ -700,6 +913,10 @@ mod dto {
                     },
                     identity,
                     None,
+                    // Inline devices carry no ESI mailbox info; the integrator
+                    // listed PDOs intending to assign them (preserves the
+                    // pre-existing emit-assignment behavior).
+                    true,
                 ),
             };
 
@@ -713,6 +930,8 @@ mod dto {
                     sm_watchdog_timeout: sm_watchdog_timeout_ms.map(Duration::from_millis),
                     sm_watchdog_enabled,
                     sm_watchdog: None,
+                    startup_sdos,
+                    supports_coe,
                 },
                 esi_output_watchdog_enabled,
             })

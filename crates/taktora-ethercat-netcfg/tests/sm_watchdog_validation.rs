@@ -17,7 +17,7 @@ use taktora_ethercat_netcfg::{NetcfgError, parse};
 
 /// Build a single-device ESI whose RxPDO output SM (index 0) carries the
 /// given control byte, plus a mailbox-less input SM. `control_byte`:
-/// `#x40` = Output direction + watchdog-trigger enabled; `#x00` = Output
+/// `#x44` = Output direction + watchdog-trigger enabled; `#x04` = Output
 /// direction + watchdog disabled.
 fn esi_with_output_sm(output_sm_control_byte: &str) -> String {
     format!(
@@ -71,18 +71,18 @@ channels: []
 
 // ---- ESI-sourced enable attestation -------------------------------------
 
-/// PASS — ESI output SM has the watchdog trigger enabled (`#x40`), default
+/// PASS — ESI output SM has the watchdog trigger enabled (`#x44`), default
 /// FTTI/2 timeout well under the bound.
 #[test]
 fn esi_enabled_default_ftti_passes() {
-    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x40"), None, None);
+    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x44"), None, None);
     parse(&yaml).expect("ESI-enabled output device under FTTI/2 passes");
 }
 
 /// PASS — override (10 ms) below FTTI/2 (50 ms), ESI enabled.
 #[test]
 fn esi_enabled_override_below_bound_passes() {
-    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x40"), None, Some(10));
+    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x44"), None, Some(10));
     parse(&yaml).expect("override below bound passes");
 }
 
@@ -90,7 +90,7 @@ fn esi_enabled_override_below_bound_passes() {
 /// the offending effective value, and the bound.
 #[test]
 fn override_above_bound_fails() {
-    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x40"), None, Some(60));
+    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x44"), None, Some(60));
     let err = parse(&yaml).expect_err("60 ms > FTTI/2 (50 ms) must fail");
     assert!(
         matches!(err, NetcfgError::SmWatchdogTimeoutTooLong { ref label, .. } if label == "outputs"),
@@ -118,7 +118,7 @@ fn override_above_bound_fails() {
 fn quantized_boundary_is_inclusive() {
     // FTTI default 100 ms → bound 50 ms. Override 50 ms == bound exactly →
     // 500 ticks → effective 50 ms == bound → PASS.
-    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x40"), None, Some(50));
+    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x44"), None, Some(50));
     parse(&yaml).expect("override exactly at FTTI/2 (on the tick grid) passes");
 }
 
@@ -127,7 +127,7 @@ fn quantized_boundary_is_inclusive() {
 /// the comparison.
 #[test]
 fn quantized_effective_one_ms_over_bound_fails() {
-    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x40"), None, Some(51));
+    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x44"), None, Some(51));
     let err = parse(&yaml).expect_err("51 ms > FTTI/2 (50 ms) must fail");
     assert!(
         matches!(err, NetcfgError::SmWatchdogTimeoutTooLong { ref label, .. } if label == "outputs"),
@@ -135,11 +135,83 @@ fn quantized_effective_one_ms_over_bound_fails() {
     );
 }
 
-/// FAIL — ESI says the output SM's watchdog trigger is DISABLED (`#x00`).
+/// FAIL — ESI says the output SM's watchdog trigger is DISABLED (`#x04`).
 #[test]
 fn esi_disabled_output_sm_fails() {
-    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x00"), None, None);
+    let (_esi, yaml) = esi_yaml(&esi_with_output_sm("#x04"), None, None);
     let err = parse(&yaml).expect_err("ESI watchdog-disabled output SM must fail");
+    assert!(
+        matches!(err, NetcfgError::SmWatchdogDisabled { ref label } if label == "outputs"),
+        "expected SmWatchdogDisabled for `outputs`, got {err:?}"
+    );
+}
+
+/// Write an ESI string to a temp file and build a one-device network.yaml
+/// referencing it, with an optional per-device timeout override, FTTI, and
+/// operator attestation (`sm_watchdog_enabled`).
+fn esi_yaml_attested(
+    esi_xml: &str,
+    sm_watchdog_enabled: Option<bool>,
+) -> (tempfile::NamedTempFile, String) {
+    let mut esi = tempfile::Builder::new()
+        .suffix(".xml")
+        .tempfile()
+        .expect("create temp ESI file");
+    esi.write_all(esi_xml.as_bytes())
+        .expect("write ESI fixture");
+    let esi_path = esi.path().to_str().expect("ESI path is UTF-8").to_owned();
+
+    let attest_line =
+        sm_watchdog_enabled.map_or(String::new(), |b| format!("\n    sm_watchdog_enabled: {b}"));
+    let yaml = format!(
+        r#"
+schema_version: 1
+bus: {{ cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_bytes: 256 }}
+devices:
+  - label: outputs{attest_line}
+    esi: "{esi_path}"
+channels: []
+"#
+    );
+    (esi, yaml)
+}
+
+/// PASS — ESI output SM has the watchdog trigger DISABLED (`#x04`) but the
+/// operator attests `sm_watchdog_enabled: true`, taking responsibility. The
+/// connector programs `0x0400`/`0x0420` regardless; attestation is the
+/// deliberate escape hatch for real devices (e.g. Beckhoff EL7047) whose ESI
+/// does not set the trigger bit even though the watchdog operates at runtime.
+#[test]
+fn esi_disabled_sm_with_operator_attestation_passes() {
+    let (_esi, yaml) = esi_yaml_attested(&esi_with_output_sm("#x04"), Some(true));
+    let cfg = parse(&yaml).expect("ESI-disabled SM + operator attestation must pass");
+    let dev = cfg.devices.iter().find(|d| d.label == "outputs").unwrap();
+    assert!(
+        dev.sm_watchdog.is_some(),
+        "resolved sm_watchdog must be Some(..) when attestation opens the gate"
+    );
+}
+
+/// FAIL — same ESI (watchdog trigger DISABLED, `#x04`) but NO operator
+/// attestation. Must still error `SmWatchdogDisabled`; default-deny is
+/// unchanged when neither ESI evidence nor explicit attestation is present.
+#[test]
+fn esi_disabled_sm_without_attestation_still_fails() {
+    let (_esi, yaml) = esi_yaml_attested(&esi_with_output_sm("#x04"), None);
+    let err = parse(&yaml).expect_err("ESI-disabled SM without attestation must still fail");
+    assert!(
+        matches!(err, NetcfgError::SmWatchdogDisabled { ref label } if label == "outputs"),
+        "expected SmWatchdogDisabled for `outputs`, got {err:?}"
+    );
+}
+
+/// FAIL — same ESI (watchdog trigger DISABLED, `#x04`) with an EXPLICIT
+/// `sm_watchdog_enabled: false`. An explicit opt-out is not attestation, so the
+/// gate stays closed (pins that the override is `== Some(true)`, not truthy).
+#[test]
+fn esi_disabled_sm_attested_false_still_fails() {
+    let (_esi, yaml) = esi_yaml_attested(&esi_with_output_sm("#x04"), Some(false));
+    let err = parse(&yaml).expect_err("explicit sm_watchdog_enabled: false must still fail");
     assert!(
         matches!(err, NetcfgError::SmWatchdogDisabled { ref label } if label == "outputs"),
         "expected SmWatchdogDisabled for `outputs`, got {err:?}"

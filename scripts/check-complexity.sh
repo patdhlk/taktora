@@ -27,9 +27,14 @@ fi
 
 # Production scope: crates/*/src/**.rs, excluding build.rs. For the self-test the
 # scan root is a fixtures dir with no */src/* layout, so fall back to all *.rs.
+# The `/src/` match is ANCHORED to SCAN_ROOT (`$SCAN_ROOT/*/src/*`), not a bare
+# `*/src/*`: an unanchored pattern matches the absolute checkout prefix too, so a
+# clone under a path that itself contains `/src/` (e.g. ~/src/...) would wrongly
+# pull in non-src files like tests/golden snapshots. Anchoring keeps the scope at
+# the documented `crates/<crate>/src/**` regardless of where the repo lives.
 # Note: mapfile requires bash 4+; use read-loop for portability with macOS bash 3.
 files=()
-while IFS= read -r line; do files+=("$line"); done < <(find "$SCAN_ROOT" -path '*/src/*' -name '*.rs' ! -name 'build.rs' | sort)
+while IFS= read -r line; do files+=("$line"); done < <(find "$SCAN_ROOT" -path "$SCAN_ROOT/*/src/*" -name '*.rs' ! -name 'build.rs' | sort)
 if [ "${#files[@]}" -eq 0 ]; then
   while IFS= read -r line; do files+=("$line"); done < <(find "$SCAN_ROOT" -name '*.rs' | sort)
 fi

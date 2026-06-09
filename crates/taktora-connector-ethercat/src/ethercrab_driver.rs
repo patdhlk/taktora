@@ -378,6 +378,22 @@ async fn apply_pdo_mapping_for_subdevice<const MAX_SUBDEVICES: usize, const MAX_
                     .sdo_write(write.index, write.subindex, v)
                     .await
                     .map_err(map_ec_error)?,
+                SdoValue::U32(v) => subdevice
+                    .sdo_write(write.index, write.subindex, v)
+                    .await
+                    .map_err(map_ec_error)?,
+                SdoValue::I8(v) => subdevice
+                    .sdo_write(write.index, write.subindex, v)
+                    .await
+                    .map_err(map_ec_error)?,
+                SdoValue::I16(v) => subdevice
+                    .sdo_write(write.index, write.subindex, v)
+                    .await
+                    .map_err(map_ec_error)?,
+                SdoValue::I32(v) => subdevice
+                    .sdo_write(write.index, write.subindex, v)
+                    .await
+                    .map_err(map_ec_error)?,
             }
         }
         break;
