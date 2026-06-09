@@ -19,64 +19,31 @@ devices:
   # line up at 0x1001+ (address = 0x1000 + position).
   - label: coupler
 
-  # EL1008: 8 digital inputs. Single fixed mapping -> default assignment.
+  # EL1008: 8 digital inputs. Single fixed mapping -> default assignment;
+  # input-only, so no SM watchdog.
   - label: el1008
     esi: esi/beckhoff_el1008.xml
 
   # EL2004: 4 digital outputs (status lamp). Output device -> SM watchdog
-  # required; 50 ms is <= FTTI/2.
-  #
-  # NOTE: The trimmed beckhoff_el2004.xml has ControlByte="#x44" on the output
-  # SM. The ESI parser derives SmDirection from bits[3:2] of the control byte:
-  # 0x44 → bits[3:2]=0b01 → SmDirection::Input (ETG: EtherCAT controller has
-  # read access). The netcfg watchdog checker finds no SmDirection::Output SM
-  # and rejects the device with SmWatchdogDisabled. To stay unblocked without
-  # touching the ESI file or any crate, the device is described inline instead
-  # of via esi:. The inline source requires sm_watchdog_enabled: true to attest
-  # the hardware watchdog (REQ_0845). This loses ESI identity in
-  # EXPECTED_IDENTITIES for this device; a future task can restore the esi:
-  # path once the trimmed ESI is corrected (ControlByte should be "#x64").
+  # (its ESI output SM declares the trigger). 50 ms is <= FTTI/2.
   - label: el2004
+    esi: esi/beckhoff_el2004.xml
     sm_watchdog_timeout_ms: 50
-    sm_watchdog_enabled: true
-    pdos:
-      rx:
-        - { index: 0x1600, bit_offset: 0, bit_length: 1 }
-        - { index: 0x1601, bit_offset: 1, bit_length: 1 }
-        - { index: 0x1602, bit_offset: 2, bit_length: 1 }
-        - { index: 0x1603, bit_offset: 3, bit_length: 1 }
 
-  # EL7047 stepper. PDO mapping = "Positioning interface":
-  #   Rx 0x1601 (ENC Control, 48 b) + 0x1602 (STM Control, 16 b) + 0x1606 (POS Control, 112 b) = 176 b
-  #   Tx 0x1A01 (ENC Status, 80 b) + 0x1A03 (STM Status, 16 b) + 0x1A07 (POS Status, 96 b) = 192 b
-  #
-  # NOTE: The trimmed beckhoff_el7047.xml has ControlByte="#x20" for its
-  # "Inputs" SM; the ESI parser maps (0x20>>2)&3=0 → SmDirection::Output.
-  # The watchdog check finds that SM (Output direction), checks bit 6:
-  # 0x20 & 0x40 = 0 → watchdog trigger disabled → rejects with SmWatchdogDisabled.
-  # The "Outputs" SM has ControlByte="#x24" → SmDirection::Input (not Output),
-  # which has no watchdog trigger bit set either. Neither SM satisfies the
-  # esi_output_watchdog_enabled=Some(true) check.
-  # Workaround: inline description with sm_watchdog_enabled: true (REQ_0845
-  # attestation). This loses ESI identity in EXPECTED_IDENTITIES and the
-  # op_mode: keyword; PDO entries are manually derived from the ESI.
-  # Fix: correct the trimmed ESI ControlBytes to "#x64" (Outputs) / "#x00"
-  # (Inputs), then restore esi: + op_mode: here.
+  # EL7047 stepper. The default ESI mapping is "Velocity control compact"; we
+  # explicitly select the positioning interface (Rx 0x1601/0x1602/0x1606,
+  # Tx 0x1A01/0x1A03/0x1A07). The ESI output SM does not declare the watchdog
+  # trigger, so we attest it (sm_watchdog_enabled: true) — the connector
+  # programs the watchdog registers at bring-up. Motor-current limits are
+  # written in PRE-OP via startup SDOs.
   - label: el7047
+    esi: esi/beckhoff_el7047.xml
+    op_mode: "Positioning interface"
     sm_watchdog_timeout_ms: 50
     sm_watchdog_enabled: true
     startup_sdos:
       - { index: 0x8010, subindex: 0x01, type: u16, value: 1800 }  # max current, mA
       - { index: 0x8010, subindex: 0x02, type: u16, value: 900 }   # standby current, mA
-    pdos:
-      rx:
-        - { index: 0x1601, bit_offset:   0, bit_length:  48 }  # ENC Control (48 b)
-        - { index: 0x1602, bit_offset:  48, bit_length:  16 }  # STM Control (16 b)
-        - { index: 0x1606, bit_offset:  64, bit_length: 112 }  # POS Control (112 b)
-      tx:
-        - { index: 0x1a01, bit_offset:   0, bit_length:  80 }  # ENC Status (80 b)
-        - { index: 0x1a03, bit_offset:  80, bit_length:  16 }  # STM Status (16 b)
-        - { index: 0x1a07, bit_offset:  96, bit_length:  96 }  # POS Status (96 b)
 
 channels:
   # element_type is per-element metadata; it is unused for these raw-image
