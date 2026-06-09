@@ -3,7 +3,7 @@
 A Rust workspace exploring how to build a high-level execution framework and a
 connector framework on top of [iceoryx2](https://github.com/eclipse-iceoryx/iceoryx2).
 
-Three layered pieces:
+Four layered pieces:
 
 - **`taktora-executor`** — items triggered by IPC, intervals, and request/response
   activity; sequential chains; parallel DAGs; signal/slot; lifecycle observability.
@@ -17,11 +17,14 @@ Three layered pieces:
   toolchain (ESI XML → typed `EsiDevice` drivers) and a *network-config* toolchain
   (network YAML → PDO maps / routing tables / validated SM-watchdog
   config for the connector).
+- **Motion control** — a `no_std`, allocation-free trajectory core (CSP setpoint
+  generation, motion profiles, electronic gearing) and a cyclic NC task that drives
+  CiA 402 drives over a fieldbus-agnostic cyclic process-data seam.
 
 > [!WARNING]
 > **Personal experiment. Not meant for production.**
 > The architecture is sound and the test suite is real, but the API has not
-> stabilised, no version has been published, the `unsafe` story has not been
+> stabilised, the published crates are pre-1.0, the `unsafe` story has not been
 > independently audited, and there is no SLA, support, or backwards-compatibility
 > guarantee. Use it to learn from, fork, or vendor in — not to ship.
 
@@ -29,7 +32,7 @@ Three layered pieces:
 
 ## What's here
 
-The workspace has grown to 23 library crates (plus per-crate `*-tests` siblings),
+The workspace has grown to 30 library crates (plus per-crate `*-tests` siblings),
 grouped by layer.
 
 **Execution & runtime support**
@@ -38,6 +41,8 @@ grouped by layer.
 |---|---|
 | [`taktora-executor`](crates/taktora-executor) | The execution core. Items, triggers, executor, runner, channels, services, chains, graphs, signal/slot, observer + execution monitor, optional thread tuning. |
 | [`taktora-executor-tracing`](crates/taktora-executor-tracing) | `Observer` adapter forwarding executor lifecycle and user events to the global `tracing` subscriber. |
+| [`taktora-stats`](crates/taktora-stats) | Allocation-free `no_std` statistics primitives for telemetry: a windowed-percentile rolling histogram (octave buckets) + exact windowed min/max via a monotonic deque. `ADR_0062` / `BB_0053`. |
+| [`taktora-telemetry-export`](crates/taktora-telemetry-export) | Off-RT-thread export of executor `CycleObservation`s: a single-producer/single-consumer overwrite-oldest seqlock ring drained to NDJSON for offline jitter analysis, never blocking the WaitSet thread. `REQ_0110` / `REQ_0111`. |
 | [`taktora-bounded-alloc`](crates/taktora-bounded-alloc) | Static pre-allocated `#[global_allocator]` with hard caps on per-allocation size and total live blocks. `FEAT_0040`. |
 | [`taktora-log`](crates/taktora-log) | Workspace logging facade (`log` crate facade with one-shot init, tracing-log bridge, console dev fallback). See `spec/requirements/logging.rst`. |
 | [`taktora-log-dlt`](crates/taktora-log-dlt) | Pure-Rust AUTOSAR DLT R20-11 backend for `taktora-log`. Talks to a co-located COVESA `dlt-daemon` over UDS (default) or TCP. See `spec/architecture/logging.rst`. |
@@ -62,7 +67,7 @@ grouped by layer.
 | [`taktora-ethercat-esi`](crates/taktora-ethercat-esi) | Parses EtherCAT ESI (slave information) XML into a faithful typed IR (identity, PDOs, sync managers, mailbox, distributed clocks, object dictionary). |
 | [`taktora-ethercat-esi-rt`](crates/taktora-ethercat-esi-rt) | Runtime contract for generated drivers: the object-safe `EsiDevice` trait + runtime `EsiError`. The only crate generated code links against. |
 | [`taktora-ethercat-esi-codegen`](crates/taktora-ethercat-esi-codegen) | Codegen layer: naming/collision policy, the `CodegenBackend` trait, and the `generate` entry point producing `proc-macro2` token streams. |
-| [`taktora-ethercat-esi-codegen-ethercrab`](crates/taktora-ethercat-esi-codegen-ethercrab) | Concrete backend: emits per-device structs + `EsiDevice` impl (`decode_inputs`/`encode_outputs`), `Identity` consts, and a device registry. |
+| [`taktora-ethercat-esi-codegen-ethercrab`](crates/taktora-ethercat-esi-codegen-ethercrab) | Concrete backend: emits per-device structs (with a joint `OpMode` enum when an ESI declares multiple PDO assignments) + `EsiDevice` impl (`decode_inputs`/`encode_outputs`), a `pdo_assignment()` accessor, `Identity` consts, and a device registry. |
 | [`taktora-ethercat-esi-build`](crates/taktora-ethercat-esi-build) | `build.rs` glue: glob ESI files → parse → generate → format → `$OUT_DIR`, encoding-aware (ISO-8859-1), with `rerun-if-changed`. |
 | [`taktora-fieldbus-od-core`](crates/taktora-fieldbus-od-core) | Shared object-dictionary IR (`Identity`, `DataType`, dictionary entries) reused across fieldbus device descriptions. |
 
@@ -74,6 +79,16 @@ grouped by layer.
 | [`taktora-ethercat-netcfg-codegen`](crates/taktora-ethercat-netcfg-codegen) | Turns the netcfg IR into Rust source (PDO maps, routing tables) for the EtherCAT connector runtime. |
 | [`taktora-ethercat-netcfg-build`](crates/taktora-ethercat-netcfg-build) | `build.rs` glue turning a `network.yaml` into a generated Rust module in `$OUT_DIR`. |
 | [`taktora-ethercat-netcfg-cli`](crates/taktora-ethercat-netcfg-cli) | Command-line front end: expand a `network.yaml` to generated Rust source for inspection. |
+
+**Motion control** — `no_std` CSP setpoint generation + a cyclic NC task
+
+| Crate | Purpose |
+|---|---|
+| [`taktora-motion-core`](crates/taktora-motion-core) | Allocation-free, `no_std` real-time trajectory core: commanded CSP setpoints as bounded, panic-free functions of `(dt, master)` — motion profiles, virtual master, electronic gearing. Owns no I/O, threads, or shared state. `FEAT_0091`. |
+| [`taktora-motion`](crates/taktora-motion) | Cyclic NC task: runs `taktora-motion-core` against CiA 402 CSP drives over a `CyclicFieldbus`. Owns unit-increment scaling, the per-axis power/bumpless/command runtime, the coupling topology, the cyclic step, and a host-side virtual-drive mock. `FEAT_0090`. |
+| [`taktora-motion-proto`](crates/taktora-motion-proto) | POD NC↔commander ABI (`AxisCommand` / `AxisStatus`): `#[repr(C)]`, `Copy`, heap-free types that cross the iceoryx2 boundary as raw bytes (consumer validates every discriminant). `REQ_0855`. |
+| [`taktora-cia402`](crates/taktora-cia402) | Fieldbus-independent CiA 402 profile: statusword/controlword semantics, the per-axis power state machine, and the `Cia402Drive` process-image accessor trait. `no_std`, zero deps. |
+| [`taktora-cyclic-fieldbus`](crates/taktora-cyclic-fieldbus) | The cyclic process-data seam: the `CyclicFieldbus` trait plus per-cycle `Validity` / `CycleQuality`. Implemented by cyclic connectors (EtherCAT, later CANopen), consumed by the NC task. `no_std`. |
 
 ## Executor quick start
 
@@ -278,11 +293,16 @@ and ship no XML/YAML.
   vendor ESI XML file and generates per-device structs implementing the
   object-safe `EsiDevice` trait (`taktora-ethercat-esi-rt`): typed
   `decode_inputs` / `encode_outputs` over the SubDevice's process image, an
-  `Identity` const per device, and a registry for identity-based dispatch. The
-  parser copes with real-world ESI quirks (localized `<Name>`, CDATA, ISO-8859-1,
-  vendor data types). Real Beckhoff terminals (EL1008 / EL2004 / EL3602, …)
-  generate compiling, bit-exact drivers; the [`ethercat-real-bus`](examples/ethercat-real-bus)
-  example drives EL1008/EL2004 through generated drivers, validated on real hardware.
+  `Identity` const per device, and a registry for identity-based dispatch. Devices
+  that declare multiple `<AlternativeSmMapping>` PDO configurations generate a joint
+  per-device `OpMode` enum — one variant per resolved assignment, each carrying its
+  own exact-length codec — plus a `pdo_assignment()` accessor that yields the active
+  mode's `0x1C12` / `0x1C13` index lists. The parser copes with real-world ESI quirks
+  (localized `<Name>`, CDATA, ISO-8859-1, vendor data types). Real Beckhoff terminals
+  (EL1008 / EL2004 / EL3602 / EL7047, …) generate compiling, bit-exact drivers; the
+  [`ethercat-real-bus`](examples/ethercat-real-bus) and
+  [`ethercat-stepper`](examples/ethercat-stepper) examples drive them through
+  generated drivers, validated on real hardware.
 - **Network-config codegen.** `taktora-ethercat-netcfg-build` turns a network
   `.yaml` into the PDO maps and routing tables the EtherCAT connector consumes,
   with a `cargo`-style CLI (`taktora-ethercat-netcfg-cli`) for inspection.
@@ -379,6 +399,7 @@ user would write:
 | [`ethercat-mock-loop`](examples/ethercat-mock-loop) | 1 kHz control loop over the EtherCAT connector with PDI bit-slice routing through `MockBusDriver` |
 | [`ethercat-wago-coupler`](examples/ethercat-wago-coupler) | mirrors a WAGO 750-430's 8 inputs to a 750-530's 8 outputs through a 750-354 coupler over a real NIC |
 | [`ethercat-real-bus`](examples/ethercat-real-bus)   | drives a real EK1100 + EL1008 + EL2004 over a Linux NIC (Pi-friendly), decoding inputs / encoding outputs via **ESI-generated typed drivers** |
+| [`ethercat-stepper`](examples/ethercat-stepper)     | drives a Beckhoff EL7047 stepper (Beckhoff **positioning interface**, not CiA 402) off EL1008 button presses with an EL2004 status lamp — all three terminals through ESI-generated typed drivers, the EL7047 in its generated `PositioningInterface` mode |
 
 See [`examples/README.md`](examples/README.md) for the full index and
 the local-paths toggle (debugging an in-tree change against an
@@ -439,8 +460,8 @@ This is **pre-1.0 personal experiment code.** Concretely:
   decomposition (taktora as `ASIL B(D)`, a diverse integrator-supplied
   monitor as the second `ASIL B(D)`) — the independence argument is
   **not closed by taktora** and the whole concept has not been assessed.
-- No version has been published to crates.io. There is no support, no
-  release cadence, no SLA, and no backwards-compatibility guarantee.
+- The crates are published to crates.io (pre-1.0, on a release-plz cadence),
+  but there is no support, no SLA, and no backwards-compatibility guarantee.
 
 If any of those caveats matter for your use case, **don't ship it**.
 
