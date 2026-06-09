@@ -7,14 +7,19 @@ use std::io::Write as _;
 
 use taktora_ethercat_netcfg::{NetcfgError, parse};
 
-/// A single-device ESI with one `TxPDO` entry: `#x6000`, `BitLen` 8.
+/// A single-device ESI with one `TxPDO` (mapping-object `#x1a00`, inner
+/// entry `#x6000`, `BitLen` 8). `Sm="3"` is declared so it appears in the
+/// synthetic default assignment set (`sm.is_some()`).
+///
+/// After PDO-granularity resolution the ESI yields:
+///   tx: [`PdoEntry`] with index `0x1a00`, `bit_offset` `0`, `bit_length` `8`
 const ESI_XML: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
 <EtherCATInfo>
   <Vendor><Id>#x00000021</Id></Vendor>
   <Descriptions><Devices><Device>
     <Type ProductCode="#x07500354" RevisionNo="#x00000001">Coupler</Type>
     <Name>Coupler</Name>
-    <TxPdo>
+    <TxPdo Sm="3">
       <Index>#x1a00</Index>
       <Entry><Index>#x6000</Index><BitLen>8</BitLen></Entry>
     </TxPdo>
@@ -31,6 +36,8 @@ fn esi_yaml(inline_bit_length: u16) -> (tempfile::NamedTempFile, String) {
         .expect("write ESI fixture");
     let esi_path = esi.path().to_str().expect("ESI path is UTF-8").to_owned();
 
+    // Inline tx uses PDO-granularity: the mapping-object index `0x1a00`
+    // (not the inner mapped-object `0x6000`). bit_length is the PDO total.
     let yaml = format!(
         r#"
 schema_version: 1
@@ -40,7 +47,7 @@ devices:
     esi: "{esi_path}"
     pdos:
       tx:
-        - {{ index: 0x6000, bit_offset: 0, bit_length: {inline_bit_length} }}
+        - {{ index: 0x1a00, bit_offset: 0, bit_length: {inline_bit_length} }}
 channels: []
 "#
     );

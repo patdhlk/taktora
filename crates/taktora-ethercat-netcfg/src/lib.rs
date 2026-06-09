@@ -296,6 +296,37 @@ pub enum NetcfgError {
         count: usize,
     },
 
+    /// `op_mode` named a mapping that does not exist on the device.
+    #[error("device `{label}` op_mode `{requested}` not found; available: {}", available.join(", "))]
+    OpModeNotFound {
+        /// Offending device label.
+        label: String,
+        /// The requested mode name.
+        requested: String,
+        /// Mapping names the device declares.
+        available: Vec<String>,
+    },
+    /// `op_mode` was set on a device that declares no `AlternativeSmMapping`.
+    #[error("device `{label}` sets op_mode but its ESI declares no selectable PDO mappings")]
+    OpModeOnFlatDevice {
+        /// Offending device label.
+        label: String,
+    },
+    /// `op_mode` omitted on a multi-mapping device with no Default=\"1\" mapping.
+    #[error("device `{label}` omits op_mode and its ESI declares no default PDO mapping")]
+    NoDefaultMapping {
+        /// Offending device label.
+        label: String,
+    },
+    /// A mapping references a PDO index present in neither rx nor tx PDOs.
+    #[error("device `{label}` mapping references unknown PDO index {index:#06x}")]
+    UnknownAssignmentPdo {
+        /// Offending device label.
+        label: String,
+        /// The dangling PDO index.
+        index: u16,
+    },
+
     /// An `esi:` reference is a remote (`http://` / `https://`) URL. Builds
     /// are hermetic and never fetch over the network at parse time
     /// (`REQ_0834`); the ESI must be vendored locally and referenced as a
@@ -422,6 +453,8 @@ mod dto {
         label: String,
         #[serde(default)]
         esi: Option<String>,
+        #[serde(default)]
+        op_mode: Option<String>,
         #[serde(default)]
         pdos: PdosDto,
         #[serde(default)]
@@ -586,26 +619,6 @@ mod dto {
         Ok(PathBuf::from(reference))
     }
 
-    /// Flatten a device's structured ESI PDOs (one direction) into netcfg
-    /// process-image [`PdoEntry`]s, assigning cumulative bit offsets in
-    /// document order. Valid for single-assignment devices; alternative-aware
-    /// resolution is a codegen concern and out of scope for the parser layer.
-    fn flatten_esi_pdos(pdos: &[taktora_ethercat_esi::Pdo]) -> Vec<PdoEntry> {
-        let mut out = Vec::new();
-        let mut bit_offset: u16 = 0;
-        for pdo in pdos {
-            for entry in &pdo.entries {
-                out.push(PdoEntry {
-                    index: entry.index,
-                    bit_offset,
-                    bit_length: entry.bit_length,
-                });
-                bit_offset = bit_offset.saturating_add(entry.bit_length);
-            }
-        }
-        out
-    }
-
     impl From<BusConfigDto> for BusConfig {
         fn from(dto: BusConfigDto) -> Self {
             Self {
@@ -652,6 +665,7 @@ mod dto {
             let Self {
                 label,
                 esi,
+                op_mode,
                 pdos,
                 identity,
                 station_alias,
@@ -659,6 +673,10 @@ mod dto {
                 sm_watchdog_timeout_ms,
                 sm_watchdog_enabled,
             } = self;
+
+            if esi.is_none() && op_mode.is_some() {
+                return Err(NetcfgError::OpModeOnFlatDevice { label });
+            }
 
             let (source, identity, esi_output_watchdog_enabled) = match esi {
                 Some(reference) => {
@@ -677,8 +695,39 @@ mod dto {
                         .next()
                         .expect("checked count == 1");
 
-                    let rx = flatten_esi_pdos(&device.rx_pdos);
-                    let tx = flatten_esi_pdos(&device.tx_pdos);
+                    let assignment =
+                        device.resolve_assignment(op_mode.as_deref()).map_err(|e| {
+                            use taktora_ethercat_esi::ResolveError as R;
+                            match e {
+                                R::NoAlternativeMappings => NetcfgError::OpModeOnFlatDevice {
+                                    label: label.clone(),
+                                },
+                                R::MappingNotFound {
+                                    requested,
+                                    available,
+                                } => NetcfgError::OpModeNotFound {
+                                    label: label.clone(),
+                                    requested,
+                                    available,
+                                },
+                                R::NoDefaultMapping => NetcfgError::NoDefaultMapping {
+                                    label: label.clone(),
+                                },
+                                R::UnknownAssignmentPdo { index } => {
+                                    NetcfgError::UnknownAssignmentPdo {
+                                        label: label.clone(),
+                                        index,
+                                    }
+                                }
+                            }
+                        })?;
+                    let to_entry = |e: &taktora_ethercat_esi::ResolvedPdoEntry| PdoEntry {
+                        index: e.index,
+                        bit_offset: e.bit_offset,
+                        bit_length: e.bit_length,
+                    };
+                    let rx: Vec<PdoEntry> = assignment.rx.iter().map(to_entry).collect();
+                    let tx: Vec<PdoEntry> = assignment.tx.iter().map(to_entry).collect();
                     // If the device ALSO carries inline pdos:, the two
                     // descriptions must agree. The ESI is the source of
                     // truth, so an exact match is redundant-but-legal and a

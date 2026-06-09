@@ -12,7 +12,7 @@ const ESI_XML: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
     <Type ProductCode="#x07500354" RevisionNo="#x00000001">WAGO 750-354</Type>
     <Name>WAGO 750-354</Name>
     <Sm StartAddress="#x1000" ControlByte="#x40" Enable="1">Outputs</Sm>
-    <TxPdo>
+    <TxPdo Sm="3">
       <Index>#x1a00</Index>
       <Entry><Index>#x6000</Index><BitLen>8</BitLen></Entry>
     </TxPdo>
@@ -57,15 +57,17 @@ channels: []
         device.source,
         DeviceSource::Esi {
             path: esi_path,
+            // PDO-granularity: index = PDO mapping-object index (0x1a00 / 0x1600),
+            // bit_length = sum of the PDO's inner entries.
             tx: vec![PdoEntry {
-                index: 0x6000,
+                index: 0x1a00,
                 bit_offset: 0,
-                bit_length: 8,
+                bit_length: 8
             }],
             rx: vec![PdoEntry {
-                index: 0x7000,
+                index: 0x1600,
                 bit_offset: 0,
-                bit_length: 8,
+                bit_length: 8
             }],
         }
     );
