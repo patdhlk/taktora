@@ -17,9 +17,33 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # 0. Classify the diff. This connector CI is all Rust, so every job below is
+  #    gated on `code` — README-only and spec-only PRs skip the whole matrix.
+  #    main has no required status checks, so skipped jobs never block a merge.
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      spec: ${{ steps.classify.outputs.spec }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: ./scripts/classify-changes.sh
+
   # 1. Default-feature build + test on Linux. Layer-1 only; no
   #    socketcan-integration, no vcan.
   build-test-default:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: build+test default (linux)
     runs-on: ubuntu-latest
     steps:
@@ -35,6 +59,8 @@ jobs:
   #    `RealCanInterface` and verifies the in-module pure-logic
   #    tests for the type conversions pass.
   feature-socketcan-integration-linux:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: feature socketcan-integration (linux)
     runs-on: ubuntu-latest
     steps:
@@ -50,6 +76,8 @@ jobs:
   #    socketcan-integration feature gates the real socketcan dep
   #    (REQ_0503).
   dep-gating:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: dep gating (TEST_0511)
     runs-on: ubuntu-latest
     steps:
@@ -61,6 +89,8 @@ jobs:
 
   # 4. Connector-scoped clippy under both feature configurations.
   clippy-can:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: clippy (taktora-connector-can)
     runs-on: ubuntu-latest
     steps:
@@ -80,6 +110,8 @@ jobs:
   #    `--include-ignored`. Verifies REQ_0502 + REQ_0613 + REQ_0614
   #    against the real Linux PF_CAN stack.
   vcan-smoke:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: vcan smoke (TEST_0512)
     runs-on: ubuntu-latest
     steps:
