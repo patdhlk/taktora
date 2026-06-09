@@ -616,7 +616,8 @@ fn emit_decode(enum_ident: &Ident, assigns: &[ResolvedAssignment]) -> TokenStrea
         let v = &a.variant_ident;
         let guard = length_guard(a.input_bits);
         let reads = direction_member_stmts(&a.inputs, "inputs", read_member);
-        quote! { #enum_ident::#v(m) => { #guard #(#reads)* } }
+        let binding = if reads.is_empty() { quote!(_) } else { quote!(m) };
+        quote! { #enum_ident::#v(#binding) => { #guard #(#reads)* } }
     });
     quote! {
         #import
@@ -635,7 +636,8 @@ fn emit_encode(enum_ident: &Ident, assigns: &[ResolvedAssignment]) -> TokenStrea
         let v = &a.variant_ident;
         let guard = length_guard(a.output_bits);
         let writes = direction_member_stmts(&a.outputs, "outputs", write_member);
-        quote! { #enum_ident::#v(m) => { #guard #(#writes)* } }
+        let binding = if writes.is_empty() { quote!(_) } else { quote!(m) };
+        quote! { #enum_ident::#v(#binding) => { #guard #(#writes)* } }
     });
     quote! {
         #import

@@ -141,7 +141,7 @@ impl taktora_ethercat_esi_rt::EsiDevice for EL1008 {
         bits: &mut taktora_ethercat_esi_rt::BitSlice<u8, taktora_ethercat_esi_rt::Lsb0>,
     ) -> Result<(), taktora_ethercat_esi_rt::EsiError> {
         match &self.mode {
-            EL1008OpMode::Default(m) => {
+            EL1008OpMode::Default(_) => {
                 const NEED: usize = 0usize;
                 if bits.len() < NEED {
                     return Err(taktora_ethercat_esi_rt::EsiError::BufferTooShort {
@@ -245,7 +245,7 @@ impl taktora_ethercat_esi_rt::EsiDevice for EL2004 {
         bits: &taktora_ethercat_esi_rt::BitSlice<u8, taktora_ethercat_esi_rt::Lsb0>,
     ) -> Result<(), taktora_ethercat_esi_rt::EsiError> {
         match &mut self.mode {
-            EL2004OpMode::Default(m) => {
+            EL2004OpMode::Default(_) => {
                 const NEED: usize = 0usize;
                 if bits.len() < NEED {
                     return Err(taktora_ethercat_esi_rt::EsiError::BufferTooShort {
@@ -412,7 +412,7 @@ impl taktora_ethercat_esi_rt::EsiDevice for EL3602 {
         bits: &mut taktora_ethercat_esi_rt::BitSlice<u8, taktora_ethercat_esi_rt::Lsb0>,
     ) -> Result<(), taktora_ethercat_esi_rt::EsiError> {
         match &self.mode {
-            EL3602OpMode::Default(m) => {
+            EL3602OpMode::Default(_) => {
                 const NEED: usize = 0usize;
                 if bits.len() < NEED {
                     return Err(taktora_ethercat_esi_rt::EsiError::BufferTooShort {
@@ -2197,7 +2197,7 @@ impl taktora_ethercat_esi_rt::EsiDevice for EL3001_like {
         bits: &mut taktora_ethercat_esi_rt::BitSlice<u8, taktora_ethercat_esi_rt::Lsb0>,
     ) -> Result<(), taktora_ethercat_esi_rt::EsiError> {
         match &self.mode {
-            EL3001_likeOpMode::Default(m) => {
+            EL3001_likeOpMode::Default(_) => {
                 const NEED: usize = 0usize;
                 if bits.len() < NEED {
                     return Err(taktora_ethercat_esi_rt::EsiError::BufferTooShort {
@@ -2309,7 +2309,7 @@ impl taktora_ethercat_esi_rt::EsiDevice for ALT {
         bits: &mut taktora_ethercat_esi_rt::BitSlice<u8, taktora_ethercat_esi_rt::Lsb0>,
     ) -> Result<(), taktora_ethercat_esi_rt::EsiError> {
         match &self.mode {
-            ALTOpMode::Default(m) => {
+            ALTOpMode::Default(_) => {
                 const NEED: usize = 0usize;
                 if bits.len() < NEED {
                     return Err(taktora_ethercat_esi_rt::EsiError::BufferTooShort {

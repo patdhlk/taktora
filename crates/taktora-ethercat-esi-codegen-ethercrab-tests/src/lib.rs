@@ -2,7 +2,6 @@
 #[allow(
     missing_docs,
     non_camel_case_types,
-    unused_variables,
     clippy::all,
     clippy::pedantic,
     clippy::nursery
