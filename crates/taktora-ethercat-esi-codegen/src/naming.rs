@@ -80,7 +80,7 @@ pub fn base_ident(device: &esi::EsiDevice) -> String {
 /// (`REQ_0511`).
 ///
 /// The raw name is lower-cased and word-segmented, then char-sanitised and
-/// keyword-escaped through the same [`sanitise_ident`] rules used for type
+/// keyword-escaped through the same `sanitise_ident` rules used for type
 /// names, so the result is always a valid, bare Rust identifier.
 ///
 /// Word boundaries are inserted on a lower→upper transition (`UnderRange`
@@ -133,7 +133,7 @@ pub fn pdo_field_string(name: Option<&str>, index: u16) -> String {
 /// `AiInputsChannel2`); an unnamed PDO falls back to its mapping index
 /// (`0x1A00` → `Pdo1a00`). The result is char-sanitised so the concatenation
 /// `<Dev><Segment>` stays a valid identifier. Backs [`pdo_struct_ident`]; the
-/// underlying [`pascal_segment`] is also shared by the `op_mode_*` naming so
+/// underlying `pascal_segment` is also shared by the `op_mode_*` naming so
 /// segments render consistently across both.
 ///
 /// [`pdo_struct_ident`]: crate::pdo_struct_ident
@@ -169,7 +169,7 @@ fn pascal_segment(raw: &str) -> String {
 /// Derives from an `AlternativeSmMapping` `<Name>` (`REQ_0523`). Unnamed
 /// mappings AND names that sanitise to nothing (all-separator characters such
 /// as `"---"` or `"   "`) fall back to `Mode<ordinal+1>` (1-based, stable in
-/// document order). The `"_"` sentinel that [`pascal_segment`] returns for
+/// document order). The `"_"` sentinel that `pascal_segment` returns for
 /// all-separator inputs is treated the same as empty, so no variant is ever
 /// literally named `_`. Collisions among the resulting segments are
 /// de-duplicated by the caller (it has the full set).

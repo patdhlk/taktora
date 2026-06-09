@@ -9,8 +9,9 @@
 # Vendor ESI fixtures are verbatim Beckhoff XML carrying German message
 # catalogs (e.g. "Antrieb ist kalibriert", "I2T-Modell"). They are vendor
 # data, not our prose — exclude them wholesale rather than allow-listing
-# each German word.
-extend-exclude = ["examples/*/esi/*.xml"]
+# each German word. The same fixtures are mirrored into the codegen test
+# corpus under crates/*/esi/, so exclude that path too.
+extend-exclude = ["examples/*/esi/*.xml", "crates/*/esi/*.xml"]
 
 [default.extend-words]
 # EtherCAT vocabulary.

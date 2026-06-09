@@ -45,8 +45,9 @@ repos:
         # project-specific allowlists once we have hits to triage.
         args: ["--no-check-filenames"]
         # Vendor ESI fixtures carry verbatim German message catalogs; they
-        # are vendor data, not our prose. Never pass them to typos.
-        exclude: '^examples/.*/esi/.*\.xml$'
+        # are vendor data, not our prose. Never pass them to typos. Same
+        # fixtures live under crates/*/esi/ (codegen test corpus) too.
+        exclude: '/esi/.*\.xml$'
 
   # ---------------------------------------------------------- rust formatting
   - repo: local
