@@ -188,10 +188,7 @@ fn resolve_assignments(
             }
             // Phase 1 classifies one concrete mapping; the name/default
             // selection errors cannot arise here.
-            _ => CodegenError::UnknownAssignmentPdo {
-                device: device_struct.to_string(),
-                index: 0,
-            },
+            _ => unreachable!("classify_assignment only returns UnknownAssignmentPdo"),
         })?;
         planned.push(Planned {
             variant_ident: op_mode_variant_ident(m.name.as_deref(), ordinal)?,
