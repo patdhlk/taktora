@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 
 use proc_macro2::{Ident, TokenStream};
-use taktora_ethercat_esi::{EsiFile, Pdo};
+use taktora_ethercat_esi::{AlternativeSmMapping, EsiFile, Pdo};
 
 pub use taktora_fieldbus_od_core::Identity;
 
@@ -39,6 +39,9 @@ pub struct Device<'a> {
     pub tx_pdos: &'a [Pdo],
     /// `RxPDOs` (master → `SubDevice`), borrowed from the parsed model.
     pub rx_pdos: &'a [Pdo],
+    /// Predefined PDO-assignment combinations (`AlternativeSmMapping`),
+    /// borrowed from the parsed model. Empty for single-assignment devices.
+    pub alt_sm_mappings: &'a [AlternativeSmMapping],
 }
 
 /// A backend that turns resolved [`Device`]s into Rust token streams.
@@ -306,6 +309,7 @@ fn resolve_devices(esi: &EsiFile) -> Result<Vec<Device<'_>>, CodegenError> {
                 name: device.name.as_deref(),
                 tx_pdos: &device.tx_pdos,
                 rx_pdos: &device.rx_pdos,
+                alt_sm_mappings: &device.alt_sm_mappings,
             })
         })
         .collect::<Result<_, _>>()?;
