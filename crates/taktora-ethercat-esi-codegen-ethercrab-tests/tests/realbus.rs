@@ -14,8 +14,8 @@
 
 use bitvec::view::BitView;
 use taktora_ethercat_esi_codegen_ethercrab_tests::generated::{
-    EL1008, EL1008_REV00100000, EL2004, EL2004_REV00000000, EL3602, EL3602_REV00100000, REGISTRY,
-    device_for,
+    EL1008, EL1008OpMode, EL1008_REV00100000, EL2004, EL2004OpMode, EL2004_REV00000000, EL3602,
+    EL3602OpMode, EL3602_REV00100000, REGISTRY, device_for,
 };
 use taktora_ethercat_esi_rt::{BitSlice, EsiDevice, EsiError, Identity, Lsb0};
 
@@ -36,14 +36,16 @@ fn el1008_decode_eight_channels() {
     dev.decode_inputs(bits)
         .expect("EL1008 decode should succeed");
 
-    assert!(!dev.channel_1.input, "ch1 (bit0) should be false");
-    assert!(dev.channel_2.input, "ch2 (bit1) should be true");
-    assert!(!dev.channel_3.input, "ch3 (bit2) should be false");
-    assert!(dev.channel_4.input, "ch4 (bit3) should be true");
-    assert!(!dev.channel_5.input, "ch5 (bit4) should be false");
-    assert!(dev.channel_6.input, "ch6 (bit5) should be true");
-    assert!(!dev.channel_7.input, "ch7 (bit6) should be false");
-    assert!(dev.channel_8.input, "ch8 (bit7) should be true");
+    // Single-PDO device -> one `Default` OpMode variant exposing all 8 channels.
+    let EL1008OpMode::Default(ref m) = dev.mode;
+    assert!(!m.inputs.channel_1.input, "ch1 (bit0) should be false");
+    assert!(m.inputs.channel_2.input, "ch2 (bit1) should be true");
+    assert!(!m.inputs.channel_3.input, "ch3 (bit2) should be false");
+    assert!(m.inputs.channel_4.input, "ch4 (bit3) should be true");
+    assert!(!m.inputs.channel_5.input, "ch5 (bit4) should be false");
+    assert!(m.inputs.channel_6.input, "ch6 (bit5) should be true");
+    assert!(!m.inputs.channel_7.input, "ch7 (bit6) should be false");
+    assert!(m.inputs.channel_8.input, "ch8 (bit7) should be true");
 
     assert_eq!(dev.input_len(), 1, "EL1008 has one input byte");
     assert_eq!(dev.output_len(), 0, "EL1008 has no outputs");
@@ -57,11 +59,12 @@ fn el1008_decode_eight_channels() {
 #[test]
 fn el2004_encode_four_channels() {
     let mut dev = EL2004::default();
-    // ch1=true, ch2=false, ch3=true, ch4=false.
-    dev.channel_1.output = true;
-    dev.channel_2.output = false;
-    dev.channel_3.output = true;
-    dev.channel_4.output = false;
+    // ch1=true, ch2=false, ch3=true, ch4=false — set via the active Default mode.
+    let EL2004OpMode::Default(ref mut m) = dev.mode;
+    m.outputs.channel_1.output = true;
+    m.outputs.channel_2.output = false;
+    m.outputs.channel_3.output = true;
+    m.outputs.channel_4.output = false;
 
     let mut buf = [0u8; 1];
     let bits: &mut BitSlice<u8, Lsb0> = buf.view_bits_mut::<Lsb0>();
@@ -122,21 +125,23 @@ fn el3602_decode_two_channels() {
     dev.decode_inputs(bits)
         .expect("EL3602 decode should succeed");
 
+    // Single-PDO multi-channel device -> one `Default` OpMode variant.
+    let EL3602OpMode::Default(ref m) = dev.mode;
     assert!(
-        dev.ai_inputs_channel_1.underrange,
+        m.inputs.ai_inputs_channel_1.underrange,
         "ch1 underrange should be true"
     );
     assert_eq!(
-        dev.ai_inputs_channel_1.value, 0x0001_0000,
+        m.inputs.ai_inputs_channel_1.value, 0x0001_0000,
         "ch1 value should decode to 65536"
     );
 
     assert!(
-        dev.ai_inputs_channel_2.underrange,
+        m.inputs.ai_inputs_channel_2.underrange,
         "ch2 underrange should be true"
     );
     assert_eq!(
-        dev.ai_inputs_channel_2.value, -2,
+        m.inputs.ai_inputs_channel_2.value, -2,
         "ch2 value should decode to -2 (signed i32)"
     );
 
@@ -174,12 +179,12 @@ fn el3602_decode_buffer_too_short() {
 
 #[test]
 fn registry_has_all_devices() {
-    // Four demo devices (EL1008/EL2004/EL3602/EL3001_like) plus the synthetic
-    // ALT alternatives fixture = five esi/*.xml devices.
+    // Four demo devices (EL1008/EL2004/EL3602/EL3001_like), the synthetic ALT
+    // alternatives fixture, and the EL7047 stepper = six esi/*.xml devices.
     assert_eq!(
         REGISTRY.len(),
-        5,
-        "all five esi/*.xml devices should register"
+        6,
+        "all six esi/*.xml devices should register"
     );
 }
 
