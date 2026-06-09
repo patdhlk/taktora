@@ -44,6 +44,9 @@ repos:
         # Don't auto-fix; report only. typos.toml in repo root can pin
         # project-specific allowlists once we have hits to triage.
         args: ["--no-check-filenames"]
+        # Vendor ESI fixtures carry verbatim German message catalogs; they
+        # are vendor data, not our prose. Never pass them to typos.
+        exclude: '^examples/.*/esi/.*\.xml$'
 
   # ---------------------------------------------------------- rust formatting
   - repo: local
