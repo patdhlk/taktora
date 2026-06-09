@@ -39,10 +39,12 @@ pub struct SdoWrite {
     pub value: SdoValue,
 }
 
-/// SDO write value. `U8`/`U16` cover the PDO-assignment sequence
-/// (`REQ_0315`); the wider and signed variants exist for operator-declared
-/// startup-configuration SDOs (`REQ_0853`), where drive parameters are
-/// commonly 16/32-bit and occasionally signed.
+/// SDO write value.
+///
+/// `U8`/`U16` cover the PDO-assignment sequence (`REQ_0315`); the wider and
+/// signed variants exist for operator-declared startup-configuration SDOs
+/// (`REQ_0853`), where drive parameters are commonly 16/32-bit and
+/// occasionally signed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SdoValue {
     /// 8-bit unsigned.
