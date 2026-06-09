@@ -88,34 +88,15 @@ pub enum CodegenError {
         reason: String,
     },
 
-    /// A PDO-assignment alternative group resolved to zero alternatives. A
-    /// backend cannot emit a choice enum with no variants (nor a `Default`), so
-    /// this is surfaced rather than emitting uncompilable tokens. The grouping
-    /// only ever produces non-empty groups, so this guards an internal
-    /// invariant (`REQ_0523`).
-    #[error("alternative group for enum {enum_ident:?} has no alternatives")]
-    EmptyAlternativeGroup {
-        /// The enum identifier the empty group would have produced.
-        enum_ident: String,
-    },
-
-    /// A single direction (`Tx`/`Rx`) resolved to MORE THAN ONE PDO-assignment
-    /// alternative group. The spec-required shape is one alternative group per
-    /// direction (the master picks one PDO assignment via 0x1C12/0x1C13).
-    /// Emitting more than one group is currently miscompiled: every group is
-    /// laid out at the same `base_offset`, so two groups in one direction would
-    /// alias the same bits at decode/encode time (silent data corruption).
-    /// Until per-group offset threading exists this is rejected as a hard error
-    /// rather than emitting wrong codegen (`REQ_0523`/`REQ_0524`).
-    #[error(
-        "device {device:?} resolves more than one alternative group in the {direction} direction; \
-         multiple alternative groups per direction are not yet supported"
-    )]
-    MultipleAlternativeGroups {
-        /// The device whose direction over-resolved.
+    /// An `AlternativeSmMapping` referenced a PDO index that is in neither the
+    /// device's `TxPdo` nor `RxPdo` list — the ESI file is internally
+    /// inconsistent.
+    #[error("device {device}: AlternativeSmMapping references unknown PDO {index:#06x}")]
+    UnknownAssignmentPdo {
+        /// The device struct ident.
         device: String,
-        /// The offending direction (`"Tx"` for inputs, `"Rx"` for outputs).
-        direction: &'static str,
+        /// The dangling PDO index.
+        index: u16,
     },
 }
 
