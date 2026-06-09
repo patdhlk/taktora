@@ -133,8 +133,11 @@ pollster          = "0.3"
 # (REQ_0104). Upstream allocates two scratch Vecs per fired-fd dispatch
 # (waitset.rs ~901 + ~624), which the master-timerfd cyclic path hits every
 # cycle, violating the zero-alloc steady-state guarantee. The fork reuses the
-# per-wait triggered-fd buffer and drops the dead (fd, deadline-idx) Vec; only
-# src/waitset.rs differs from published 0.8.1. Remove once released upstream.
+# per-wait triggered-fd buffer and drops the dead (fd, deadline-idx) Vec.
+# src/waitset.rs differs from published 0.8.1; src/service/mod.rs additionally
+# imports the container `String` trait so `as_str` resolves under newer nightly
+# (rust-lang/rust#147992) — the rustdoc-JSON build cargo-public-api drives would
+# otherwise fail to compile iceoryx2. Remove once released upstream.
 # Fork: https://github.com/patdhlk/iceoryx2 (branch taktora-pin-0.8.1-alloc-free).
 [patch.crates-io]
-iceoryx2 = { git = "https://github.com/patdhlk/iceoryx2", rev = "bf3f4be595fc0388047fff68e29b149765c8f04b" }
+iceoryx2 = { git = "https://github.com/patdhlk/iceoryx2", rev = "c6a41fccda31668e53dc86d2a1fe95ba34af732d" }
