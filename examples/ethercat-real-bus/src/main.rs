@@ -283,17 +283,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut dev = generated::EL1008::default();
                     match dev.decode_inputs([v].view_bits::<Lsb0>()) {
                         Ok(()) => {
+                            // The generated EL1008 carries its named channels
+                            // under the active op-mode; the EL1008 has a single
+                            // `Default` mode, so this binding is irrefutable.
+                            let generated::EL1008OpMode::Default(m) = &dev.mode;
                             println!(
                                 "t=+{elapsed_ms:>6}ms  bits=0b{v:08b}  decimal={v}  \
                                  ch1={} ch2={} ch3={} ch4={} ch5={} ch6={} ch7={} ch8={}",
-                                dev.channel_1.input as u8,
-                                dev.channel_2.input as u8,
-                                dev.channel_3.input as u8,
-                                dev.channel_4.input as u8,
-                                dev.channel_5.input as u8,
-                                dev.channel_6.input as u8,
-                                dev.channel_7.input as u8,
-                                dev.channel_8.input as u8,
+                                m.inputs.channel_1.input as u8,
+                                m.inputs.channel_2.input as u8,
+                                m.inputs.channel_3.input as u8,
+                                m.inputs.channel_4.input as u8,
+                                m.inputs.channel_5.input as u8,
+                                m.inputs.channel_6.input as u8,
+                                m.inputs.channel_7.input as u8,
+                                m.inputs.channel_8.input as u8,
                             );
                         }
                         Err(e) => {
@@ -327,7 +331,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // it encode the output PDI byte. Channels 2..4 stay false. The bit
             // layout comes straight from `esi/beckhoff_el2004.xml`.
             let mut el2004 = generated::EL2004::default();
-            el2004.channel_1.output = state_bool;
+            let generated::EL2004OpMode::Default(m) = &mut el2004.mode;
+            m.outputs.channel_1.output = state_bool;
             let mut buf = [0u8; 1];
             match el2004.encode_outputs(buf.view_bits_mut::<Lsb0>()) {
                 Ok(()) => {
@@ -459,16 +464,18 @@ mod tests {
         el1008
             .decode_inputs([0b1010_1010u8].view_bits::<Lsb0>())
             .expect("EL1008 decode should succeed");
-        assert!(!el1008.channel_1.input);
-        assert!(el1008.channel_2.input);
-        assert!(!el1008.channel_7.input);
-        assert!(el1008.channel_8.input);
+        let generated::EL1008OpMode::Default(m) = &el1008.mode;
+        assert!(!m.inputs.channel_1.input);
+        assert!(m.inputs.channel_2.input);
+        assert!(!m.inputs.channel_7.input);
+        assert!(m.inputs.channel_8.input);
         assert_eq!(el1008.input_len(), 1);
         assert_eq!(el1008.output_len(), 0);
 
         // EL2004: set channel 1 only -> bit0 high -> 0b0000_0001.
         let mut el2004 = generated::EL2004::default();
-        el2004.channel_1.output = true;
+        let generated::EL2004OpMode::Default(m) = &mut el2004.mode;
+        m.outputs.channel_1.output = true;
         let mut buf = [0u8; 1];
         el2004
             .encode_outputs(buf.view_bits_mut::<Lsb0>())
