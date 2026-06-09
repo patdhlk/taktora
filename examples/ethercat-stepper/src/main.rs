@@ -47,7 +47,9 @@ const CONTROL_PERIOD: Duration = Duration::from_millis(10);
 /// Lamp/health cadence.
 const LAMP_PERIOD: Duration = Duration::from_millis(250);
 
-/// Bus topology bounds passed to `EthercrabBusDriver`.
+/// Bus topology bounds passed to `EthercrabBusDriver`; keep in sync with
+/// `bus.max_subdevices` / `bus.max_pdi_bytes` in `network.yaml` (the codegen
+/// does not emit these as constants).
 const MAX_SUBDEVICES: usize = 16;
 const MAX_PDI: usize = 256;
 
@@ -85,10 +87,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         deceleration: cli.decel,
     };
 
-    // 0. Generated EL7047 device, pinned to the positioning-interface mode. Used
-    //    only for the byte-level codec + the domain adapter; the bus PDO
+    // 0. Generated EL7047 device, pinned to the positioning-interface mode and
+    //    reused across cycles (input images decode into it, output images encode
+    //    out of it; the domain control/status surface is mapped via
+    //    `el7047_adapter`). Used only for the byte-level codec — the bus PDO
     //    assignment now comes from generated_net::PDO_MAP (network.yaml).
-    let el7047 = generated::EL7047 {
+    let mut el7047_dev = generated::EL7047 {
         mode: generated::EL7047OpMode::PositioningInterface(Default::default()),
     };
 
@@ -102,6 +106,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .pdo_map(generated_net::PDO_MAP)
         .build();
 
+    // Informational only: the connector has no identity-check API yet, so this
+    // logs (does not enforce) the expected per-device identities — a hardware
+    // mismatch is then visible in the terminal at startup.
     for id in generated_net::EXPECTED_IDENTITIES {
         eprintln!(
             "expecting device @ {:#06x}: vendor={:#x} product={:#x} rev={:#x}",
@@ -169,11 +176,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Control loop runs at CONTROL_PERIOD (10 ms); toggling every 25 cycles
     // (250 ms) gives a ~2 Hz blink the eye can resolve.
     const BLINK_TOGGLE_CYCLES: u32 = 25;
-
-    // Generated EL7047 device, pinned to the positioning-interface mode, reused
-    // across cycles: input images decode into it, output images encode out of
-    // it. The domain control/status surface is mapped via `el7047_adapter`.
-    let mut el7047_dev = el7047;
 
     exec.add(item_with_triggers(
         |d| -> Result<(), ExecutorError> {
