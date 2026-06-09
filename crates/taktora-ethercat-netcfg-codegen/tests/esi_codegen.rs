@@ -23,6 +23,34 @@ const ESI_XML: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
       <Device>
         <Type ProductCode="#x07500354" RevisionNo="#x00000001">Coupler</Type>
         <Name>Coupler</Name>
+        <Mailbox DataLinkLayer="true"><CoE SdoInfo="1" PdoAssign="1"/></Mailbox>
+        <Sm StartAddress="#x1000" ControlByte="#x44" Enable="1">Outputs</Sm>
+        <TxPdo Sm="3">
+          <Index>#x1a00</Index>
+          <Entry><Index>#x6000</Index><SubIndex>1</SubIndex><BitLen>8</BitLen></Entry>
+        </TxPdo>
+        <RxPdo Sm="0">
+          <Index>#x1600</Index>
+          <Entry><Index>#x7000</Index><SubIndex>1</SubIndex><BitLen>8</BitLen></Entry>
+        </RxPdo>
+      </Device>
+    </Devices>
+  </Descriptions>
+</EtherCATInfo>
+"##;
+
+/// Same single device but with NO `CoE` mailbox — a "simple terminal". Its PDO
+/// assignment must NOT be emitted (writing 0x1C12/0x1C13 to a mailbox-less
+/// device fails with `NoReadMailbox` on the bus); it keeps its fixed default
+/// mapping. `expected_wkc` is still derived from the resolved PDO presence.
+const ESI_XML_NO_MAILBOX: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
+<EtherCATInfo>
+  <Vendor><Id>#x00000021</Id></Vendor>
+  <Descriptions>
+    <Devices>
+      <Device>
+        <Type ProductCode="#x07500355" RevisionNo="#x00000001">SimpleTerm</Type>
+        <Name>SimpleTerm</Name>
         <Sm StartAddress="#x1000" ControlByte="#x44" Enable="1">Outputs</Sm>
         <TxPdo Sm="3">
           <Index>#x1a00</Index>
@@ -236,5 +264,56 @@ channels:
         routing_const(&file, "ETHERCAT_COUPLER_OUT"),
         (0x1000, "Rx".to_owned()),
         "rx channel routes to address 0x1000 with direction Rx"
+    );
+}
+
+#[test]
+fn mailbox_less_device_emits_empty_assignment_but_keeps_wkc() {
+    // A simple terminal (no CoE mailbox) must NOT receive PDO-assignment SDO
+    // writes — its rx/tx in the generated SubDeviceMap are empty — yet it
+    // still contributes its derived expected_wkc and routes process data.
+    let mut esi = tempfile::Builder::new()
+        .suffix(".xml")
+        .tempfile()
+        .expect("create temp ESI file");
+    esi.write_all(ESI_XML_NO_MAILBOX.as_bytes())
+        .expect("write ESI XML");
+    let esi_path = esi.path().to_str().expect("ESI path is UTF-8");
+
+    let yaml = format!(
+        r#"
+schema_version: 1
+bus: {{ cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_bytes: 256 }}
+devices:
+  - {{ label: term, esi: "{esi_path}" }}
+channels: []
+"#
+    );
+
+    let cfg = taktora_ethercat_netcfg::parse(&yaml).expect("network.yaml + ESI parse");
+    let src = taktora_ethercat_netcfg_codegen::generate(&cfg).expect("codegen succeeds");
+    let file = syn::parse_file(&src).expect("generated source is valid Rust");
+
+    let maps = sub_device_maps(&file);
+    assert_eq!(maps.len(), 1, "single device → one SubDeviceMap");
+    let map = maps[0];
+
+    // WKC is still derived from the RESOLVED PDOs (both directions present).
+    assert_eq!(
+        lit_u64(field(map, "expected_wkc")),
+        3,
+        "mailbox-less device still contributes wkc = Rx(1) + Tx(2)"
+    );
+
+    // But the PDO-assignment lists are EMPTY — no 0x1C12/0x1C13 writes.
+    assert_eq!(
+        pdo_entries(field(map, "tx_pdos")),
+        Vec::<(u64, u64)>::new(),
+        "mailbox-less device emits no tx PDO assignment"
+    );
+    assert_eq!(
+        pdo_entries(field(map, "rx_pdos")),
+        Vec::<(u64, u64)>::new(),
+        "mailbox-less device emits no rx PDO assignment"
     );
 }

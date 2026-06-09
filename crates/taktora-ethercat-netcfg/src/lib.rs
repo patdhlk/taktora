@@ -82,6 +82,15 @@ pub struct DeviceInstance {
     pub sm_watchdog: Option<SmWatchdogRegisters>,
     /// Operator-declared startup SDOs, in declaration order. Empty if none.
     pub startup_sdos: Vec<StartupSdoSpec>,
+    /// Whether the device can accept `CoE` PDO-assignment SDO writes
+    /// (`0x1C12`/`0x1C13`). For an `esi:` device this reflects whether the ESI
+    /// declares a `CoE` mailbox; for an inline device it is `true` (the
+    /// integrator listed PDOs intending to assign them). Simple terminals
+    /// (e.g. EL1008/EL2004) have no mailbox, so writing a PDO assignment to
+    /// them fails with `NoReadMailbox` on the bus — codegen therefore emits an
+    /// EMPTY assignment for them (they use their fixed default mapping) while
+    /// still contributing their `expected_wkc`.
+    pub supports_coe: bool,
 }
 
 /// Resolved ESC SM-watchdog register values for one output device.
@@ -836,7 +845,7 @@ mod dto {
                 .map(|s| convert_startup_sdo(&label, s))
                 .collect::<Result<Vec<_>, _>>()?;
 
-            let (source, identity, esi_output_watchdog_enabled) = match esi {
+            let (source, identity, esi_output_watchdog_enabled, supports_coe) = match esi {
                 Some(reference) => {
                     let path = esi_local_path(&reference)?;
                     let xml = std::fs::read_to_string(&path)?;
@@ -852,6 +861,17 @@ mod dto {
                         .into_iter()
                         .next()
                         .expect("checked count == 1");
+
+                    // A CoE mailbox is required to accept PDO-assignment SDO
+                    // writes (0x1C12/0x1C13). Simple terminals with no mailbox
+                    // (EL1008/EL2004) must NOT be written to — codegen emits an
+                    // empty assignment for them and they keep their fixed
+                    // default mapping.
+                    let supports_coe = device
+                        .mailbox
+                        .as_ref()
+                        .and_then(|m| m.coe.as_ref())
+                        .is_some();
 
                     // op_mode selects the PDO mapping and is not retained in
                     // the IR; the resolved PDOs in `assignment` are the only output.
@@ -879,7 +899,12 @@ mod dto {
                     // Keep an explicit YAML identity; otherwise carry the
                     // ESI identity into the device (same type — od-core Identity).
                     let identity = identity.or(Some(device.identity));
-                    (DeviceSource::Esi { path, rx, tx }, identity, wd_enabled)
+                    (
+                        DeviceSource::Esi { path, rx, tx },
+                        identity,
+                        wd_enabled,
+                        supports_coe,
+                    )
                 }
                 None => (
                     DeviceSource::Inline {
@@ -888,6 +913,10 @@ mod dto {
                     },
                     identity,
                     None,
+                    // Inline devices carry no ESI mailbox info; the integrator
+                    // listed PDOs intending to assign them (preserves the
+                    // pre-existing emit-assignment behavior).
+                    true,
                 ),
             };
 
@@ -902,6 +931,7 @@ mod dto {
                     sm_watchdog_enabled,
                     sm_watchdog: None,
                     startup_sdos,
+                    supports_coe,
                 },
                 esi_output_watchdog_enabled,
             })

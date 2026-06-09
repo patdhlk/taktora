@@ -398,8 +398,22 @@ fn pdo_map_tokens(config: &NetworkConfig) -> TokenStream {
         // Canonical EtherCAT LRW working-counter rule (REQ_0329): +1 per
         // SubDevice written to (RxPDOs / outputs), +2 per SubDevice read
         // from (TxPDOs / inputs). Derivation is the only source — no
-        // override path (ADR_0095 / REQ_0828).
+        // override path (ADR_0095 / REQ_0828). WKC is derived from the
+        // RESOLVED PDO presence regardless of whether the assignment is
+        // actually written below.
         let expected_wkc: u16 = u16::from(!rx.is_empty()) + 2 * u16::from(!tx.is_empty());
+
+        // PDO-assignment SDO writes (0x1C12/0x1C13) require a CoE mailbox.
+        // Simple terminals (no mailbox) must get an EMPTY assignment — they
+        // keep their fixed default mapping; writing 0x1C12 to them fails with
+        // `NoReadMailbox` on the bus. They still contribute `expected_wkc`
+        // above and their process data is routed via the channel consts.
+        let empty: &[taktora_ethercat_netcfg::PdoEntry] = &[];
+        let (rx, tx) = if device.supports_coe {
+            (rx, tx)
+        } else {
+            (empty, empty)
+        };
         let rx_entries = rx.iter().map(pdo_entry_tokens);
         let tx_entries = tx.iter().map(pdo_entry_tokens);
 
