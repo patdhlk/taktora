@@ -1722,6 +1722,11 @@ impl DispatchPass<'_, '_, '_> {
         // SAFETY: same single-writer WaitSet-thread discipline as
         // dispatch_task; the pointer is valid for the duration of this call.
         let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
+        // Post-validate_decls one-interval-per-task (#93), this fires at most
+        // once per task per grid pass — so these pending_skipped/pending_late
+        // writes cannot be clobbered by a same-phase re-entry, and the
+        // dispatch_task `pending_cycle` guard is the structural backstop if that
+        // invariant ever changes (e.g. the follow-up batched-barrier slice).
         task.pending_skipped = u32::try_from(skipped).unwrap_or(u32::MAX);
         task.pending_late = Some(late_by);
         self.dispatch_task(task_idx);
@@ -1736,6 +1741,19 @@ impl DispatchPass<'_, '_, '_> {
         // duration of this call.
         let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
 
+        // Per-phase dispatch dedup (REQ_0854, #93). `pending_cycle` is set at
+        // dispatch and `take`n only by `barrier_and_record`. Still `Some` ⇒ this
+        // task was already dispatched this wake-phase with no intervening
+        // barrier; re-submitting the borrowed job (main item OR fault handler)
+        // would alias one `*mut dyn FnMut` across two pool workers. Skip — the
+        // first run's listener `take()` loop drains all pending input. This is
+        // the structural backstop that makes the grid path (one barrier after
+        // the whole due-loop) and the future batched-barrier slice sound by
+        // construction.
+        if task.pending_cycle.is_some() {
+            return;
+        }
+
         // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072). When it
         // routes to a (possible) handler, normal dispatch is skipped.
         if self.handle_fault_routing(task) {
@@ -1745,12 +1763,19 @@ impl DispatchPass<'_, '_, '_> {
             // are None (poison-safe); the index always moves. Allocation-free:
             // a CyclePending { Instant, bool } written onto the TaskEntry,
             // no heap.
-            if task.scan_period.is_some() {
-                task.pending_cycle = Some(CyclePending {
-                    pre: self.clock.now_nanos(),
-                    faulted: true,
-                });
-            }
+            //
+            // Set unconditionally (REQ_0854, #93): `pending_cycle` doubles as
+            // the per-phase dedup token for ALL task kinds, so it must cover the
+            // borrowed fault-handler submit too, not just cyclic tasks. Setting
+            // it for an event task is telemetry-neutral — `record_cycle_for`
+            // opens with `let Some(period) = task.scan_period else { return }`,
+            // before any state mutation, so an event task's token produces zero
+            // telemetry side effects (and REQ_0107's cyclic-faulted-scan cycle
+            // advance is unaffected).
+            task.pending_cycle = Some(CyclePending {
+                pre: self.clock.now_nanos(),
+                faulted: true,
+            });
             return;
         }
 
@@ -2194,6 +2219,24 @@ fn validate_decls(id: &TaskId, decls: &[crate::trigger::TriggerDecl]) -> Result<
         )));
     }
 
+    // Exactly one scan period per cyclic task (REQ_0002, #93). Two interval
+    // decls share the grid epoch in Grid mode (REQ_0268), come due in the same
+    // pass, and would submit one borrowed `*mut dyn FnMut` to two pool workers
+    // before the single barrier — a data race on the Linux-default path. Reject
+    // at the validate_decls chokepoint, which covers both `add` and
+    // `add_chain_with_id_boxed`. Multi-listener stays legal.
+    let interval_count = decls
+        .iter()
+        .filter(|d| matches!(d, TriggerDecl::Interval(_)))
+        .count();
+    if interval_count > 1 {
+        return Err(ExecutorError::DeclareTriggers(format!(
+            "task `{id}` declares {interval_count} interval triggers; a cyclic \
+             task must declare exactly one scan period — split it into separate \
+             tasks"
+        )));
+    }
+
     if decls
         .iter()
         .any(|d| matches!(d, TriggerDecl::Interval(dur) if dur.is_zero()))
@@ -2634,6 +2677,50 @@ impl ExecutorGraphBuilder<'_> {
     }
 }
 
+// ── Test seam ─────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+impl Executor {
+    /// White-box seam (`#93`, `REQ_0854`): reproduce the batched-barrier / grid
+    /// wake — two dispatches of one task with a SINGLE barrier between them —
+    /// over a guard-less [`DispatchPass`] built from our own fields.
+    /// `dispatch_task` / `barrier_and_record` never read `guards` /
+    /// `attachment_to_task`, so empty slices suffice; `stop_listener_ptr` points
+    /// at the real Arc. Pins the per-phase dedup contract: the second dispatch
+    /// must be skipped, so the borrowed job (main item or fault handler) is
+    /// submitted at most once — never aliased across two pool workers.
+    #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
+    fn dispatch_twice_one_barrier(&mut self, task_idx: usize) {
+        // Raw pointers taken first so the &mut borrows are released before the
+        // shared borrows below — same discipline as `dispatch_loop`.
+        let tasks_ptr = &mut self.tasks as *mut Vec<TaskEntry>;
+        let cycle_stats_ptr = &mut self.cycle_stats as *mut Vec<TaskCycleStats>;
+        let exec_fault_ptr = &*self.exec_fault as *const ExecutorFaultAtomic;
+        let exec_start_ptr = &*self.start_time as *const OnceLock<Instant>;
+        let stop_listener_ptr = self.stop_listener.as_ref() as *const IxListener<ipc::Service>;
+        let observer = &self.observer;
+        let pool = &self.pool;
+        let clock = &self.clock;
+        let iter_err = Arc::clone(&self.iter_err);
+        let mut pass = DispatchPass {
+            guards: &[],
+            attachment_to_task: &[],
+            tasks_ptr,
+            cycle_stats_ptr,
+            observer,
+            exec_fault_ptr,
+            exec_start_ptr,
+            clock,
+            stop_listener_ptr,
+            pool,
+            iter_err: &iter_err,
+        };
+        pass.dispatch_task(task_idx);
+        pass.dispatch_task(task_idx);
+        pass.barrier_and_record();
+    }
+}
+
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2654,6 +2741,71 @@ mod tests {
         let a = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
         let b = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn dispatch_guard_runs_event_task_once_per_phase() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        // REQ_0854 / #93: two dispatches of one task with a single barrier
+        // between them (the future batched-barrier / grid pattern) must submit
+        // the borrowed main job at most ONCE — re-submitting the same
+        // `*mut dyn FnMut` would alias it across two pool workers. An event task
+        // (no scan period) exercises the normal `submit_task_job` path.
+        let runs = Arc::new(AtomicU64::new(0));
+        let r = Arc::clone(&runs);
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        exec.add(item(move |_| {
+            r.fetch_add(1, Ordering::Relaxed);
+            Ok(ControlFlow::Continue)
+        }))
+        .expect("add");
+        exec.dispatch_twice_one_barrier(0);
+        assert_eq!(
+            runs.load(Ordering::Relaxed),
+            1,
+            "borrowed main job must be submitted exactly once per barrier phase"
+        );
+    }
+
+    #[test]
+    fn dispatch_guard_runs_fault_handler_once_per_phase() {
+        use crate::fault::{FaultReason, FaultState};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        // REQ_0854 / #93: the dedup token must cover the BORROWED FAULT HANDLER
+        // submit, not just the main job. An event task (no scan period) routed
+        // to its handler twice in one barrier phase must run the handler once.
+        // Before the uniform-token fix, the fault branch only set `pending_cycle`
+        // for cyclic tasks, so an event task's handler aliased across workers.
+        let runs = Arc::new(AtomicU64::new(0));
+        let r = Arc::clone(&runs);
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        exec.add_with_fault_handler(
+            item(|_| Ok(ControlFlow::Continue)),
+            item(move |_| {
+                r.fetch_add(1, Ordering::Relaxed);
+                Ok(ControlFlow::Continue)
+            }),
+        )
+        .expect("add_with_fault_handler");
+        // Drive the task to Faulted so dispatch routes to the handler.
+        exec.tasks[0].fault.swap(
+            FaultState::Faulted {
+                reason: FaultReason::BudgetExceeded {
+                    took_ms: 6,
+                    budget_ms: 2,
+                },
+                since_ms: 0,
+            },
+            0,
+        );
+        exec.dispatch_twice_one_barrier(0);
+        assert_eq!(
+            runs.load(Ordering::Relaxed),
+            1,
+            "borrowed fault handler must be submitted exactly once per barrier phase"
+        );
     }
 
     #[test]
@@ -2780,20 +2932,10 @@ mod tests {
     }
 
     #[test]
-    fn add_accepts_multiple_intervals_and_single_kinds() {
+    fn add_accepts_single_interval_and_multiple_listeners() {
         use core::time::Duration;
         let mut exec = Executor::builder().worker_threads(0).build().unwrap();
-        // Multiple Interval decls: still cyclic-only, accepted.
-        exec.add(crate::item::item_with_triggers(
-            |d| {
-                d.interval(Duration::from_millis(1));
-                d.interval(Duration::from_millis(2));
-                Ok(())
-            },
-            |_| Ok(crate::ControlFlow::Continue),
-        ))
-        .expect("multiple intervals accepted");
-        // Single interval: accepted.
+        // Single interval: accepted (the only legal cyclic shape — REQ_0002).
         exec.add(crate::item::item_with_triggers(
             |d| {
                 d.interval(Duration::from_millis(1));
@@ -2802,7 +2944,8 @@ mod tests {
             |_| Ok(crate::ControlFlow::Continue),
         ))
         .expect("single interval accepted");
-        // Multiple listeners (no interval): accepted.
+        // Multiple listeners (no interval): still accepted (multi-listener is
+        // legal; only multi-interval is rejected — #93).
         let ch = exec
             .channel::<Msg>("taktora.test.req0268.multi.listener")
             .unwrap();
@@ -2817,6 +2960,36 @@ mod tests {
             |_| Ok(crate::ControlFlow::Continue),
         ))
         .expect("multiple listeners accepted");
+    }
+
+    #[test]
+    fn add_rejects_multiple_intervals() {
+        use core::time::Duration;
+        // Two interval() decls on one task: in Grid mode (Linux default) both
+        // share the grid epoch, come due in the same pass, and would submit one
+        // borrowed FnMut to two pool workers before the single barrier — a data
+        // race. A cyclic task must declare exactly one scan period (REQ_0002),
+        // so reject at add() time. (#93)
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let err = exec
+            .add(crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(1));
+                    d.interval(Duration::from_millis(2));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            ))
+            .expect_err("multiple intervals must be rejected");
+        match err {
+            ExecutorError::DeclareTriggers(msg) => {
+                assert!(
+                    msg.contains("interval"),
+                    "message must mention the interval triggers: {msg}"
+                );
+            }
+            other => panic!("expected DeclareTriggers, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2882,6 +3055,32 @@ mod tests {
             )])
             .expect_err("chain head zero-period interval must be rejected");
         assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
+    }
+
+    #[test]
+    fn add_chain_rejects_multiple_intervals() {
+        use core::time::Duration;
+        // The chain path collects the head item's decls through the same
+        // validate_decls chokepoint, so the one-scan-period rule (REQ_0002, #93)
+        // covers chains for free — pin it.
+        let mut exec = Executor::builder().worker_threads(0).build().unwrap();
+        let err = exec
+            .add_chain(vec![crate::item::item_with_triggers(
+                |d| {
+                    d.interval(Duration::from_millis(1));
+                    d.interval(Duration::from_millis(2));
+                    Ok(())
+                },
+                |_| Ok(crate::ControlFlow::Continue),
+            )])
+            .expect_err("chain head with two intervals must be rejected");
+        match err {
+            ExecutorError::DeclareTriggers(msg) => assert!(
+                msg.contains("interval"),
+                "message must mention the interval triggers: {msg}"
+            ),
+            other => panic!("expected DeclareTriggers, got {other:?}"),
+        }
     }
 
     #[test]
