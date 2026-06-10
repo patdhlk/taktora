@@ -5,10 +5,8 @@
 //! (master timer / stop listener). Capacity is reserved up front so
 //! steady-state resolution is allocation-free (`REQ_0060`).
 
-// Constructed and called by the dispatch loop (later tasks of issue #94).
-#![allow(dead_code)]
 // pub(crate) inside a private module — intentional, mirrors `executor.rs`; the
-// later wiring tasks reach for these items from `executor`.
+// dispatch loop reaches for these items from `executor` (#94).
 #![allow(clippy::redundant_pub_crate)]
 
 use iceoryx2::prelude::ipc;
