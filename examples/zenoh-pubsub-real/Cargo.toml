@@ -19,7 +19,7 @@ license     = "Apache-2.0 OR MIT"
 # two versions of a shared crate, failing cross-crate API calls with type
 # mismatches. Same trap previously fixed in the ethercat-real-bus and
 # ethercat-wago-coupler examples.
-taktora-executor                = "0.2"
+taktora-executor                = "0.3"
 taktora-connector-core          = "0.2"
 taktora-connector-host          = "0.1"
 taktora-connector-transport-iox = "0.1"

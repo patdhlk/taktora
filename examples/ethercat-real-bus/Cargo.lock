@@ -1593,9 +1593,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-ethercat"
-version = "0.4.0"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49fff73aa1ee7382e61453b55fab13edf112bdd10b16cb86e940b2e1d4720b20"
+checksum = "002855e76a0dafa0f0cde7af009179c048d762fe97ee928bc2ee3904d2506080"
 dependencies = [
  "crossbeam-channel",
  "ethercrab",
@@ -1611,9 +1611,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-host"
-version = "0.1.11"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4add7829e6d19bb0aebda60dbe83ec28985226df4d2bc040aabab6dca1a89569"
+checksum = "9ae890569e0c7af6daba3f110c52227a19cf29bd767467c87716974db4dd745d"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",
@@ -1693,9 +1693,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-executor"
-version = "0.2.3"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89f2bde112c0dea7602a7f59965e0ef261f1ae2d34e4deb9ff1116e54e4b369f"
+checksum = "bd8ff6ce6785702018783aae342be349096f890453abb7aa3e7641caefad4ed2"
 dependencies = [
  "bitflags 2.13.0",
  "crossbeam-channel",

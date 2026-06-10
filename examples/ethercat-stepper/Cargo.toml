@@ -29,7 +29,7 @@ path = "src/main.rs"
 # rejects the local 0.2.x path patch AND splits the dependency graph into two
 # `taktora_executor` versions (the published connector-host 0.1.8 requires
 # ^0.2.0), which fails `register_with` with a type mismatch.
-taktora-executor                = "0.2"
+taktora-executor                = "0.3"
 taktora-connector-core          = "0.2"
 taktora-connector-host          = "0.1"
 taktora-connector-transport-iox = "0.1"

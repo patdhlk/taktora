@@ -2182,9 +2182,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-codec"
-version = "0.1.7"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "747cbfe8b49d4c0a4184ae0938f8d8c98de8963ef0a30531cfa6745e6329b423"
+checksum = "66d269867944c21a6eb517ac92c80cc6cfac56a4144ef22b3a749f806d4fcb48"
 dependencies = [
  "serde",
  "serde_json",
@@ -2193,9 +2193,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-core"
-version = "0.2.6"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b65658e35d42c829ea1bd7f6884cb0561e8d2fde58a2755f96299b0cbb53a7b9"
+checksum = "a973c22be38d85910fb8db398d7a256c8b73446efdf905f9a4a5b1950fe21725"
 dependencies = [
  "rand",
  "serde",
@@ -2204,9 +2204,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-host"
-version = "0.1.8"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "200c2d1f452fb009a438a51025d45eae0c411f7d2e17581a2ae102b7dc7fad46"
+checksum = "9ae890569e0c7af6daba3f110c52227a19cf29bd767467c87716974db4dd745d"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",
@@ -2219,9 +2219,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-transport-iox"
-version = "0.1.7"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82a2c354c98149067cf51f992de452e6bfc2f251346b093a29ffadd773d98385"
+checksum = "0ad11099860e3288840a5e8d50ac6c5589e12b5ccd6d66b7bb357ce442bbdca0"
 dependencies = [
  "iceoryx2",
  "serde",
@@ -2230,9 +2230,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-zenoh"
-version = "0.2.7"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11684f318c5d41e8e8c2ccf4e2587236c4107f43400e9f6ed180e88904103eae"
+checksum = "9227ec5975492c7501319619dacf6de351a9c48e5e65308ffd39e4ee9313e4a0"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",
@@ -2249,9 +2249,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-executor"
-version = "0.2.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "465925ef2a0e250e1680dc10b36a5e8b68d299dd913e2e97760a501a5789ee62"
+checksum = "bd8ff6ce6785702018783aae342be349096f890453abb7aa3e7641caefad4ed2"
 dependencies = [
  "bitflags",
  "crossbeam-channel",
@@ -2266,9 +2266,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-stats"
-version = "0.1.1"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bda52ac9d21d0ce7ff79182b536ab1703ba18a234efaee35754217e394a37354"
+checksum = "58a1ca61659e74dd657a539d6feb4b223faf2888287fb1af03d8452e7bed15da"
 
 [[package]]
 name = "thiserror"
