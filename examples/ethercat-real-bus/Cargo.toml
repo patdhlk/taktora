@@ -24,9 +24,9 @@ taktora-connector-transport-iox = "0.1"
 # NOTE: must track the current published major so the `[patch.crates-io]` path
 # override actually applies — a stale caret req silently falls back to the
 # published crate (this produced the bogus WKC `expected 9` on the bus once).
-# 0.3 brings the non_exhaustive SubDeviceMap constructors + SmWatchdog. CI
-# enforces this via scripts/check-example-patch-skew.sh.
-taktora-connector-ethercat      = { version = "0.3", features = ["bus-integration"] }
+# 0.4 is the current published major (non_exhaustive SubDeviceMap constructors
+# + SmWatchdog). CI enforces this via scripts/check-example-patch-skew.sh.
+taktora-connector-ethercat      = { version = "0.4", features = ["bus-integration"] }
 
 # ESI device-driver toolchain. These two crates are unpublished, so they are
 # path-only here (a local hardware demo, never built from crates.io). The
