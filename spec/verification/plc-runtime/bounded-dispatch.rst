@@ -135,3 +135,67 @@ that :need:`REQ_0062` mandates.
    ``iter_err: Arc<Mutex<Option<ExecutorError>>>`` (built once
    in ``Executor::build``) is reused, not re-allocated, on
    every dispatch iteration.
+
+Per-phase dispatch dedup (at-most-one borrowed-job submit)
+----------------------------------------------------------
+
+Verification of the at-most-one-submit-per-barrier-phase contract
+(:need:`REQ_0854`) and the exactly-one-scan-period rejection that
+:need:`REQ_0002` mandates — the guard recorded in :need:`ADR_0105`.
+
+.. test:: At-most-one borrowed-job submit per barrier phase; multiple intervals rejected
+   :id: TEST_0872
+   :status: implemented
+   :verifies: REQ_0854
+
+   **Goal.** Pin two facets of the per-phase dedup contract: (1) a task
+   with two attachments fired in one wake-phase is **submitted once** — its
+   single run drains all pending input — so two pool workers never alias one
+   ``*mut dyn FnMut``, covering both the main item and the borrowed fault
+   handler; and (2) declaring more than one ``interval()`` on a single task
+   is **rejected at ``add`` / ``Executor::build`` time**, the behavioral
+   break of :need:`REQ_0002`.
+
+   **Fixture.** In-crate unit tests in
+   ``crates/taktora-executor/src/executor.rs``:
+
+   * ``add_rejects_multiple_intervals`` — registering a single item that
+     declares two ``interval()`` triggers returns a build/add error.
+   * ``add_chain_rejects_multiple_intervals`` — the same rejection on the
+     ``add_chain`` path, so a chain cannot smuggle in a second scan period.
+   * ``dispatch_guard_runs_event_task_once_per_phase`` — an event task with
+     two listeners fired in one wake-phase runs **once** (its ``take()``
+     loop drains both notifications) rather than being submitted twice; the
+     guard short-circuits on ``pending_cycle.is_some()`` before fault
+     routing.
+   * ``dispatch_guard_runs_fault_handler_once_per_phase`` — the borrowed
+     **fault-handler** submit is likewise guarded: a task routed to its
+     fault handler with the token already set this phase is skipped, so the
+     fault handler is submitted at most once per phase.
+
+   **Steps.**
+
+   1. *Rejection.* Build an executor and register a task declaring two
+      ``interval()`` triggers via ``add`` (then ``add_chain``); assert the
+      call returns the multiple-interval rejection error and the executor is
+      not built with the illegal task.
+   2. *Event dedup.* Build a ``worker_threads(2)`` executor with one event
+      task carrying two listeners; arrange both listeners to be notified in
+      a single wake-phase; run one phase and read a run counter.
+   3. *Fault dedup.* Drive a task into its fault-routed branch within a
+      phase where ``pending_cycle`` is already set; read the fault-handler
+      run counter.
+
+   **Expected outcome.**
+
+   * Both ``*_rejects_multiple_intervals`` tests observe the rejection error
+     at add/build time.
+   * The event task's run counter advances by **exactly one** for the
+     two-listener wake-phase (one submit, ``take()`` drains both), and
+     ``cycle_index`` / recorded cycles advance at most once for the phase.
+   * The fault handler is submitted **at most once** per phase — the second,
+     would-be-aliasing submit is skipped by the ``pending_cycle`` guard.
+
+   Existing ``MockClock`` telemetry tests pass unchanged: ``record_cycle_for``
+   early-returns for event tasks, so the single recorded cycle is the cyclic
+   one and telemetry is unaffected.

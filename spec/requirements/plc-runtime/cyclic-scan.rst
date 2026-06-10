@@ -27,10 +27,17 @@ timer-slack guarantees that bound long-run cyclic precision.
    :id: REQ_0002
    :status: implemented
    :satisfies: FEAT_0011
-   :links: BB_0025, TEST_0105
+   :links: BB_0025, TEST_0105, TEST_0872
 
    Under nominal load (no item exceeding its scan period), the runtime
    shall invoke each cyclic item exactly once per declared period.
+
+   A cyclic task shall declare **exactly one** scan period; multiple
+   ``interval()`` declarations on one task are **rejected at
+   ``Executor::build`` time** (and at ``add`` / ``add_chain`` time, in
+   ``validate_decls``). This makes the at-most-one-submit-per-barrier-phase
+   contract of :need:`REQ_0854` unambiguous at the task level and is the
+   behavioral break carried as the 0.2 → 0.3 semver minor bump.
 
 .. req:: Scan-cycle execution observability
    :id: REQ_0003

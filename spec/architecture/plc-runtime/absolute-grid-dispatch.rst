@@ -328,3 +328,73 @@ rounding of the relative timeout:
    while the pre-fix reconstruction staircased −1.4 ms → −30.5 ms over
    645 events on the same load profile; a quiet run's envelope was
    −14.5 µs … +275 µs with zero skips.
+
+.. arch-decision:: Per-phase dispatch dedup via the existing pending_cycle token
+   :id: ADR_0105
+   :status: accepted
+   :refines: FEAT_0017
+   :links: REQ_0854, REQ_0002
+
+   **Context.** In released ``taktora-executor`` 0.2.x the per-callback
+   ``barrier_and_record`` was doing double duty: besides flushing telemetry
+   it was the *only* thing stopping a task's borrowed ``*mut dyn FnMut`` job
+   from being submitted twice with no barrier in between. With
+   ``worker_threads >= 2`` two ``interval()`` declarations on one task could
+   share the grid epoch, come due in the same ``take_due`` pass, and submit
+   the **one** borrowed job to **two** pool workers before the single
+   barrier — two workers aliasing one ``*mut dyn FnMut``, i.e. undefined
+   behavior (a data race on the closure's captured state). This is reachable
+   on the production **Grid (Linux-default)** path precisely because
+   ``run_grid_cyclic_pass`` barriers only *after* its whole due-loop
+   (:need:`BB_0095`), so the protection that masked the hazard is the very
+   per-callback barrier the follow-up barrier-consolidation slice removes.
+   This ADR is the in-spec record of that released-0.2.x discrepancy and the
+   contract that closes it (:need:`REQ_0854`).
+
+   **Decision.** Promote the **existing** ``pending_cycle`` token to a
+   per-phase dedup guard — **no new field**. ``pending_cycle`` is already
+   set at dispatch and ``take``\ n only by ``barrier_and_record``, so it is
+   exactly a "submitted this phase, no intervening barrier" marker. At the
+   top of ``dispatch_task``, **before fault routing**, ``if
+   task.pending_cycle.is_some() { return; }`` skips the re-dispatch; the
+   listener's pending notifications are level-readable and the job's
+   ``take()`` loop drains them, so the single run services every attachment
+   fired in the phase. The token is set **uniformly on both the normal and
+   the fault-routed branch and for all task kinds**, so the guard also
+   covers the borrowed fault-handler submit (the contract is: at most one
+   submit — main item *or* fault handler — per task per barrier phase).
+   Telemetry stays correct without a special case because ``record_cycle_for``
+   already early-returns for event tasks (no ``scan_period``), so only the
+   cyclic cycle is recorded and ``cycle_index`` advances at most once per
+   phase. Independently, ``validate_decls`` rejects more than one
+   ``interval()`` declaration per task at ``Executor::build`` / ``add`` time
+   — a behavioral break carried as the 0.2 → 0.3 semver minor bump
+   (:need:`REQ_0002`); multi-*listener* tasks stay legal.
+
+   **Rejected alternatives.**
+
+   * *Barrier between each dispatch* (drain the pool after every
+     ``dispatch_task`` so a second submit can never alias). Rejected: it
+     re-welds correctness to a per-dispatch barrier and **defeats the
+     follow-up barrier-consolidation slice** (:need:`BB_0095`'s "one
+     ``pool.barrier()`` per iteration"), whose whole point is to amortise
+     the barrier across the due-loop. The guard makes consolidation sound
+     *without* a barrier per submit.
+   * *A separate dedup ``bool`` on ``TaskEntry``.* Rejected as **redundant
+     with ``pending_cycle``**: that token already has exactly the set-at-
+     dispatch / taken-at-barrier lifetime the guard needs, so a parallel
+     flag would be a second source of truth to keep in lock-step (and an
+     extra field on the dispatch hot struct) for no added information.
+
+   **Consequences.** The at-most-one-submit contract holds **by
+   construction**, not by accident of the per-callback barrier, so the
+   barrier-consolidation slice can proceed. A task with two fired
+   attachments in one wake-phase now runs **once** (draining all pending
+   input via ``take()``) and records one cycle, where 0.2.x ran it twice and
+   recorded two — identical behavior for the common single-decl event task.
+   The guard is a single ``Option::is_some`` check reusing an existing
+   field, so it adds no steady-state allocation (:need:`REQ_0060`). The
+   call-site ordering wrinkle (``dispatch_cyclic`` writes
+   ``pending_skipped`` / ``pending_late`` *before* ``dispatch_task``) is
+   handled deliberately at the call site, accepting the same-task / same-tick
+   last-writer value on a dedup-skip.
