@@ -1200,7 +1200,7 @@ impl Executor {
         // wake source differs (Task 3).
         let mut cyclic_task_indices: Vec<usize> = Vec::new();
         let mut cyclic_periods: Vec<u64> = Vec::new();
-        build_attachments(
+        let deadline_count = build_attachments(
             &waitset,
             &self.tasks,
             dispatch_mode,
@@ -1210,6 +1210,9 @@ impl Executor {
             &mut cyclic_task_indices,
             &mut cyclic_periods,
         )?;
+        // `deadline_count` is the number of attached `Deadline` guards; the next
+        // task (#94) feeds it to `AttachmentMap::build` to size its id buckets.
+        let _ = deadline_count; // consumed by AttachmentMap::build in the next task (#94)
         // `cyclic_periods` is cloned, not moved, because Task 3 reads it again to
         // arm the single master timerfd; on non-Linux it is unused after this.
         let mut grid =
@@ -1597,6 +1600,46 @@ fn run_grid_cyclic_pass(
 /// Every other decl (and every decl in `Legacy` mode, including `Interval`
 /// via `attach_interval`) is attached normally. Extracted from `dispatch_loop`
 /// to keep that function within the cyclomatic-complexity budget.
+/// Today's linear resolution: returns the task index for the single guard the
+/// fired id matches, or `IGNORE` if none. At most one guard can match (one fd
+/// per attachment, unique tick indices), so first-match is exact.
+///
+/// Consumed by `process_attachment` via `AttachmentMap::resolve` in the next
+/// task (#94); the `O(log n)` map calls this as its `slow` fallback to seed the
+/// per-id cache. Kept as a free fn (sibling of `attach_trigger_decl`) so both
+/// the map and the still-linear `process_attachment` loop share one definition.
+// consumed by `process_attachment` via `AttachmentMap::resolve` in the next task (#94)
+#[allow(dead_code)]
+fn linear_scan(
+    guards: &[WaitSetGuard<'_, '_, ipc::Service>],
+    attachment_to_task: &[usize],
+    id: &WaitSetAttachmentId<ipc::Service>,
+) -> usize {
+    let mut found = crate::attachment_map::IGNORE;
+    for i in 0..guards.len() {
+        if id.has_event_from(&guards[i]) || id.has_missed_deadline(&guards[i]) {
+            // Debug: keep scanning to assert no second guard matches.
+            // Release: first match is exact (uniqueness invariant), stop early.
+            //
+            // `cfg!(debug_assertions)` is a RUNTIME bool, not a `#[cfg]`
+            // attribute, so BOTH arms always compile — the Linux clippy run
+            // still sees the early `return`. Deliberately NOT `#[cfg(...)]`,
+            // which would gate a path the macOS clippy run skips.
+            if cfg!(debug_assertions) {
+                debug_assert_eq!(
+                    found,
+                    crate::attachment_map::IGNORE,
+                    "id matched two guards"
+                );
+                found = attachment_to_task[i];
+            } else {
+                return attachment_to_task[i];
+            }
+        }
+    }
+    found
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_attachments<'w>(
     waitset: &'w WaitSet<ipc::Service>,
@@ -1607,7 +1650,12 @@ fn build_attachments<'w>(
     attachment_to_task: &mut Vec<usize>,
     cyclic_task_indices: &mut Vec<usize>,
     cyclic_periods: &mut Vec<u64>,
-) -> Result<(), ExecutorError> {
+) -> Result<usize, ExecutorError> {
+    // Number of `Deadline` decls actually ATTACHED as guards (Grid-mode
+    // `Interval` decls are diverted to the cyclic vecs and never counted).
+    // Threaded out for `AttachmentMap::build` in the next task (#94), which
+    // sizes its deadline-id bucket from this exact count.
+    let mut deadline_count = 0usize;
     for (task_idx, task) in tasks.iter().enumerate() {
         for decl in &task.decls {
             if dispatch_mode == crate::DispatchMode::Grid {
@@ -1619,12 +1667,18 @@ fn build_attachments<'w>(
                     continue;
                 }
             }
+            // Count `Deadline` only on the path where it is actually attached
+            // (after the Grid-`Interval` `continue`), so the tally matches the
+            // guards pushed below one-for-one.
+            if matches!(decl, TriggerDecl::Deadline { .. }) {
+                deadline_count += 1;
+            }
             let guard = attach_trigger_decl(waitset, listener_storage, decl)?;
             guards.push(guard);
             attachment_to_task.push(task_idx);
         }
     }
-    Ok(())
+    Ok(deadline_count)
 }
 
 /// Attaches a single [`TriggerDecl`] to `waitset`, returning the resulting
