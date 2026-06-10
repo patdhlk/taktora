@@ -25,8 +25,8 @@ taktora-connector-transport-iox = "0.1"
 # actually applies — `^0.1` rejects the 0.2.x patch and silently falls back to
 # the stale published connector. This example needs ≥0.2.5 for the
 # cyclic-traffic SAFE-OP → OP walk (REQ_0841) the WAGO 750-354 requires;
-# 0.3 is the current published major (non_exhaustive SubDeviceMap).
-taktora-connector-ethercat      = { version = "0.3", features = ["bus-integration"] }
+# 0.4 is the current published major (non_exhaustive SubDeviceMap).
+taktora-connector-ethercat      = { version = "0.4", features = ["bus-integration"] }
 
 clap       = { version = "4", features = ["derive"] }
 serde      = { version = "1", features = ["derive"] }

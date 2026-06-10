@@ -1536,9 +1536,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-core"
-version = "0.2.6"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b65658e35d42c829ea1bd7f6884cb0561e8d2fde58a2755f96299b0cbb53a7b9"
+checksum = "a973c22be38d85910fb8db398d7a256c8b73446efdf905f9a4a5b1950fe21725"
 dependencies = [
  "rand",
  "serde",
@@ -1547,9 +1547,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-ethercat"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "544ae03cc5413e6969d855be857fd7d2996105823455c471d620fc2a436a0253"
+checksum = "49fff73aa1ee7382e61453b55fab13edf112bdd10b16cb86e940b2e1d4720b20"
 dependencies = [
  "crossbeam-channel",
  "ethercrab",
@@ -1565,9 +1565,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-host"
-version = "0.1.8"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "200c2d1f452fb009a438a51025d45eae0c411f7d2e17581a2ae102b7dc7fad46"
+checksum = "4add7829e6d19bb0aebda60dbe83ec28985226df4d2bc040aabab6dca1a89569"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",
@@ -1580,9 +1580,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-transport-iox"
-version = "0.1.7"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82a2c354c98149067cf51f992de452e6bfc2f251346b093a29ffadd773d98385"
+checksum = "0ad11099860e3288840a5e8d50ac6c5589e12b5ccd6d66b7bb357ce442bbdca0"
 dependencies = [
  "iceoryx2",
  "serde",
@@ -1591,9 +1591,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-executor"
-version = "0.2.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "465925ef2a0e250e1680dc10b36a5e8b68d299dd913e2e97760a501a5789ee62"
+checksum = "89f2bde112c0dea7602a7f59965e0ef261f1ae2d34e4deb9ff1116e54e4b369f"
 dependencies = [
  "bitflags 2.13.0",
  "crossbeam-channel",
@@ -1608,9 +1608,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-stats"
-version = "0.1.1"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bda52ac9d21d0ce7ff79182b536ab1703ba18a234efaee35754217e394a37354"
+checksum = "58a1ca61659e74dd657a539d6feb4b223faf2888287fb1af03d8452e7bed15da"
 
 [[package]]
 name = "thiserror"
