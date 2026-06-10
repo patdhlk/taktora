@@ -19,7 +19,7 @@
 
 use core::time::Duration;
 use taktora_bounded_alloc::CountingAllocator;
-use taktora_executor::{ControlFlow, Executor, item, item_with_triggers};
+use taktora_executor::{ControlFlow, DispatchMode, Executor, item, item_with_triggers};
 
 #[global_allocator]
 static ALLOC: CountingAllocator = CountingAllocator::new();
@@ -138,9 +138,37 @@ fn dispatch_is_zero_allocation() {
         );
     }
 
-    // Case 5 — negative: harness must catch a deliberate per-iteration
+    // Case 5: Legacy-mode single interval — forces the interval to attach as a
+    // Tick WaitSet guard so every tick routes through `AttachmentMap::resolve`
+    // on the POSITIVE branch (precomputed Tick id -> real task index, a
+    // binary-search hit). Unlike the Grid default (Linux), where intervals
+    // bypass the WaitSet via `run_grid_cyclic_pass`, this exercises the map's
+    // hot path on every platform and proves it is allocation-free (REQ_0060,
+    // #94 / ADR_0106).
+    {
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .dispatch_mode(DispatchMode::Legacy)
+            .build()
+            .unwrap();
+        let it = item_with_triggers(
+            |d| {
+                d.interval(Duration::from_millis(1));
+                Ok(())
+            },
+            |_| Ok(ControlFlow::Continue),
+        );
+        exec.add(it).unwrap();
+        let per_iter = per_iter_allocs(&mut exec);
+        assert_eq!(
+            per_iter, 0,
+            "REQ_0060 violated: ~{per_iter} steady-state allocations per iteration (Legacy interval, AttachmentMap positive resolve)"
+        );
+    }
+
+    // Case 6 — negative: harness must catch a deliberate per-iteration
     // alloc. If this case stops firing, the counting allocator has lost
-    // visibility into worker-thread allocations and the other four
+    // visibility into worker-thread allocations and the other five
     // cases are meaningless.
     {
         let mut exec = Executor::builder().worker_threads(0).build().unwrap();

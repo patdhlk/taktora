@@ -23,8 +23,9 @@ Zero-allocation dispatch
    harness isolates per-iteration allocations from setup
    allocations via a differential measurement.
 
-   **Fixture.** Three executor configurations covering the three
-   dispatch paths:
+   **Fixture.** Five executor configurations covering the
+   dispatch paths (chain, single, graph) plus the event/fd
+   resolve path through ``AttachmentMap``:
 
    * ``Executor::builder().worker_threads(0).build()`` + ``add_chain([h, m, t])`` —
      ``TaskKind::Chain`` on the inline pool.
@@ -36,6 +37,15 @@ Zero-allocation dispatch
      ``TaskKind::Graph`` on the threaded pool (vertex
      dispatch via per-vertex pre-built closures + SPSC
      ring).
+   * ``Executor::builder().worker_threads(0).dispatch_mode(Legacy).build()`` +
+     ``add(interval_item)`` — forces the interval to attach as a WaitSet Tick
+     guard so dispatch routes through ``AttachmentMap::resolve`` on the
+     positive branch (precomputed Tick id -> real task index, a binary-search
+     hit), exercising the ``O(log n)`` resolver's hot path allocation-free on
+     every platform. Unlike the Grid default (Linux), where intervals divert
+     to the master-timer ``run_grid_cyclic_pass`` path and never touch the
+     map, this case pins ``Legacy`` so the resolve branch runs everywhere.
+     See :need:`REQ_0060` / ADR_0106.
 
    Each item / vertex returns ``Ok(Continue)`` without
    allocating.
@@ -69,12 +79,12 @@ Zero-allocation dispatch
 
    3. Assert ``per_iter == 0``.
 
-   4. Repeat for each of the four fixture configurations
+   4. Repeat for each of the five fixture configurations
       above.
 
-   **Expected outcome.** All four assertions hold:
+   **Expected outcome.** All five assertions hold:
    ``per_iter == 0``. Test passes under ``cargo test
-   -p taktora-executor --test no_alloc_dispatch --release``.
+   -p taktora-executor-tests --test no_alloc_dispatch --release``.
 
    **Negative case.** ``harness_catches_deliberate_allocation``
    registers a task whose ``execute`` body does
@@ -84,7 +94,7 @@ Zero-allocation dispatch
    where the ``#[global_allocator]`` is not actually wired up.
 
    Lives under
-   ``crates/taktora-executor/tests/no_alloc_dispatch.rs``.
+   ``crates/taktora-executor-tests/tests/no_alloc_dispatch.rs``.
 
 Bounded-time dispatch (pre-allocated error slot)
 ------------------------------------------------
@@ -105,8 +115,8 @@ that :need:`REQ_0062` mandates.
    ``per_iter`` allocation count under the differential measurement
    in :need:`TEST_0170`.
 
-   **Fixture.** ``crates/taktora-executor/tests/no_alloc_dispatch.rs``
-   — ``dispatch_is_zero_allocation`` (lines 76-166). Uses the
+   **Fixture.** ``crates/taktora-executor-tests/tests/no_alloc_dispatch.rs``
+   — ``dispatch_is_zero_allocation`` (lines 76-194). Uses the
    process-wide ``CountingAllocator`` as the ``#[global_allocator]``
    to count allocations on every thread (WaitSet plus pool workers)
    inside a bracketed measurement window. The differential
@@ -115,9 +125,10 @@ that :need:`REQ_0062` mandates.
 
    **Steps.**
 
-   1. Build any of the four fixture executors
+   1. Build any of the five fixture executors
       (single-threaded chain, two-worker chain, two-worker
-      diamond graph, single-threaded single item).
+      diamond graph, single-threaded single item,
+      single-threaded Legacy interval).
    2. Warm up with an untracked ``run_n(10)``.
    3. Bracket ``run_n(10)`` and ``run_n(100)`` with the counting
       allocator.
@@ -130,7 +141,7 @@ that :need:`REQ_0062` mandates.
    allocations (which is what would happen if the error slot
    were Arc-Mutex-allocated per cycle).
 
-   **Expected outcome.** ``per_iter == 0`` across all four
+   **Expected outcome.** ``per_iter == 0`` across all five
    fixture configurations — the executor's pre-allocated
    ``iter_err: Arc<Mutex<Option<ExecutorError>>>`` (built once
    in ``Executor::build``) is reused, not re-allocated, on
