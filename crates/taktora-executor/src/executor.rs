@@ -1200,7 +1200,7 @@ impl Executor {
         // wake source differs (Task 3).
         let mut cyclic_task_indices: Vec<usize> = Vec::new();
         let mut cyclic_periods: Vec<u64> = Vec::new();
-        build_attachments(
+        let deadline_count = build_attachments(
             &waitset,
             &self.tasks,
             dispatch_mode,
@@ -1210,6 +1210,24 @@ impl Executor {
             &mut cyclic_task_indices,
             &mut cyclic_periods,
         )?;
+        // `deadline_count` is the number of attached `Deadline` guards; it sizes
+        // the `AttachmentMap` id buckets so the lazy-learned Notification-form ids
+        // (which a missed `Deadline` resolves to on its first miss) never realloc
+        // in steady state. The map is built once, below, just after the guards are
+        // final — `build_attachments` is the only populator of `guards` /
+        // `attachment_to_task`, so nothing mutates them past this point.
+        //
+        // Borrow-check note: `attachment_map` aliases nothing in `self.tasks`; it
+        // is a standalone local declared before the run `loop` and re-borrowed
+        // `&mut` by each iteration's WaitSet callback. The callback's `resolve`
+        // closure borrows `guards` / `attachment_to_task` *immutably* (via the
+        // `DispatchPass` slice fields), while `map.resolve` holds `&mut map` — two
+        // distinct objects, no aliasing, no raw pointer.
+        let mut attachment_map = crate::attachment_map::AttachmentMap::build(
+            &guards,
+            &attachment_to_task,
+            deadline_count,
+        );
         // `cyclic_periods` is cloned, not moved, because Task 3 reads it again to
         // arm the single master timerfd; on non-Linux it is unused after this.
         let mut grid =
@@ -1382,7 +1400,12 @@ impl Executor {
                     };
                     waitset.wait_and_process_once_with_timeout(
                         |attachment_id: WaitSetAttachmentId<ipc::Service>| {
-                            pass.process_attachment(&attachment_id)
+                            // `attachment_map` is a standalone local re-borrowed
+                            // `&mut` each iteration; it aliases nothing `pass`
+                            // already borrows (`pass` holds the `guards` /
+                            // `attachment_to_task` slices immutably), so the two
+                            // live side by side without conflict.
+                            pass.process_attachment(&attachment_id, &mut attachment_map)
                         },
                         timeout,
                     )
@@ -1597,6 +1620,44 @@ fn run_grid_cyclic_pass(
 /// Every other decl (and every decl in `Legacy` mode, including `Interval`
 /// via `attach_interval`) is attached normally. Extracted from `dispatch_loop`
 /// to keep that function within the cyclomatic-complexity budget.
+/// Today's linear resolution: returns the task index for the single guard the
+/// fired id matches, or `IGNORE` if none. At most one guard can match (one fd
+/// per attachment, unique tick indices), so first-match is exact.
+///
+/// Consumed by `process_attachment` via `AttachmentMap::resolve`; the
+/// `O(log n)` map calls this as its `slow` fallback to seed the per-id cache.
+/// Kept as a free fn (sibling of `attach_trigger_decl`) so both the map's
+/// fallback and any direct caller share one definition.
+fn linear_scan(
+    guards: &[WaitSetGuard<'_, '_, ipc::Service>],
+    attachment_to_task: &[usize],
+    id: &WaitSetAttachmentId<ipc::Service>,
+) -> usize {
+    let mut found = crate::attachment_map::IGNORE;
+    for i in 0..guards.len() {
+        if id.has_event_from(&guards[i]) || id.has_missed_deadline(&guards[i]) {
+            // Debug: keep scanning to assert no second guard matches.
+            // Release: first match is exact (uniqueness invariant), stop early.
+            //
+            // `cfg!(debug_assertions)` is a RUNTIME bool, not a `#[cfg]`
+            // attribute, so BOTH arms always compile — the Linux clippy run
+            // still sees the early `return`. Deliberately NOT `#[cfg(...)]`,
+            // which would gate a path the macOS clippy run skips.
+            if cfg!(debug_assertions) {
+                debug_assert_eq!(
+                    found,
+                    crate::attachment_map::IGNORE,
+                    "id matched two guards"
+                );
+                found = attachment_to_task[i];
+            } else {
+                return attachment_to_task[i];
+            }
+        }
+    }
+    found
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_attachments<'w>(
     waitset: &'w WaitSet<ipc::Service>,
@@ -1607,7 +1668,12 @@ fn build_attachments<'w>(
     attachment_to_task: &mut Vec<usize>,
     cyclic_task_indices: &mut Vec<usize>,
     cyclic_periods: &mut Vec<u64>,
-) -> Result<(), ExecutorError> {
+) -> Result<usize, ExecutorError> {
+    // Number of `Deadline` decls actually ATTACHED as guards (Grid-mode
+    // `Interval` decls are diverted to the cyclic vecs and never counted).
+    // Consumed by `AttachmentMap::build` (#94), which sizes its lazy-learned
+    // deadline-id bucket from this exact count.
+    let mut deadline_count = 0usize;
     for (task_idx, task) in tasks.iter().enumerate() {
         for decl in &task.decls {
             if dispatch_mode == crate::DispatchMode::Grid {
@@ -1619,12 +1685,18 @@ fn build_attachments<'w>(
                     continue;
                 }
             }
+            // Count `Deadline` only on the path where it is actually attached
+            // (after the Grid-`Interval` `continue`), so the tally matches the
+            // guards pushed below one-for-one.
+            if matches!(decl, TriggerDecl::Deadline { .. }) {
+                deadline_count += 1;
+            }
             let guard = attach_trigger_decl(waitset, listener_storage, decl)?;
             guards.push(guard);
             attachment_to_task.push(task_idx);
         }
     }
-    Ok(())
+    Ok(deadline_count)
 }
 
 /// Attaches a single [`TriggerDecl`] to `waitset`, returning the resulting
@@ -1795,14 +1867,23 @@ impl DispatchPass<'_, '_, '_> {
     }
 
     /// Handles a single `WaitSet` wakeup: drains stop notifications, then
-    /// dispatches every task whose attachment fired. Always returns
+    /// resolves the fired attachment id via `map` (an `O(log n)` lookup that
+    /// falls back to `linear_scan` once per never-before-seen id, caching the
+    /// result) and dispatches the single matching task. Always returns
     /// [`CallbackProgression::Continue`]; termination is decided by the
     /// `stop_flag` check in `dispatch_loop` after the callback returns.
+    ///
+    /// Behaviour is identical to the prior linear guard sweep: at most one guard
+    /// matches a given fired id (uniqueness invariant), so resolving-then-
+    /// dispatching the one match is equivalent to looping and dispatching every
+    /// match. Wake-only attachments (stop listener, master timer) resolve to
+    /// [`crate::attachment_map::IGNORE`] and dispatch nothing.
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(unsafe_code)]
     fn process_attachment(
         &mut self,
         attachment_id: &WaitSetAttachmentId<ipc::Service>,
+        map: &mut crate::attachment_map::AttachmentMap,
     ) -> CallbackProgression {
         // Drain stop notifications first (no dispatch — the stop_flag check
         // after the callback returns handles termination).
@@ -1811,14 +1892,17 @@ impl DispatchPass<'_, '_, '_> {
         let stop_l = unsafe { &*self.stop_listener_ptr };
         while let Ok(Some(_)) = stop_l.try_wait_one() {}
 
-        for i in 0..self.guards.len() {
-            let guard = &self.guards[i];
-            let fired =
-                attachment_id.has_event_from(guard) || attachment_id.has_missed_deadline(guard);
-            if !fired {
-                continue;
-            }
-            let task_idx = self.attachment_to_task[i];
+        // Resolve the fired id to its task index. `map` caches per-id; the
+        // `slow` fallback is `linear_scan` over the same guard/task slices the
+        // old loop walked. Capture the two slice fields locally so the closure
+        // borrows just them (a shared borrow) rather than `&self` — `map` is a
+        // separate object held `&mut`, so the borrows do not alias.
+        let guards = self.guards;
+        let attachment_to_task = self.attachment_to_task;
+        let task_idx = map.resolve(attachment_id, |id| {
+            linear_scan(guards, attachment_to_task, id)
+        });
+        if task_idx != crate::attachment_map::IGNORE {
             self.dispatch_task(task_idx);
         }
 

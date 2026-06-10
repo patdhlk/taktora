@@ -17,6 +17,7 @@
 #![doc(html_root_url = "https://docs.rs/taktora-executor/0.1.0")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod attachment_map;
 mod chain;
 mod channel;
 mod clock;

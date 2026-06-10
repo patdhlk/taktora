@@ -398,3 +398,48 @@ rounding of the relative timeout:
    ``pending_skipped`` / ``pending_late`` *before* ``dispatch_task``) is
    handled deliberately at the call site, accepting the same-task / same-tick
    last-writer value on a dedup-skip.
+
+.. arch-decision:: AttachmentMap — sorted-Vec O(log n) attachment-to-task resolution with lazy-learn dual identity
+   :id: ADR_0106
+   :status: accepted
+   :refines: FEAT_0017
+   :links: REQ_0060
+
+   **Context.** ``process_attachment`` resolved every fired id with a linear
+   scan over all guards, reconstructing ids inside
+   ``has_event_from``/``has_missed_deadline`` each call — O(n) per dispatch
+   over the full guard set, on the hot path.
+
+   **Decision.** A single sorted ``Vec<(WaitSetAttachmentId, task_index)>``
+   resolved by ``binary_search``, built once after ``build_attachments`` and
+   threaded as a short-lived ``&mut`` borrow into the event-dispatch pass.
+   Sorted ``Vec`` over ``HashMap``: ids are small ``Copy`` values and
+   attachment counts are tens — a cache-resident contiguous array beats a
+   SipHash probe.
+
+   **Dual identity / lazy-learn.** A deadline attachment's missed-deadline
+   fire is the precomputable ``Deadline``-form id (a binary-search hit); its
+   real-event fire is the ``Notification``-form id whose constructor is
+   private upstream, so it is learned on first fire via a single linear scan,
+   then cached. Negative results are cached too (an ``IGNORE`` sentinel) so
+   master-timer / stop-listener wakes cost one failed binary search forever
+   after.
+
+   **Deliberate flattening.** ``has_event_from || has_missed_deadline``
+   treats a deadline attachment's real event and its miss identically, and the
+   map preserves that — both ids resolve to the same bare ``task_index``. The
+   two fires *do* arrive as distinct ids (Notification-form vs Deadline-form),
+   so routing misses differently in future (e.g. faulting a task on a missed
+   deadline — the obvious eventual PLC feature) is a value **enrichment**
+   (``(task_idx, FireKind)``), not a redesign. The flattening is a decision,
+   not an oversight.
+
+   **Consequences.** Steady-state resolution is O(log n) and allocation-free
+   (capacity reserved at ``guards.len() + deadline_count + 2``; a ``resolve``
+   capacity ``debug_assert`` turns that reservation into a checked invariant).
+   Behavior is identical to the linear scan (same task for the same id).
+   Relies on the one-fd-one-attachment / unique-tick-index uniqueness
+   invariant. The map's validity — and the soundness of caching ``IGNORE``
+   forever — is bounded by the attachment set's **immutability within
+   ``dispatch_loop``** (guards built once, no detach, fds stable); any future
+   dynamic attach/detach must rebuild or invalidate the map.
