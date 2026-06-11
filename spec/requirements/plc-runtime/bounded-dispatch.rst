@@ -77,7 +77,11 @@ implementation).
    The skipped run is **sound** because the single run drains all pending
    input through its listener ``take()`` loop: the listener's notifications
    are level-readable, so a second listener fired in the same wake-phase is
-   serviced by the one run rather than by a second, aliasing submit.
+   serviced by the one run rather than by a second, aliasing submit. The
+   now-active **observable** contract this enforces — once the per-callback
+   barrier is gone (see below) — is: a task whose **multiple listener
+   triggers all fire in one wake dispatches once per wake**, draining every
+   ready listener in that single run, **not once per fired listener**.
    Consequently each task **records at most one cycle** and advances
    ``cycle_index`` **at most once per phase**. Telemetry stays correct
    because ``record_cycle_for`` early-returns for event tasks (which carry
@@ -85,11 +89,17 @@ implementation).
 
    This is the explicit guard that makes the at-most-one-submit contract
    hold *by construction* rather than only by accident of the per-callback
-   barrier. It is the precondition for the follow-up barrier-consolidation
-   slice (which removes that per-callback barrier) and it closes the latent
-   Grid-path (Linux-default) hazard whereby ``run_grid_cyclic_pass`` barriers
-   only after its whole due-loop, so two grid slots resolving to one task
-   would otherwise double-submit the same borrowed job — see
+   barrier. It was the precondition for the barrier-consolidation slice,
+   which **has now landed**: the per-callback barrier is **removed**, and
+   the dispatch path performs a **single** ``barrier_and_record`` per wake
+   that covers **both** the event population (marked by the ``WaitSet``
+   callback) **and** the grid/cyclic population (marked by the grid pass),
+   folding each task's ``pending_cycle`` **exactly once**. With that
+   per-callback barrier gone, this guard is now the *sole* thing holding the
+   at-most-one-submit contract, so it also closes the latent Grid-path
+   (Linux-default) hazard whereby ``run_grid_cyclic_pass`` barriers only
+   after its whole due-loop, so two grid slots resolving to one task would
+   otherwise double-submit the same borrowed job — see
    :need:`ADR_0105`. It complements the once-per-period cyclic contract of
    :need:`REQ_0002` and the absolute-grid phase-locking of :need:`REQ_0268`,
    and it must not introduce steady-state allocation on the dispatch path

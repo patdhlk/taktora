@@ -257,3 +257,74 @@ fn run_n_survives_eintr_from_unrelated_signals() {
         "EINTR must not truncate run_n: all 50 cycles must dispatch"
     );
 }
+
+/// Pins the once-per-wake dispatch contract (#95, activated via the #93
+/// per-phase dedup guard): a task whose multiple listener triggers all fire in
+/// a single wake must dispatch exactly once — its item drains all ready
+/// listeners in that one run — not once per fired listener.
+///
+/// Both channels are published BEFORE `run_n(1)`, so both listener events are
+/// latched before the first wait. One wake therefore processes both ready
+/// attachments, firing the `WaitSet` callback twice for the SAME task index.
+/// With one barrier+fold per wake the dedup guard collapses that to a single
+/// dispatch (counter == 1); on the per-attachment-barrier path the second
+/// fired listener re-dispatches (counter == 2).
+///
+/// `DispatchMode::Legacy` is forced for deterministic cross-platform behaviour
+/// (event dispatch is mode-independent; Legacy avoids Grid wake quirks).
+#[test]
+fn multi_listener_dispatches_once_per_wake() {
+    use taktora_executor::DispatchMode;
+
+    let mut exec = Executor::builder()
+        .worker_threads(0)
+        .dispatch_mode(DispatchMode::Legacy)
+        .build()
+        .unwrap();
+
+    let topic_a = unique("taktora.test.run.multi.a");
+    let topic_b = unique("taktora.test.run.multi.b");
+    let ch_a = exec.channel::<Tick>(&topic_a).unwrap();
+    let ch_b = exec.channel::<Tick>(&topic_b).unwrap();
+    let pub_a = ch_a.publisher().unwrap();
+    let pub_b = ch_b.publisher().unwrap();
+    let sub_a = ch_a.subscriber().unwrap();
+    let sub_b = ch_b.subscriber().unwrap();
+
+    let counter = Arc::new(AtomicU32::new(0));
+    let c = Arc::clone(&counter);
+
+    // Both subscribers are registered as triggers on ONE item. They are
+    // `Subscriber<T>` (`!Send`), so they move into the declare closure and
+    // stay there; the execute body needs only the shared counter. What this
+    // test pins is the *dispatch count*: how many times the item body runs
+    // when both of its listeners are ready in the same wake — not whether the
+    // body drains the samples. (`subscriber_trigger_dispatches_task` likewise
+    // dispatches without draining.)
+    exec.add(item_with_triggers(
+        move |d| {
+            d.subscriber(&sub_a);
+            d.subscriber(&sub_b);
+            Ok(())
+        },
+        move |_| {
+            c.fetch_add(1, Ordering::SeqCst);
+            Ok(ControlFlow::Continue)
+        },
+    ))
+    .unwrap();
+
+    // Publish to BOTH channels before the first wait, so both listener events
+    // are latched and one wake processes both ready attachments.
+    pub_a.send_copy(Tick(0)).unwrap();
+    pub_b.send_copy(Tick(1)).unwrap();
+
+    exec.run_n(1).unwrap();
+
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "a task whose two listeners both fire in one wake must dispatch once, \
+         not once per fired listener"
+    );
+}

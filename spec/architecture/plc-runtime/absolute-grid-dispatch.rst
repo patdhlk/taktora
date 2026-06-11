@@ -346,8 +346,9 @@ rounding of the relative timeout:
    behavior (a data race on the closure's captured state). This is reachable
    on the production **Grid (Linux-default)** path precisely because
    ``run_grid_cyclic_pass`` barriers only *after* its whole due-loop
-   (:need:`BB_0095`), so the protection that masked the hazard is the very
-   per-callback barrier the follow-up barrier-consolidation slice removes.
+   (:need:`BB_0095`), so the protection that masked the hazard was the very
+   per-callback barrier the barrier-consolidation slice has now removed (the
+   dispatch path runs a single ``barrier_and_record`` per wake).
    This ADR is the in-spec record of that released-0.2.x discrepancy and the
    contract that closes it (:need:`REQ_0854`).
 
