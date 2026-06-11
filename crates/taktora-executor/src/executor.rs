@@ -1470,17 +1470,29 @@ impl Executor {
                 pool,
                 iter_err: &iter_err_inner,
             };
-            run_grid_cyclic_pass(
+            // Route the grid pass through the SAME REQ_0123, #103 framework-fault
+            // boundary as the wait above: its `barrier_and_record` ->
+            // `record_cycle_for` -> `Observer::on_cycle_stats` fold runs a user
+            // callback that can panic, and such a panic must reach
+            // `fatal.fire(...)` -> abort, not unwind raw out of `dispatch_loop`.
+            // `None` is only reachable under a test terminal (production aborts
+            // in `fire`); bail the loop exactly like the wait boundary above
+            // rather than iterate over possibly-corrupt state.
+            let now_nanos = self.cyclic_clock.now_nanos();
+            let Some(()) = run_grid_cyclic_pass_guarded(
+                &self.fatal_dispatch,
                 cpass,
                 ticked,
                 dispatch_mode,
                 &stop_flag,
                 cb_result,
                 &mut grid,
-                self.cyclic_clock.now_nanos(),
+                now_nanos,
                 &cyclic_task_indices,
                 &mut due_cyclic,
-            );
+            ) else {
+                break Ok(());
+            };
 
             // Funnel the post-callback decision (interrupt / item error /
             // stop request / run-mode termination) through one helper that
@@ -1629,6 +1641,46 @@ fn run_grid_cyclic_pass(
         pass.dispatch_cyclic(cyclic_task_indices[*slot], *skipped, *late_by);
     }
     pass.barrier_and_record();
+}
+
+/// Run [`run_grid_cyclic_pass`] inside the `REQ_0123` / #103 framework-fault boundary.
+///
+/// The post-wait grid pass folds cyclic telemetry through
+/// `barrier_and_record` -> `record_cycle_for` -> [`Observer::on_cycle_stats`],
+/// a *user* callback that can panic. That panic is a framework-boundary fault
+/// (same class as the wrapped `WaitSet` drive), so it must route to
+/// `fatal.fire(...)` -> abort, not unwind raw out of `dispatch_loop`. We wrap
+/// the whole pass in the same `guard_or_fatal(FatalSite::ExecutorRunLoop, ...)`
+/// the wait boundary uses; `None` (only reachable under a `#[cfg(test)]`
+/// recording terminal — production aborts in `fire`) signals the caller to bail
+/// the loop rather than iterate over possibly-corrupt state. `cb_result` is
+/// `Copy`, so passing it by value here leaves it intact for `after_callback`.
+#[allow(clippy::too_many_arguments)]
+fn run_grid_cyclic_pass_guarded(
+    fatal: &FatalDispatch,
+    pass: DispatchPass<'_, '_, '_>,
+    ticked: bool,
+    dispatch_mode: crate::DispatchMode,
+    stop_flag: &Stoppable,
+    cb_result: Result<WaitSetRunResult, iceoryx2::waitset::WaitSetRunError>,
+    grid: &mut crate::grid::GridTimer,
+    now_nanos: u64,
+    cyclic_task_indices: &[usize],
+    due_cyclic: &mut Vec<(usize, u64, u64)>,
+) -> Option<()> {
+    guard_or_fatal(fatal, FatalSite::ExecutorRunLoop, || {
+        run_grid_cyclic_pass(
+            pass,
+            ticked,
+            dispatch_mode,
+            stop_flag,
+            cb_result,
+            grid,
+            now_nanos,
+            cyclic_task_indices,
+            due_cyclic,
+        );
+    })
 }
 
 /// Build every `WaitSet` attachment for the task table (`REQ_0268`). In `Grid`
@@ -3079,6 +3131,141 @@ mod tests {
             first_lateness,
             Some(0),
             "stale pending_late token corrupted the first-cycle lateness baseline (#102)"
+        );
+    }
+
+    #[test]
+    #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
+    fn cyclic_fold_observer_panic_routes_to_fatal_boundary() {
+        use crate::fatal::{FatalContext, FatalDispatch, FatalSite};
+        use std::sync::{Arc, Mutex};
+        // #103 / REQ_0123: the post-wait grid pass folds cyclic telemetry
+        // through `barrier_and_record` -> `record_cycle_for` ->
+        // `Observer::on_cycle_stats`, a USER callback that can panic. Latent on
+        // `main`, that fold ran OUTSIDE the `guard_or_fatal` framework-fault
+        // boundary, so an observer panic unwound raw out of `dispatch_loop`
+        // instead of routing to `fatal.fire(...)` -> abort. This drives a
+        // panicking cycle-stats observer through `run_grid_cyclic_pass_guarded`
+        // and asserts the boundary catches it (`None` + one ExecutorRunLoop
+        // fire). Deterministic white-box, modeled on `dispatch_twice_one_barrier`
+        // — a `run_n` Grid integration test is unreliable (macOS interleave
+        // race + ubuntu first-cycle-skip flake), so the fold might not fire.
+
+        // (2) Observer whose on_cycle_stats panics.
+        struct BoomObserver;
+        impl Observer for BoomObserver {
+            fn on_cycle_stats(&self, _obs: &CycleObservation) {
+                panic!("observer boom");
+            }
+        }
+
+        // (1) One cyclic (interval) task so it has a `scan_period` and
+        // `record_cycle_for` does NOT early-return.
+        let period = std::time::Duration::from_millis(1);
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .observer(Arc::new(BoomObserver) as Arc<dyn Observer>)
+            .build()
+            .expect("build");
+        exec.add(crate::item::item_with_triggers(
+            move |d| {
+                d.interval(period);
+                Ok(())
+            },
+            |_ctx| Ok(ControlFlow::Continue),
+        ))
+        .expect("add");
+        assert_eq!(
+            exec.tasks[0].scan_period,
+            Some(period),
+            "cyclic task must carry a scan_period or record_cycle_for early-returns"
+        );
+
+        // (3) Swap in a recording terminal so `guard_or_fatal` returns `None`
+        // instead of aborting; capture every fired site.
+        let fired: Arc<Mutex<Vec<FatalSite>>> = Arc::new(Mutex::new(Vec::new()));
+        let fired2 = Arc::clone(&fired);
+        exec.fatal_dispatch = Arc::new(FatalDispatch::with_terminal(
+            exec.fatal_dispatch.handler().clone(),
+            move |ctx: &FatalContext| {
+                fired2.lock().expect("lock").push(ctx.site);
+            },
+        ));
+
+        // (4) Hand-build a guard-less DispatchPass over our own fields (raw
+        // pointers taken first so the &mut borrows release before the shared
+        // borrows below — same discipline as `dispatch_twice_one_barrier`).
+        let tasks_ptr = &mut exec.tasks as *mut Vec<TaskEntry>;
+        let cycle_stats_ptr = &mut exec.cycle_stats as *mut Vec<TaskCycleStats>;
+        let exec_fault_ptr = &*exec.exec_fault as *const ExecutorFaultAtomic;
+        let exec_start_ptr = &*exec.start_time as *const OnceLock<Instant>;
+        let stop_listener_ptr = exec.stop_listener.as_ref() as *const IxListener<ipc::Service>;
+        let observer = &exec.observer;
+        let pool = &exec.pool;
+        let clock = &exec.clock;
+        let iter_err = Arc::clone(&exec.iter_err);
+        let stop_flag = exec.stoppable.clone();
+        let fatal = Arc::clone(&exec.fatal_dispatch);
+        let pass = DispatchPass {
+            guards: &[],
+            attachment_to_task: &[],
+            tasks_ptr,
+            cycle_stats_ptr,
+            observer,
+            exec_fault_ptr,
+            exec_start_ptr,
+            clock,
+            stop_listener_ptr,
+            pool,
+            iter_err: &iter_err,
+        };
+
+        // (5) Build a GridTimer and force the single cyclic task DUE. `take_due`
+        // mutates the timer (it advances `next` past the served slot), so probe
+        // due-ness on a throwaway timer and hand the pass a fresh, un-advanced
+        // one — `run_grid_cyclic_pass` calls `take_due` itself, and a re-call on
+        // an already-advanced timer at the same `now` would find nothing.
+        let period_ns = u64::try_from(period.as_nanos()).expect("period fits u64");
+        let base_now = 0_u64;
+        let now = base_now + period_ns;
+        let cyclic_task_indices = vec![0_usize];
+        let mut due_probe: Vec<(usize, u64, u64)> = Vec::new();
+        crate::grid::GridTimer::new(base_now, vec![period_ns]).take_due(now, &mut due_probe);
+        assert!(
+            !due_probe.is_empty(),
+            "grid setup wrong: cyclic task is not due, the fold would never fire"
+        );
+        let mut grid = crate::grid::GridTimer::new(base_now, vec![period_ns]);
+        let mut due_cyclic: Vec<(usize, u64, u64)> = Vec::new();
+
+        // (6) Drive the guarded grid pass: the cyclic task dispatches, the
+        // internal barrier runs, `record_cycle_for` calls the panicking
+        // observer -> panic -> caught by `guard_or_fatal` -> fatal terminal
+        // records -> returns `None`.
+        let outcome = run_grid_cyclic_pass_guarded(
+            &fatal,
+            pass,
+            true,
+            crate::DispatchMode::Grid,
+            &stop_flag,
+            Ok(WaitSetRunResult::AllEventsHandled),
+            &mut grid,
+            now,
+            &cyclic_task_indices,
+            &mut due_cyclic,
+        );
+
+        // (7) The boundary caught the panic: `None` and exactly one fire at the
+        // run-loop site.
+        assert!(
+            outcome.is_none(),
+            "observer panic in the cyclic fold must be caught by the framework boundary (None)"
+        );
+        let sites = fired.lock().expect("lock").clone();
+        assert_eq!(
+            sites,
+            vec![FatalSite::ExecutorRunLoop],
+            "expected exactly one ExecutorRunLoop fatal fire, got {sites:?}"
         );
     }
 
