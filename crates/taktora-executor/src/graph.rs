@@ -596,13 +596,16 @@ impl Graph {
         let job_ptr: *mut (dyn FnMut() + Send) =
             std::ptr::from_mut::<dyn FnMut() + Send>(self.vertex_jobs[i].as_mut());
         // SAFETY: closure lives on this Graph, which lives inside
-        // `Box<Graph>` inside `TaskEntry`. `pool.barrier()` (called by
-        // the WaitSet thread at the end of every callback) ensures the
-        // closure has finished executing before the next iteration's
-        // callback can touch the graph again. We hold `&mut self`
-        // throughout `run_once_borrowed`, so the WaitSet thread is the
-        // sole user of the graph state outside of the pool worker's
-        // closure invocation.
+        // `Box<Graph>` inside `TaskEntry`. The primary release point is
+        // the `done_cv` / `pending == 0` join in `run_once_borrowed`: that
+        // call blocks until every dispatched vertex job has finished and
+        // `pending` has drained to 0 before it returns — i.e. before
+        // `dispatch_task` returns, well ahead of any outer barrier. The
+        // single per-wake `barrier_and_record` in
+        // `run_grid_cyclic_pass_guarded` is a redundant backstop. We hold
+        // `&mut self` throughout `run_once_borrowed`, so the `WaitSet`
+        // thread is the sole user of the graph state outside of the pool
+        // worker's closure invocation.
         unsafe {
             pool.submit_borrowed(crate::pool::BorrowedJob::new(job_ptr));
         }

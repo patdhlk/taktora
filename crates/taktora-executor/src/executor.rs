@@ -1336,10 +1336,13 @@ impl Executor {
             //      reads `tasks_ptr`. The pool jobs it submits hold borrowed
             //      `*mut dyn ExecutableItem` slices into individual TaskEntries,
             //      not into the Vec itself, so they don't race with the Vec.
-            //   2. `pool.barrier()` at the end of this callback ensures every
-            //      submitted pool job has completed (and dropped its raw pointer)
-            //      before the callback returns. The next iteration of the WaitSet
-            //      loop is therefore the sole user of `tasks_ptr` again.
+            //   2. The single per-wake `barrier_and_record` in
+            //      `run_grid_cyclic_pass_guarded` (which runs after the callback
+            //      returns, plus the defensive `pool.barrier()` on the
+            //      `break Ok(())` bail paths) ensures every submitted pool job has
+            //      completed (and dropped its raw pointer) before the next wake.
+            //      The next iteration of the `WaitSet` loop is therefore the sole
+            //      user of `tasks_ptr` again.
             //   3. The Vec is never resized inside this loop (no `push` / `remove`
             //      after dispatch starts), so the underlying buffer addresses are
             //      stable for the lifetime of `dispatch_loop`.
@@ -1439,6 +1442,13 @@ impl Executor {
                 // `#[cfg(test)]` recording terminal can unwind the loop.
                 // Consequently, silently discarding any pending `iter_err`
                 // here is immaterial to production behavior.
+                //
+                // D4 (#95): defensive drain so no in-flight borrowed job
+                // outlives `tasks_ptr` exclusivity at loop exit (production
+                // aborts in `fire`; this covers the `#[cfg(test)]` terminal). A
+                // second `barrier()` on a quiescent pool is a counter fast-path
+                // no-op.
+                pool.barrier();
                 break Ok(());
             };
 
@@ -1491,6 +1501,12 @@ impl Executor {
                 &cyclic_task_indices,
                 &mut due_cyclic,
             ) else {
+                // D4 (#95): defensive drain so no in-flight borrowed job
+                // outlives `tasks_ptr` exclusivity at loop exit (production
+                // aborts in `fire`; this covers the `#[cfg(test)]` terminal). A
+                // second `barrier()` on a quiescent pool is a counter fast-path
+                // no-op.
+                pool.barrier();
                 break Ok(());
             };
 
@@ -1592,16 +1608,23 @@ enum IterOutcome {
 /// off the scheduling clock. `pass` mirrors the callback's `DispatchPass`
 /// exactly — same borrows and raw pointers, same single-writer WaitSet-thread
 /// discipline — and the callback is already dropped (its borrows freed) by the
-/// time this runs. We poll `grid` for due cyclic slots, dispatch each due task,
-/// and fold their telemetry through the SHARED [`DispatchPass::barrier_and_record`]
-/// helper. This is a SEPARATE barrier phase from the callback's: each phase
-/// barriers and folds only its own `pending_cycle` stashes, so cyclic tasks
-/// record exactly once, identically to event tasks. We do NOT call
-/// `record_cycle_for` directly here.
+/// time this runs. We poll `grid` for due cyclic slots and dispatch each due
+/// task (marking its `pending_cycle`).
 ///
-/// Self-gates and returns early (no dispatch, no record) unless this wake should
-/// run the grid: the master timer ticked (`ticked`), we are in `Grid` mode, it is
-/// not a stop wake, and there is at least one cyclic task with something due.
+/// Dispatch only (#95): this no longer barriers or folds telemetry. The lone
+/// per-wake `pool.barrier()` + telemetry fold moved to the caller
+/// ([`run_grid_cyclic_pass_guarded`]), which runs the single
+/// [`DispatchPass::barrier_and_record`] AFTER this returns — folding the event
+/// tasks the `WaitSet` callback marked AND the grid cyclic tasks marked here in
+/// one pass. We borrow `&mut pass` so the caller still owns the `DispatchPass`
+/// value and can run that barrier on it. We do NOT call `record_cycle_for`
+/// directly here.
+///
+/// Self-gates and returns early (no dispatch) unless this wake should run the
+/// grid: the master timer ticked (`ticked`), we are in `Grid` mode, it is not a
+/// stop wake, and there is at least one cyclic task with something due. The
+/// caller's barrier is UNCONDITIONAL — it runs even on these early returns,
+/// folding any event marks left by the callback.
 ///
 /// **Stop-wake suppression (`REQ_0268`)**: a `stop()` (or a SIGINT/SIGTERM
 /// `cb_result`) must emit no spurious cyclic cycle — Legacy dispatches none on a
@@ -1611,7 +1634,7 @@ enum IterOutcome {
 /// effects.
 #[allow(clippy::too_many_arguments)]
 fn run_grid_cyclic_pass(
-    mut pass: DispatchPass<'_, '_, '_>,
+    pass: &mut DispatchPass<'_, '_, '_>,
     ticked: bool,
     dispatch_mode: crate::DispatchMode,
     stop_flag: &Stoppable,
@@ -1640,25 +1663,28 @@ fn run_grid_cyclic_pass(
     for (slot, skipped, late_by) in due_cyclic.iter() {
         pass.dispatch_cyclic(cyclic_task_indices[*slot], *skipped, *late_by);
     }
-    pass.barrier_and_record();
 }
 
-/// Run [`run_grid_cyclic_pass`] inside the `REQ_0123` / #103 framework-fault boundary.
+/// Run [`run_grid_cyclic_pass`] AND the lone per-wake barrier+fold inside the
+/// `REQ_0123` / #103 framework-fault boundary.
 ///
-/// The post-wait grid pass folds cyclic telemetry through
-/// `barrier_and_record` -> `record_cycle_for` -> [`Observer::on_cycle_stats`],
-/// a *user* callback that can panic. That panic is a framework-boundary fault
-/// (same class as the wrapped `WaitSet` drive), so it must route to
-/// `fatal.fire(...)` -> abort, not unwind raw out of `dispatch_loop`. We wrap
-/// the whole pass in the same `guard_or_fatal(FatalSite::ExecutorRunLoop, ...)`
-/// the wait boundary uses; `None` (only reachable under a `#[cfg(test)]`
-/// recording terminal — production aborts in `fire`) signals the caller to bail
-/// the loop rather than iterate over possibly-corrupt state. `cb_result` is
-/// `Copy`, so passing it by value here leaves it intact for `after_callback`.
+/// Two things happen here, both wrapped in the boundary: (1) the grid pass
+/// dispatches due cyclic tasks (marking their `pending_cycle`), and (2) the ONE
+/// per-wake [`DispatchPass::barrier_and_record`] runs — barriering every
+/// in-flight pool job and folding every task (event OR cyclic) whose
+/// `pending_cycle` is set this wake. The fold runs
+/// `record_cycle_for` -> [`Observer::on_cycle_stats`], a *user* callback that
+/// can panic; that panic is a framework-boundary fault (same class as the
+/// wrapped `WaitSet` drive), so it must route to `fatal.fire(...)` -> abort,
+/// not unwind raw out of `dispatch_loop`. `None` (only reachable under a
+/// `#[cfg(test)]` recording terminal — production aborts in `fire`) signals the
+/// caller to bail the loop rather than iterate over possibly-corrupt state.
+/// `cb_result` is `Copy`, so passing it by value here leaves it intact for
+/// `after_callback`.
 #[allow(clippy::too_many_arguments)]
 fn run_grid_cyclic_pass_guarded(
     fatal: &FatalDispatch,
-    pass: DispatchPass<'_, '_, '_>,
+    mut pass: DispatchPass<'_, '_, '_>,
     ticked: bool,
     dispatch_mode: crate::DispatchMode,
     stop_flag: &Stoppable,
@@ -1670,7 +1696,7 @@ fn run_grid_cyclic_pass_guarded(
 ) -> Option<()> {
     guard_or_fatal(fatal, FatalSite::ExecutorRunLoop, || {
         run_grid_cyclic_pass(
-            pass,
+            &mut pass,
             ticked,
             dispatch_mode,
             stop_flag,
@@ -1680,6 +1706,14 @@ fn run_grid_cyclic_pass_guarded(
             cyclic_task_indices,
             due_cyclic,
         );
+        // D2/D3: the ONE barrier + fold per wake. Unconditional (runs even when
+        // run_grid_cyclic_pass early-returns for Legacy/stop/not-ticked/no-cyclic),
+        // REQ_0123-guarded (we are inside guard_or_fatal), and covers BOTH
+        // populations: event tasks marked by the WaitSet callback AND grid cyclic
+        // tasks marked just above. barrier_and_record folds every task index whose
+        // pending_cycle is Some, so a different DispatchPass value having set the
+        // event stashes is irrelevant — same tasks_ptr.
+        pass.barrier_and_record();
     })
 }
 
@@ -1944,6 +1978,17 @@ impl DispatchPass<'_, '_, '_> {
     /// [`CallbackProgression::Continue`]; termination is decided by the
     /// `stop_flag` check in `dispatch_loop` after the callback returns.
     ///
+    /// Mark-and-submit only (#95): this resolves the fired id and submits the
+    /// matching task's borrowed job, but it does NOT barrier. The single
+    /// `pool.barrier()` + telemetry fold per wake is deferred to
+    /// [`DispatchPass::barrier_and_record`], run once in the guarded grid pass
+    /// ([`run_grid_cyclic_pass_guarded`]); that fold covers BOTH the event
+    /// tasks marked here and the grid cyclic tasks. The #93 per-phase dedup
+    /// guard in [`DispatchPass::dispatch_task`] (`pending_cycle.is_some()` ⇒
+    /// return) makes a task whose multiple listeners fire in the same wake
+    /// dispatch exactly once — its one item run drains all ready listeners —
+    /// rather than once per fired listener.
+    ///
     /// Behaviour is identical to the prior linear guard sweep: at most one guard
     /// matches a given fired id (uniqueness invariant), so resolving-then-
     /// dispatching the one match is equivalent to looping and dispatching every
@@ -1977,8 +2022,9 @@ impl DispatchPass<'_, '_, '_> {
             self.dispatch_task(task_idx);
         }
 
-        self.barrier_and_record();
-
+        // No barrier here (#95): the lone per-wake `barrier_and_record` runs in
+        // the guarded grid pass, folding both these event marks and the grid
+        // cyclic marks together.
         CallbackProgression::Continue
     }
 
@@ -2175,8 +2221,11 @@ impl DispatchPass<'_, '_, '_> {
         if let Some(handler_box) = task.handler_job.as_deref_mut() {
             let job_ptr: *mut (dyn FnMut() + Send) = handler_box as *mut (dyn FnMut() + Send);
             // SAFETY: same as the main-job dispatch below — handler_job is
-            // owned by the TaskEntry; pool.barrier() awaits its completion
-            // before the next callback.
+            // owned by the `TaskEntry`; the single per-wake
+            // `barrier_and_record` in `run_grid_cyclic_pass_guarded` awaits
+            // its completion before the next iteration (and before
+            // `Executor` drop), so the borrowed job is never reused while
+            // a worker still holds it.
             unsafe {
                 self.pool
                     .submit_borrowed(crate::pool::BorrowedJob::new(job_ptr));
@@ -2207,10 +2256,13 @@ impl DispatchPass<'_, '_, '_> {
                 let job_ptr: *mut (dyn FnMut() + Send) = job_box as *mut (dyn FnMut() + Send);
                 // SAFETY: the closure lives in `task.job`, owned by
                 // `self.tasks[task_idx]`; `tasks_ptr` is sound for the
-                // duration of this callback. `pool.barrier()` in
-                // `process_attachment` finishes the closure invocation before
-                // the next iteration's callback. The WaitSet thread does not
-                // touch the closure between this submit and that barrier.
+                // duration of this callback. The single per-wake
+                // `barrier_and_record` in `run_grid_cyclic_pass_guarded`
+                // finishes the closure invocation before the next
+                // iteration (and before `Executor` drop). The `WaitSet`
+                // thread does not touch the closure between this submit and
+                // that barrier, so there is no aliased reuse of the
+                // borrowed job.
                 unsafe {
                     self.pool
                         .submit_borrowed(crate::pool::BorrowedJob::new(job_ptr));
