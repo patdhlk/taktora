@@ -1337,9 +1337,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.12.3"
+version = "1.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e10754a14b9137dd7b1e3e5b0493cc9171fdd105e0ab477f51b72e7f3ac0e276"
+checksum = "f1292b7759ae1cb9ec195452d1390a074f0cd8541ab7a5a8c31cd6db45d4a6ba"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -1360,9 +1360,9 @@ dependencies = [
 
 [[package]]
 name = "regex-syntax"
-version = "0.8.10"
+version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rustc-hash"
@@ -1593,9 +1593,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-ethercat"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "002855e76a0dafa0f0cde7af009179c048d762fe97ee928bc2ee3904d2506080"
+checksum = "a9b68260fc1b5c2aed34705a2cf8acf62341d9a29336b4fde2540fe5f87bf0de"
 dependencies = [
  "crossbeam-channel",
  "ethercrab",
@@ -1611,9 +1611,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-host"
-version = "0.1.13"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ae890569e0c7af6daba3f110c52227a19cf29bd767467c87716974db4dd745d"
+checksum = "97e07ddee7a196864649530846ffbec924d71caab5e29f9ae7cc111994db0706"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",
@@ -1693,9 +1693,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-executor"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8ff6ce6785702018783aae342be349096f890453abb7aa3e7641caefad4ed2"
+checksum = "0ad63500703a2089ebf755e900d823da2a441f23ad45e48200e525c7509aa7e0"
 dependencies = [
  "bitflags 2.13.0",
  "crossbeam-channel",
@@ -2116,18 +2116,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.50"
+version = "0.8.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b065d4f0e55f82fae73202e189638116a87c55ab6b8e6c2721e13dd9d854ad1"
+checksum = "ce1022995ff5ff5d841ad7d994facc23098cd40152f2c1d11cd607c6f530653f"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.50"
+version = "0.8.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b631b19d36a892ab55420c92dbc83ccd79274f25be714855d3074aa71cab639"
+checksum = "1ae7f38b72ec2a254e2b87ef277cf2cd4fb97cbebf944faa6f33354da0867930"
 dependencies = [
  "proc-macro2",
  "quote",
