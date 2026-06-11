@@ -1160,6 +1160,25 @@ impl Executor {
         clippy::borrow_as_ptr
     )]
     fn dispatch_loop(&mut self, mode: &mut RunMode<'_>) -> Result<(), ExecutorError> {
+        // Clear the per-wake transient tokens on every TaskEntry, once per
+        // `run_*` call (O(task_count), alloc-free). `pending_cycle` doubles as
+        // the per-phase dispatch dedup token (REQ_0854, #93), and its intended lifetime is
+        // a single `dispatch_loop` invocation — but nothing enforced that
+        // across a `run_*` re-entry, since `Executor` is `&mut self` and
+        // `self.tasks` persists. A mid-wake fatal bail (`break Ok(())`) that
+        // landed after a mark but before the post-barrier fold `take`d the
+        // token would leave it `Some`, and the next `dispatch_loop`'s
+        // `dispatch_task` guard would silently swallow that task's first
+        // dispatch. Sweeping here makes the token lifetime one invocation by
+        // construction (closes #102). Cross-cycle telemetry state
+        // (`grid_epoch` / `grid_slot` / `last_dispatch`) is deliberately left
+        // untouched — clearing it would corrupt the lateness grid.
+        for task in &mut self.tasks {
+            task.pending_cycle = None;
+            task.pending_skipped = 0;
+            task.pending_late = None;
+        }
+
         // Tight timer slack for the dispatch thread (REQ_0274). SCHED_OTHER
         // threads inherit the kernel's 50 µs default, and `epoll_wait`
         // sleeps through `schedule_hrtimeout_range` WITH that slack: on the
@@ -2949,6 +2968,117 @@ mod tests {
             hits.load(Ordering::Relaxed) >= 8,
             "legacy mode under-dispatched: {}",
             hits.load(Ordering::Relaxed)
+        );
+    }
+
+    #[test]
+    fn stranded_pending_cycle_token_does_not_swallow_first_dispatch() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        // Regression for #102: the `dispatch_loop` entry sweep clears the three
+        // per-wake transients (REQ_0854, #93) so a prior `run_*` that bailed
+        // mid-wake cannot strand them. This test presets ALL THREE on the task
+        // and asserts the two that are first-cycle observable under `run_n(1)`:
+        //
+        //   * `pending_cycle = Some(..)` — doubles as the per-phase dispatch
+        //     dedup token. `dispatch_task`'s `pending_cycle.is_some()` guard
+        //     would silently swallow the task's first dispatch if the sweep
+        //     didn't clear it (the dispatch-count assertion guards this clear).
+        //   * `pending_late = Some(L)` — `record_cycle_for` back-dates the
+        //     first-cycle `grid_epoch` via `pre_ns.saturating_sub(L)` (the
+        //     `get_or_insert_with` anchor). `pre_ns` is ns since the clock's
+        //     build epoch, so this early in a run it's small (~1 ms); with
+        //     `L = 5_000_000 > pre_ns` the subtraction saturates to 0, so the
+        //     first recorded cycle's `lateness_ns` reads a nonzero value
+        //     (`≈ pre_ns`, the dispatch instant, in this saturating regime; it
+        //     would equal `L` only once `pre_ns >= L`) instead of the clean
+        //     `0` — a silently corrupted lateness baseline for the whole run
+        //     (the lateness assertion guards this clear).
+        //   * `pending_skipped = <nonzero>` — `mem::take`n by the same record
+        //     pass, but the first record has `first == true`, so it does NOT
+        //     advance `grid_slot` and has no first-cycle observable effect.
+        //     Its clear is defensive (it would only bite a later cycle), so
+        //     there is intentionally no assertion on it here; a `run_n(2)`
+        //     test for it would be flaky on real timers. Presetting it is for
+        //     completeness, to prove the sweep clears all three together.
+        //
+        // The sweep makes the token lifetime one `dispatch_loop` invocation by
+        // construction even though `Executor` is `&mut self` and `self.tasks`
+        // persists across `run_*` calls.
+        struct LatenessRecorder {
+            lateness: std::sync::Mutex<Vec<Option<i64>>>,
+        }
+        impl Observer for LatenessRecorder {
+            fn on_cycle_stats(&self, obs: &CycleObservation) {
+                self.lateness.lock().expect("lock").push(obs.lateness_ns);
+            }
+        }
+
+        let hits = Arc::new(AtomicU32::new(0));
+        let h = Arc::clone(&hits);
+        let recorder = Arc::new(LatenessRecorder {
+            lateness: std::sync::Mutex::new(Vec::new()),
+        });
+        // Legacy mode is mandatory for scripted/deterministic cyclic tests: the
+        // platform default races on macOS and skips the first Grid cycle on
+        // ubuntu.
+        let mut exec = Executor::builder()
+            .worker_threads(0)
+            .dispatch_mode(crate::DispatchMode::Legacy)
+            .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
+            .build()
+            .expect("build");
+        exec.add(crate::item::item_with_triggers(
+            move |d| {
+                d.interval(std::time::Duration::from_millis(1));
+                Ok(())
+            },
+            move |_ctx| {
+                h.fetch_add(1, Ordering::Relaxed);
+                Ok(ControlFlow::Continue)
+            },
+        ))
+        .expect("add");
+
+        // Simulate the stranded-token precondition: a prior `dispatch_loop`
+        // bailed mid-wake after marking the task but before folding it, leaving
+        // all three per-wake transients `Some`/nonzero.
+        exec.tasks[0].pending_cycle = Some(CyclePending {
+            pre: 0,
+            faulted: false,
+        });
+        exec.tasks[0].pending_skipped = 7;
+        exec.tasks[0].pending_late = Some(5_000_000);
+
+        exec.run_n(1).expect("run");
+
+        // Guards the `pending_cycle = None` clear: the handler fires exactly
+        // once. Without the clear, the dedup guard swallows the first dispatch.
+        assert_eq!(
+            hits.load(Ordering::Relaxed),
+            1,
+            "stale pending_cycle token swallowed the first dispatch (#102)"
+        );
+
+        // Guards the `pending_late = None` clear. First cycle ⇒ `grid_slot = 0`,
+        // `expected = 0`, `elapsed = pre - grid_epoch`. With the clear,
+        // `late_by = None` ⇒ `grid_epoch = pre` ⇒ lateness `Some(0)`. Without it,
+        // `late_by = Some(5_000_000)` ⇒ `grid_epoch = pre.saturating_sub(L)`,
+        // which saturates to 0 here (`L > pre`, `pre` being ns since the clock
+        // epoch), so lateness reads a nonzero `Some(≈ pre)` — the dispatch
+        // instant, not `L` (it would read `Some(L)` only once `pre >= L`). The
+        // assertion turns only on clean-being-exactly-`Some(0)` vs corrupted-
+        // being-nonzero, not on the corrupted magnitude.
+        let first_lateness = *recorder
+            .lateness
+            .lock()
+            .expect("lock")
+            .first()
+            .expect("at least one cycle observation must have been recorded");
+        assert_eq!(
+            first_lateness,
+            Some(0),
+            "stale pending_late token corrupted the first-cycle lateness baseline (#102)"
         );
     }
 
