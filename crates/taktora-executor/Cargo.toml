@@ -50,9 +50,21 @@ iceoryx2-bb-posix = "0.8"
 # pthread_kills the dispatch thread to provoke EINTR mid-wait (REQ_0269).
 libc = "0.2"
 
+[target.'cfg(loom)'.dependencies]
+# Model-checks the `Tracker` quiescence handshake (pool.rs) under
+# `RUSTFLAGS="--cfg loom" cargo test`. Only the lock-free flag/condvar dance is
+# modelled; the rest of the pool is std-only. Pulled in as a normal (non-dev)
+# dependency because `Tracker` swaps its sync primitives to `loom::sync` under
+# `cfg(loom)`.
+loom = { workspace = true }
+
 [lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"
+# `--cfg loom` is set manually (not a Cargo feature) only for the pool.rs
+# quiescence-handshake model check; register it so it is not flagged as an
+# unexpected cfg.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
