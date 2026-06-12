@@ -72,6 +72,24 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+  loom:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: Loom model (pool::Tracker quiescence handshake)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Model-check the Tracker handshake
+        # The loom model lives behind `#[cfg(loom)]` in pool.rs and is compiled
+        # ONLY under this flag — no other job exercises it, so without this gate
+        # the model silently bit-rots. It verifies the SeqCst-fence wakeup
+        # handshake against all interleavings loom explores.
+        env:
+          RUSTFLAGS: "--cfg loom"
+        run: cargo test -p taktora-executor --lib loom_tests
+
   doc:
     needs: changes
     if: needs.changes.outputs.code == 'true'

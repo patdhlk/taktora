@@ -10,9 +10,21 @@
 use crate::error::ExecutorError;
 use crate::fatal::{FatalDispatch, FatalSite, guard_or_fatal};
 use crossbeam_channel::{Receiver, Sender, bounded};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+
+// `Tracker`'s sync primitives are aliased so its quiescence handshake can be
+// model-checked under `--cfg loom` (see the `loom_tests` module). Only the
+// handshake is modelled; the rest of this module (Pool, run_worker) stays
+// std-only and is never exercised inside `loom::model`.
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering, fence};
+#[cfg(loom)]
+use loom::sync::{Condvar, Mutex};
+#[cfg(not(loom))]
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering, fence};
+#[cfg(not(loom))]
+use std::sync::{Condvar, Mutex};
 
 /// Unit of work submitted into the pool. Two variants:
 ///
@@ -66,30 +78,85 @@ unsafe impl Send for BorrowedJob {}
 
 /// Shared progress tracker — counts jobs submitted vs completed, used for
 /// `barrier()`.
-#[derive(Default)]
+///
+/// # Quiescence handshake
+///
+/// In steady state `complete()` runs once per pool job, so it must be cheap.
+/// The naive design (`notify_all` on every completion) costs one `futex_wake`
+/// syscall per job even when no thread is parked — O(N) wasted syscalls per
+/// cycle. Instead, the single waiting thread publishes a `waiting` flag before
+/// it parks; `complete()` only takes the lock and notifies when the flag is
+/// set, taking the steady-state cost to O(1) wakes per cycle (and zero in
+/// inline mode, where nothing ever parks).
+///
+/// Correctness rests on **two orthogonal mechanisms** — do not conflate them:
+///
+/// * **Flag-decision race (Dekker).** `complete()` increments `completed` then
+///   reads `waiting`; the waiter stores `waiting = true` then re-reads
+///   `completed`. That is a store-then-load of *different* locations on each
+///   thread, and the lock does **not** serialise it because `complete()` reads
+///   `waiting` lock-free. A `StoreLoad` reordering would let both threads read
+///   stale values — the completer skips the notify *and* the waiter parks on a
+///   stale count → a permanent hang. The fix is a `SeqCst` **fence** between
+///   the store and the load on each side: the two fences sit in one total
+///   order, so whichever fence is first, its thread's store is visible to the
+///   other thread's post-fence load. Plain `SeqCst` *atomics* would also be
+///   correct on hardware, but loom (the verifier) models `SeqCst` atomics only
+///   as `AcqRel` and cannot prove the cross-location order — it *can* model
+///   `SeqCst` fences, so the fence formulation is what makes `loom_tests`
+///   mechanical rather than a hand proof. Acquire/Release (no fence) is **not**
+///   sufficient.
+/// * **Park-handshake race.** Even once `complete()` decides to notify, firing
+///   between the waiter's final re-check and its `cv.wait()` would be lost. The
+///   lock-acquire/drop in `complete()` closes that window (the waiter holds the
+///   lock across the check; `cv.wait()` releases it atomically).
 struct Tracker {
     submitted: AtomicUsize,
     completed: AtomicUsize,
+    /// Set by the (single) waiter before it parks; gates `complete()`'s notify.
+    waiting: AtomicBool,
     cv: Condvar,
     lock: Mutex<()>,
 }
 
 impl Tracker {
+    // Not `const`: under `--cfg loom` the sync primitives are `loom::sync` types
+    // whose `::new` constructors are not `const`. clippy only sees the std path.
+    #[allow(clippy::missing_const_for_fn)]
+    fn new() -> Self {
+        Self {
+            submitted: AtomicUsize::new(0),
+            completed: AtomicUsize::new(0),
+            waiting: AtomicBool::new(false),
+            cv: Condvar::new(),
+            lock: Mutex::new(()),
+        }
+    }
+
     fn submit(&self) {
         self.submitted.fetch_add(1, Ordering::SeqCst);
     }
 
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn complete(&self) {
-        self.completed.fetch_add(1, Ordering::SeqCst);
-        // Acquire+drop the lock to establish happens-before with the waiter,
-        // then notify *after* releasing — avoids a wake-then-sleep cycle under
-        // high completion rate.
-        #[allow(clippy::unwrap_used)]
-        // fail-fast: mutex poison is unreachable under the abort boundary (ADR_0065)
-        let guard = self.lock.lock().unwrap();
-        drop(guard); // release BEFORE notifying (see comment above)
-        self.cv.notify_all();
+        // Release so the waiter that observes this increment also sees the
+        // completed job's writes (the barrier's memory-visibility guarantee).
+        self.completed.fetch_add(1, Ordering::Release);
+        // `StoreLoad` fence: orders the increment above before the `waiting` load
+        // below. Paired with the waiter's fence, the two SeqCst fences sit in a
+        // single total order, so the threads cannot both miss each other — see
+        // the `Tracker` doc comment (the wakeup Dekker).
+        fence(Ordering::SeqCst);
+        if self.waiting.load(Ordering::Relaxed) {
+            // Acquire+drop the lock to establish happens-before with the
+            // waiter, then notify *after* releasing — closes the park-handshake
+            // window. notify_one suffices: there is exactly one waiter.
+            #[allow(clippy::unwrap_used)]
+            // fail-fast: mutex poison is unreachable under the abort boundary (ADR_0065)
+            let guard = self.lock.lock().unwrap();
+            drop(guard); // release BEFORE notifying (see comment above)
+            self.cv.notify_one();
+        }
     }
 
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -100,12 +167,31 @@ impl Tracker {
         // fail-fast: mutex poison is unreachable under the abort boundary (ADR_0065)
         #[allow(clippy::unwrap_used)]
         let mut g = self.lock.lock().unwrap();
-        while self.submitted.load(Ordering::SeqCst) != self.completed.load(Ordering::SeqCst) {
+        // Publish that we are about to park *before* the re-check, so any
+        // completer that increments `completed` after this point is guaranteed
+        // (via SeqCst) to observe the flag and notify. `swap` lets us assert the
+        // single-waiter invariant that `notify_one` depends on.
+        let prev = self.waiting.swap(true, Ordering::Relaxed);
+        debug_assert!(
+            !prev,
+            "Tracker supports a single waiter; concurrent barrier() detected"
+        );
+        // `StoreLoad` fence: orders the `waiting` store above before the
+        // `completed` load below, pairing with the completer's fence (see the
+        // `Tracker` doc comment). Acquire on the `completed` load receives the
+        // completer's Release increment (memory-visibility on quiescence).
+        fence(Ordering::SeqCst);
+        while self.submitted.load(Ordering::Relaxed) != self.completed.load(Ordering::Acquire) {
             // fail-fast: mutex poison is unreachable under the abort boundary (ADR_0065)
             #[allow(clippy::unwrap_used)]
             let next = self.cv.wait(g).unwrap();
             g = next;
         }
+        // Reset under the lock before dropping the guard. A completer may still
+        // observe a stale `true` and fire one wasted `notify_one`; that is
+        // harmless (it wakes nobody, or spuriously wakes the next cycle's waiter
+        // which re-checks the loop condition).
+        self.waiting.store(false, Ordering::Relaxed);
     }
 }
 
@@ -181,7 +267,7 @@ impl Pool {
         attrs: crate::thread_attrs::ThreadAttributes,
         fatal: Arc<FatalDispatch>,
     ) -> Result<Self, ExecutorError> {
-        let tracker = Arc::new(Tracker::default());
+        let tracker = Arc::new(Tracker::new());
         if n_workers == 0 {
             return Ok(Self {
                 mode: PoolMode::Inline,
@@ -336,7 +422,9 @@ impl Drop for Pool {
     }
 }
 
-#[cfg(test)]
+// Std-thread functional tests — not built under `--cfg loom` (they spawn real
+// OS threads and a subprocess, which loom must not intercept).
+#[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
     use crate::fatal::FatalDispatch;
@@ -509,5 +597,91 @@ mod tests {
         assert_eq!(entries.len(), 1, "exactly one fatal should have fired");
         assert_eq!(entries[0].0, FatalSite::PoolWorker);
         assert_eq!(entries[0].1, "kaboom");
+    }
+}
+
+// Loom model of the `Tracker` quiescence handshake. Run with:
+//   RUSTFLAGS="--cfg loom" cargo test -p taktora-executor --lib loom_tests
+//
+// Loom exhaustively explores the thread interleavings and memory-ordering
+// reorderings permitted by the C11 model. It is the regression gate for the
+// Dekker race described on `Tracker`: with anything weaker than `SeqCst` on the
+// `waiting`/`completed` handshake, loom finds the interleaving where the waiter
+// parks forever (reported as a deadlock).
+#[cfg(all(test, loom))]
+mod loom_tests {
+    use super::Tracker;
+    use loom::sync::Arc;
+    use loom::sync::atomic::Ordering;
+
+    /// One waiter racing one completer (`submitted == 1`). This is the minimal
+    /// model that exercises the flag-decision race: the waiter may publish
+    /// `waiting` and re-check `completed` concurrently with the completer
+    /// incrementing `completed` and reading `waiting`. The barrier must always
+    /// return — if it can't, loom reports the parked waiter as a deadlock.
+    #[test]
+    fn barrier_never_misses_wakeup_single_completer() {
+        loom::model(|| {
+            let tracker = Arc::new(Tracker::new());
+            tracker.submit();
+
+            let completer = {
+                let tracker = Arc::clone(&tracker);
+                loom::thread::spawn(move || {
+                    tracker.complete();
+                })
+            };
+
+            // The model thread is the single waiter. Reaching the line after
+            // this call means no wakeup was lost.
+            tracker.wait_for_quiescence();
+            completer.join().unwrap();
+
+            assert_eq!(
+                tracker.submitted.load(Ordering::SeqCst),
+                tracker.completed.load(Ordering::SeqCst),
+                "barrier returned before quiescence",
+            );
+        });
+    }
+
+    /// One waiter racing two completers (`submitted == 2`). Widens the
+    /// interleaving space so the race is exercised when the waiter parks after
+    /// one of two completions and must still be woken by the second.
+    ///
+    /// Bounded with a preemption limit: a full exhaustive run with three
+    /// threads and a condvar is ~minutes. The single-completer test above runs
+    /// unbounded (it is the primary Dekker gate and caught every wrong
+    /// ordering); this one trades exhaustiveness for CI-tractable coverage of
+    /// the multi-completer shape.
+    #[test]
+    fn barrier_never_misses_wakeup_two_completers() {
+        let mut builder = loom::model::Builder::new();
+        builder.preemption_bound = Some(3);
+        builder.check(|| {
+            let tracker = Arc::new(Tracker::new());
+            tracker.submit();
+            tracker.submit();
+
+            let completers: Vec<_> = (0..2)
+                .map(|_| {
+                    let tracker = Arc::clone(&tracker);
+                    loom::thread::spawn(move || {
+                        tracker.complete();
+                    })
+                })
+                .collect();
+
+            tracker.wait_for_quiescence();
+            for c in completers {
+                c.join().unwrap();
+            }
+
+            assert_eq!(
+                tracker.submitted.load(Ordering::SeqCst),
+                tracker.completed.load(Ordering::SeqCst),
+                "barrier returned before quiescence",
+            );
+        });
     }
 }
