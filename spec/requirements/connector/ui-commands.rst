@@ -21,8 +21,9 @@ cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Commands use acceptance-ack request-response
    :id: REQ_0865
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0094
+   :links: BB_0046, TEST_0878, TEST_0881
 
    A command invocation shall be a request-response exchange keyed by the
    envelope ``correlation_id`` (:need:`REQ_0204`). The application shall reply
@@ -35,8 +36,9 @@ cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: CanExecute is a published boolean property
    :id: REQ_0866
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0094
+   :links: BB_0046, TEST_0874, TEST_0879
 
    Each command's ``CanExecute`` state shall be exposed as a published boolean
    property (``kind = CanExecute`` per :need:`REQ_0857`); the
@@ -45,8 +47,9 @@ cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Command delivery is at-most-once via correlation-id dedupe
    :id: REQ_0867
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0094
+   :links: BB_0046, TEST_0878, TEST_0879
 
    The application shall keep a bounded LRU of recently-seen
    ``correlation_id`` values mapped to their acknowledgement. A retry carrying
@@ -57,8 +60,9 @@ cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Idempotent commands are flagged for opt-in auto-retry
    :id: REQ_0868
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0094
+   :links: BB_0047, TEST_0874
 
    A command may be flagged idempotent at authoring time (e.g.
    ``#[command(idempotent)]``); the flag shall be carried in the manifest
@@ -71,8 +75,9 @@ cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Rejected carries a closed reason-code set
    :id: REQ_0869
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0094
+   :links: BB_0045, TEST_0879
 
    A ``Rejected`` acknowledgement shall carry a reason ``code`` from a closed,
    framework-defined set — ``CanExecuteFalse``, ``InvalidArgs``, ``Faulted``,
@@ -82,8 +87,9 @@ cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Command handler runs off the RT thread
    :id: REQ_0870
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0094
+   :links: BB_0046, TEST_0878
 
    The command handler that reads invocations, validates them, and replies
    shall run off the executor's RT/WaitSet thread; it shall enqueue the
@@ -93,8 +99,9 @@ cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Command channel is bounded and surfaces BackPressure
    :id: REQ_0871
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0094
+   :links: BB_0046, TEST_0879
 
    The command request channel shall be bounded with a capacity configurable
    via the connector options. When the channel is full, the connector shall

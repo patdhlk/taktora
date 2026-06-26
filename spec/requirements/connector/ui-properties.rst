@@ -20,8 +20,9 @@ UI consumer. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: UiConnector implements Connector
    :id: REQ_0855
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0093
+   :links: BB_0046, TEST_0880, TEST_0884
 
    The connector crate shall expose ``UiConnector<C: PayloadCodec>`` that
    implements the ``Connector`` trait with ``type Routing = UiRouting`` and
@@ -32,8 +33,9 @@ UI consumer. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: ViewModel published as one struct-per-service with latest-value
    :id: REQ_0856
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0093
+   :links: BB_0046, TEST_0877
 
    Each ViewModel shall be published as a single iceoryx2 pub/sub service
    carrying one fixed-layout struct, published atomically (one envelope per
@@ -44,8 +46,9 @@ UI consumer. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: UiRouting carries ViewModel/command name and kind
    :id: REQ_0857
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0093
+   :links: BB_0045, BB_0046, TEST_0883
 
    The ``UiRouting`` struct shall carry the logical name and a ``kind``
    discriminant — ``Property`` | ``Command`` | ``CanExecute`` — with an
@@ -67,10 +70,26 @@ UI consumer. This cluster ``:satisfies:`` :need:`FEAT_0092`.
    data-carrying tagged unions, and 128-bit integers shall be rejected at
    compile time. Same-host operation permits native endianness and alignment.
 
+   .. note::
+
+      **Partially implemented — kept ``draft``.** The derive
+      (:need:`BB_0047`) implements and is tested for the scalar, fixed
+      array, inline bounded UTF-8 string, and C-like enum members, and
+      rejects the heap-backed / tagged-union / 128-bit cases at compile
+      time (verified by :need:`TEST_0875`). The **nested POD struct**
+      member of the closed set is deferred: a nested-struct field
+      currently lands on a purposeful "not yet supported"
+      ``compile_error!`` rather than being lowered, so the requirement is
+      not yet fully met. The manifest schema descriptor side *can* already
+      express nested ``Struct`` types (:need:`REQ_0875`); only the derive
+      codegen is outstanding. This requirement stays ``draft`` until
+      nested-struct lowering lands.
+
 .. req:: Derive macro computes the envelope payload size
    :id: REQ_0859
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0093
+   :links: BB_0047, TEST_0873
 
    The ``#[derive(ViewModel)]`` macro shall compute each ViewModel's
    compile-time maximum encoded size and instantiate the channel's
@@ -80,8 +99,9 @@ UI consumer. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Producer writes a seqlock latest-value cell, RT-safe
    :id: REQ_0860
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0093
+   :links: BB_0046, TEST_0876
 
    Updating a ViewModel from the producing task shall write the POD struct
    into a per-ViewModel seqlock latest-value cell with no heap allocation, no
@@ -92,8 +112,9 @@ UI consumer. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Non-RT publisher pump encodes and publishes at a configurable cadence
    :id: REQ_0861
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0093
+   :links: BB_0046, TEST_0877
 
    A non-RT publisher pump shall snapshot changed ViewModel cells, JSON-encode
    them off the RT thread, and publish them at a configurable UI cadence
@@ -105,8 +126,9 @@ UI consumer. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Publisher pump skips zero-subscriber ViewModels
    :id: REQ_0862
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0093
+   :links: BB_0046, TEST_0877
 
    When iceoryx2 reports zero subscribers for a ViewModel's service, the pump
    shall skip encoding and publishing that ViewModel to avoid wasted work, and
@@ -117,8 +139,9 @@ UI consumer. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Hot-scalar opt-out promotes a field to its own service
    :id: REQ_0863
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0093
+   :links: BB_0046, TEST_0880
 
    The author shall be able to opt a single hot scalar field out of its
    enclosing ViewModel struct and publish it on its own iceoryx2 service, for
@@ -126,10 +149,22 @@ UI consumer. This cluster ``:satisfies:`` :need:`FEAT_0092`.
    ViewModel. The promoted field shall appear in the manifest as its own
    entry; default behaviour remains struct-per-ViewModel.
 
+   .. note::
+
+      Implemented in its minimal form: ``UiConnector::add_hot_scalar``
+      declares a standalone **single-field ViewModel** on its own iceoryx2
+      service (the observable contract — own service + own manifest entry,
+      :need:`BB_0046`). The v1 surface is the standalone hot-scalar
+      observable rather than an attribute that *extracts* a field out of an
+      existing ``#[derive(ViewModel)]`` struct; the externally observable
+      contract (own service, own manifest entry, struct-per-ViewModel
+      default unchanged) is identical.
+
 .. req:: Client reconstructs per-field PropertyChanged by diffing
    :id: REQ_0864
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0093
+   :links: BB_0048, TEST_0881
 
    The reference client shall raise per-field ``PropertyChanged``-style
    notifications by comparing each received ViewModel struct against the

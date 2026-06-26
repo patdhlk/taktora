@@ -20,8 +20,9 @@ other restarting, and the trust boundary for v1. This cluster ``:satisfies:``
 
 .. req:: Mandatory SystemViewModel heartbeat with epoch
    :id: REQ_0879
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0096
+   :links: BB_0046, TEST_0880
 
    The connector shall always publish a ``SystemViewModel`` carrying a
    monotonic counter that advances every publisher-pump tick and a process
@@ -32,8 +33,9 @@ other restarting, and the trust boundary for v1. This cluster ``:satisfies:``
 
 .. req:: Per-ViewModel staleness from the envelope
    :id: REQ_0880
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0096
+   :links: BB_0048, TEST_0881
 
    The client shall be able to compute per-ViewModel staleness from the
    envelope ``timestamp_ns`` and ``sequence_number`` (:need:`REQ_0202` /
@@ -42,8 +44,9 @@ other restarting, and the trust boundary for v1. This cluster ``:satisfies:``
 
 .. req:: UI restart is stateless
    :id: REQ_0881
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0096
+   :links: BB_0048, TEST_0881
 
    A UI that exits and relaunches shall recover with no application
    involvement: history-depth-1 delivery (:need:`REQ_0856` / :need:`REQ_0872`)
@@ -52,8 +55,9 @@ other restarting, and the trust boundary for v1. This cluster ``:satisfies:``
 
 .. req:: Application restart bumps epoch and triggers rebind
    :id: REQ_0882
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0096
+   :links: BB_0048, TEST_0881
 
    On application restart the process ``epoch`` (:need:`REQ_0879`) shall
    change. A client observing an epoch change shall re-read the manifest and
@@ -64,8 +68,9 @@ other restarting, and the trust boundary for v1. This cluster ``:satisfies:``
 
 .. req:: Connector health reflects local publish health
    :id: REQ_0883
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0096
+   :links: BB_0046, TEST_0882
 
    The connector's ``Connector`` health state machine (:need:`REQ_0231`) shall
    report local publishing health — pump running, publish backpressure or
@@ -75,8 +80,9 @@ other restarting, and the trust boundary for v1. This cluster ``:satisfies:``
 
 .. req:: OS-mediated trust for v1
    :id: REQ_0884
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0096
+   :links: BB_0046, TEST_0881
 
    v1 shall rely on operating-system and iceoryx2 access control for the trust
    boundary and shall not implement application-level authentication or role
@@ -84,3 +90,14 @@ other restarting, and the trust boundary for v1. This cluster ``:satisfies:``
    is granted to any local process able to open the connector's services.
    Capability tokens or read-only/control roles are deferred to a later
    revision.
+
+   .. note::
+
+      Met by design: the connector (:need:`BB_0046`) ships no
+      authentication surface, so command authority is granted to any local
+      process able to open its iceoryx2 services. :need:`TEST_0881`
+      exercises exactly that — a distinct local process opens the services
+      and issues commands with no auth handshake. The explicit
+      trust-boundary statement required by this requirement is recorded in
+      the architecture solution strategy under :need:`ADR_0107`. Capability
+      tokens and control/read-only roles remain deferred.

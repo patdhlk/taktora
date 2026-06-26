@@ -20,8 +20,9 @@ incompatible build. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Single instance-namespaced manifest service
    :id: REQ_0872
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0095
+   :links: BB_0046, TEST_0880
 
    The application shall publish exactly one manifest on a well-known iceoryx2
    service per application instance, with publisher history depth 1 so a
@@ -33,8 +34,9 @@ incompatible build. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Manifest enumerates all services, schemas and signatures
    :id: REQ_0873
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0095
+   :links: BB_0045, TEST_0883
 
    The manifest shall enumerate, for the instance: every ViewModel and its
    iceoryx2 service name and field schema; every command and its request /
@@ -46,8 +48,9 @@ incompatible build. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Manifest carries a contract hash
    :id: REQ_0874
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0095
+   :links: BB_0045, TEST_0883, TEST_0884
 
    The manifest shall carry a contract hash computed over the structural
    contract — ViewModel and command names, field names and types, and command
@@ -56,8 +59,9 @@ incompatible build. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Closed self-describing schema type system
    :id: REQ_0875
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0095
+   :links: BB_0045, TEST_0883
 
    The manifest's field-schema descriptors shall express exactly the closed
    POD type set of :need:`REQ_0858` — scalars, fixed-length arrays, inline
@@ -69,8 +73,9 @@ incompatible build. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Contract-hash mismatch fails closed with read-only fallback
    :id: REQ_0876
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0095
+   :links: BB_0048, TEST_0881
 
    When a client's expected contract hash does not match the manifest's, the
    client shall refuse to bind in its normal (read-write) mode. It may enter a
@@ -80,8 +85,9 @@ incompatible build. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Multi-application discovery via the iceoryx2 registry
    :id: REQ_0877
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0095
+   :links: BB_0048, TEST_0881
 
    A UI shall be able to enumerate the live taktora applications on the host by
    scanning the iceoryx2 service registry for services matching the manifest
@@ -90,8 +96,9 @@ incompatible build. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. req:: Derive macro emits the manifest contribution
    :id: REQ_0878
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0095
+   :links: BB_0047, TEST_0873, TEST_0874, TEST_0883
 
    The ``#[derive(ViewModel)]`` / command macros shall emit each type's
    manifest contribution — field names and schema descriptors, command
