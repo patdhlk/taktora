@@ -15,7 +15,9 @@
 
 use std::sync::{Arc, Mutex};
 
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use taktora_connector_core::ConnectorError;
+use taktora_connector_core::HealthEvent;
 use taktora_connector_core::health::{ConnectorHealth, HealthMonitor};
 
 /// Local publish-health for the UI connector.
@@ -23,9 +25,17 @@ use taktora_connector_core::health::{ConnectorHealth, HealthMonitor};
 /// Clone-able: every clone shares one [`HealthMonitor`], so the pump can
 /// [`observe`](Self::observe) publish outcomes on its thread while the connector
 /// reports [`current`](Self::current).
+///
+/// It also fans out every legal transition to any number of
+/// [`subscribe`](Self::subscribe)rs (`REQ_0231`), so the connector's
+/// `subscribe_health` can hand callers a live [`HealthEvent`] stream — modelled
+/// on the Zenoh connector's broadcast monitor.
 #[derive(Clone)]
 pub struct PublishHealth {
     inner: Arc<Mutex<HealthMonitor>>,
+    /// Broadcast fan-out: one `Sender` per live subscriber. Dropped receivers
+    /// are pruned on the next broadcast (a `send` to a dropped receiver errs).
+    subscribers: Arc<Mutex<Vec<Sender<HealthEvent>>>>,
 }
 
 impl Default for PublishHealth {
@@ -40,7 +50,28 @@ impl PublishHealth {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(HealthMonitor::new())),
+            subscribers: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Open a fresh receive-only [`HealthEvent`] stream (`REQ_0231`).
+    ///
+    /// Every call returns its own channel that observes every subsequent legal
+    /// transition; the connector's `subscribe_health` wraps the returned
+    /// receiver in a `HealthSubscription`.
+    #[must_use]
+    pub fn subscribe(&self) -> Receiver<HealthEvent> {
+        let (tx, rx) = unbounded();
+        self.subscribers.lock().expect("subs lock").push(tx);
+        rx
+    }
+
+    /// Fan one transition out to every live subscriber, pruning dropped ones.
+    fn broadcast(&self, event: &HealthEvent) {
+        self.subscribers
+            .lock()
+            .expect("subs lock")
+            .retain(|s| s.send(event.clone()).is_ok());
     }
 
     /// Mark the pump as running: transition to [`ConnectorHealth::Up`].
@@ -74,9 +105,15 @@ impl PublishHealth {
         // `Up`/`Connecting` -> `Degraded` are both legal; ignore an illegal
         // attempt (only reachable from `Down`, which this connector never enters
         // locally).
-        let _ = monitor.try_transition_to(ConnectorHealth::Degraded {
-            reason: reason.to_owned(),
-        });
+        let event = monitor
+            .try_transition_to(ConnectorHealth::Degraded {
+                reason: reason.to_owned(),
+            })
+            .ok();
+        drop(monitor);
+        if let Some(event) = event {
+            self.broadcast(&event);
+        }
     }
 
     /// The current health state.
@@ -90,7 +127,11 @@ impl PublishHealth {
         if matches!(monitor.current(), ConnectorHealth::Up) {
             return;
         }
-        let _ = monitor.try_transition_to(ConnectorHealth::Up);
+        let event = monitor.try_transition_to(ConnectorHealth::Up).ok();
+        drop(monitor);
+        if let Some(event) = event {
+            self.broadcast(&event);
+        }
     }
 }
 
@@ -159,6 +200,21 @@ mod tests {
         h.mark_running();
         // Simulate several ticks where every entry was skipped (no observe call).
         assert_eq!(kind(&h), ConnectorHealthKind::Up);
+    }
+
+    #[test]
+    fn subscribe_observes_transitions() {
+        let h = PublishHealth::new();
+        let rx = h.subscribe();
+        // Connecting -> Up is the first legal transition the subscriber sees.
+        h.mark_running();
+        let event = rx.try_recv().expect("a transition event was broadcast");
+        assert!(matches!(event.to, ConnectorHealth::Up));
+
+        // Up -> Degraded is broadcast too.
+        h.observe(&Err(ConnectorError::BackPressure));
+        let event = rx.try_recv().expect("a degrade event was broadcast");
+        assert!(matches!(event.to, ConnectorHealth::Degraded { .. }));
     }
 
     #[test]
