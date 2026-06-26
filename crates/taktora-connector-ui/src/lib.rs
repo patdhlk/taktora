@@ -22,6 +22,7 @@
 pub mod bounded_string;
 pub mod command;
 pub mod iox_publisher;
+pub mod manifest;
 pub mod property;
 pub mod pump;
 pub mod routing;
@@ -38,6 +39,7 @@ pub use taktora_connector_ui_contract as contract;
 pub use bounded_string::BoundedString;
 pub use command::CommandParams;
 pub use iox_publisher::IoxVmPublisher;
+pub use manifest::ManifestBuilder;
 pub use property::{Property, PropertyReader};
 pub use pump::{
     EncodeFn, MockPublisher, Pump, PumpEntry, PumpHandle, PumpTickStats, VmPublisher,
