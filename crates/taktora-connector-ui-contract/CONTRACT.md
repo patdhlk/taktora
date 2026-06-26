@@ -77,6 +77,11 @@ tagged on `"type"` with `snake_case` tags from a **closed POD set**:
 Types outside this set (`Vec`, `String`, `HashMap`, `i128`/`u128`, …) are
 rejected at authoring time (REQ_0858).
 
+> **Nested-struct caveat (v1).** While the contract/schema can *express* a
+> `struct` (nested POD) field, the v1 `#[derive(ViewModel)]` codegen **defers**
+> nested-struct fields (REQ_0858) — so authors cannot yet declare them. The tag
+> is reserved in the wire grammar for forward compatibility.
+
 ## Command ack
 
 The reply on a command's `reply_service`, adjacently tagged on `"ack"`:

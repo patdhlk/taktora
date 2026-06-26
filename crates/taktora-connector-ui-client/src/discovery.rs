@@ -15,14 +15,10 @@ use iceoryx2::node::Node;
 use iceoryx2::prelude::{CallbackProgression, NodeBuilder, ServiceDetails, ipc};
 use iceoryx2::service::Service as _;
 use taktora_connector_transport_iox::{RawChannelReader, ServiceFactory};
-use taktora_connector_ui_contract::Manifest;
+use taktora_connector_ui_contract::{MANIFEST_SERVICE_SUFFIX, Manifest};
 
 use crate::ENVELOPE_CAPACITY;
 use crate::error::ClientError;
-
-/// The well-known suffix of a per-instance manifest service (mirrors the
-/// server's `manifest_service_name`).
-const MANIFEST_SUFFIX: &str = ".manifest";
 
 /// The default time [`discover`] / [`Client::connect`] waits for a manifest's
 /// first (history-redelivered) sample.
@@ -31,9 +27,12 @@ const MANIFEST_SUFFIX: &str = ".manifest";
 pub(crate) const DEFAULT_MANIFEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The manifest service name for `instance` (the one bootstrap convention).
+///
+/// Delegates to [`taktora_connector_ui_contract::manifest_service_name`] so the
+/// client and server share one definition of this bootstrap name.
 #[must_use]
 pub fn manifest_service_name(instance: &str) -> String {
-    format!("{instance}{MANIFEST_SUFFIX}")
+    taktora_connector_ui_contract::manifest_service_name(instance)
 }
 
 /// Create a fresh iceoryx2 client node bound to the default (same-host) config.
@@ -52,7 +51,7 @@ pub fn list_manifest_services(node: &Node<ipc::Service>) -> Result<Vec<String>, 
     let mut names = Vec::new();
     ipc::Service::list(node.config(), |service: ServiceDetails<ipc::Service>| {
         let name = service.static_details.name().as_str();
-        if name.ends_with(MANIFEST_SUFFIX) {
+        if name.ends_with(MANIFEST_SERVICE_SUFFIX) {
             names.push(name.to_owned());
         }
         CallbackProgression::Continue

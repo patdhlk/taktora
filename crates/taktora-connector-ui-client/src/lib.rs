@@ -48,8 +48,10 @@ pub mod property;
 
 /// The fixed envelope payload capacity every UI service uses, matching the
 /// server's `UiConnector::ENVELOPE_CAPACITY`. Every channel is opened as
-/// `RawChannel{Reader,Writer}<ENVELOPE_CAPACITY>`.
-pub const ENVELOPE_CAPACITY: usize = 4096;
+/// `RawChannel{Reader,Writer}<ENVELOPE_CAPACITY>`. Aliases the single source of
+/// truth [`taktora_connector_ui_contract::ENVELOPE_CAPACITY`] so the client and
+/// server can never open mismatched iceoryx2 payload types.
+pub const ENVELOPE_CAPACITY: usize = taktora_connector_ui_contract::ENVELOPE_CAPACITY;
 
 pub use binding::{BindMode, bind_mode_for, decide_bind_mode};
 pub use client::{Client, ClientConfig, CommandOutcome, RetryPolicy};

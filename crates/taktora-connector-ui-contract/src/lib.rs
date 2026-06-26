@@ -15,9 +15,11 @@ pub mod field;
 pub mod hash;
 pub mod kind;
 pub mod schema;
+pub mod wire;
 
 pub use ack::{Ack, RejectedCode};
 pub use field::{FieldSchema, FieldType};
 pub use hash::{contract_hash, validate_name};
 pub use kind::Kind;
 pub use schema::{CommandSchema, Manifest, ViewModelSchema};
+pub use wire::{ENVELOPE_CAPACITY, MANIFEST_SERVICE_SUFFIX, manifest_service_name};

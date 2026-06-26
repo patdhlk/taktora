@@ -75,8 +75,10 @@ use crate::viewmodel::ViewModel;
 /// The fixed envelope payload capacity used for every connector-created
 /// service. A free const (not an associated const) because stable Rust forbids a
 /// generic `Self::CONST` as a const-generic argument. Re-exported publicly as
-/// [`UiConnector::ENVELOPE_CAPACITY`]. See the module docs.
-const ENVELOPE_CAPACITY: usize = 4096;
+/// [`UiConnector::ENVELOPE_CAPACITY`]. Both alias the single source of truth in
+/// [`taktora_connector_ui_contract::ENVELOPE_CAPACITY`] so the server and every
+/// client open the same iceoryx2 payload type. See the module docs.
+const ENVELOPE_CAPACITY: usize = taktora_connector_ui_contract::ENVELOPE_CAPACITY;
 
 /// A deferred "open the iceoryx2 publisher and build the pump entry" step.
 ///
@@ -140,8 +142,11 @@ impl UiConnector<JsonCodec> {
 
 impl<C: PayloadCodec> UiConnector<C> {
     /// The fixed envelope payload capacity used for every connector-created
-    /// service. See the module docs.
-    pub const ENVELOPE_CAPACITY: usize = 4096;
+    /// service. A public alias of the single source of truth
+    /// [`taktora_connector_ui_contract::ENVELOPE_CAPACITY`] (kept here so
+    /// existing `UiConnector::<_>::ENVELOPE_CAPACITY` call sites still resolve).
+    /// See the module docs.
+    pub const ENVELOPE_CAPACITY: usize = taktora_connector_ui_contract::ENVELOPE_CAPACITY;
 
     /// Construct a UI connector with an explicit codec for the additive
     /// `create_writer` / `create_reader` path.

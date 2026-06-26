@@ -1,14 +1,57 @@
 //! Server-side MVVM UI connector for the taktora-connector framework
 //! (`FEAT_0092`).
 //!
-//! This crate is the *authoring layer*: the [`ViewModel`] and [`CommandParams`]
-//! traits an application implements (usually via the re-exported derives), the
-//! [`UiRouting`] routing type, and the POD building blocks the generated image
-//! types are built from ([`BoundedString`], [`ImageEnum`]).
+//! This is the **server side** of the UI connector: the half that runs in the
+//! taktora application process and publishes ViewModels / accepts commands for a
+//! UI to bind against over the language-neutral [`contract`]. It provides:
 //!
-//! The non-RT publisher pump, the seqlock cell, the command handler, and the
-//! `Connector` impl land in later slices; this crate currently exposes the
-//! types the derive macros target.
+//! * [`UiConnector`] — the [`Connector`](taktora_connector_host::Connector)
+//!   implementation that registers with the executor.
+//! * The seqlock latest-value cells ([`Property`] / [`PropertyReader`]) and the
+//!   non-RT publisher [`Pump`] that drains them off the real-time path.
+//! * The acceptance-ack command handler ([`CommandHandler`]) over the iceoryx2
+//!   command transport.
+//! * Manifest publishing ([`ManifestBuilder`]) and the mandatory
+//!   [`SystemViewModel`] heartbeat.
+//! * The MVVM authoring API on [`UiConnector`]:
+//!   [`add_view_model`](UiConnector::add_view_model),
+//!   [`add_command`](UiConnector::add_command), and
+//!   [`add_hot_scalar`](UiConnector::add_hot_scalar).
+//!
+//! Applications implement the [`ViewModel`] and [`CommandParams`] traits (usually
+//! via the re-exported derives) over POD building blocks ([`BoundedString`],
+//! [`ImageEnum`]); the connector handles the wire.
+//!
+//! # Quickstart
+//!
+//! ```no_run
+//! use serde::Serialize;
+//! use taktora_connector_ui::{UiConnector, UiConnectorOptions, ViewModel};
+//! use taktora_connector_host::Connector;
+//! use taktora_executor::Executor;
+//!
+//! // 1. Declare a ViewModel (a fixed-layout POD struct).
+//! #[derive(Clone, Debug, PartialEq, Serialize, ViewModel)]
+//! struct Stepper {
+//!     position: f64,
+//! }
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // 2. Construct the connector and author its ViewModels *before* registering.
+//! let mut connector = UiConnector::new(
+//!     UiConnectorOptions::builder().instance("demo").build(),
+//! )?;
+//! let position = connector.add_view_model::<Stepper>("Stepper");
+//!
+//! // 3. Register with the executor: this spawns the pump + command handler.
+//! let mut executor = Executor::builder().build()?;
+//! connector.register_with(&mut executor)?;
+//!
+//! // 4. Drive the ViewModel from the application; the pump publishes it.
+//! position.set(&Stepper { position: 1.0 });
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! # Re-exports
 //!

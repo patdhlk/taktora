@@ -16,13 +16,17 @@ use taktora_connector_ui_contract::{CommandSchema, Manifest, ViewModelSchema, co
 
 use crate::pump::{EncodeFn, PumpEntry, VmPublisher};
 
-/// The well-known suffix of the per-instance manifest service.
-const MANIFEST_SUFFIX: &str = "manifest";
+/// The logical (trace-log) name of the manifest pump entry. Not a service name.
+const MANIFEST_ENTRY_NAME: &str = "manifest";
 
 /// The service name carrying the manifest for `instance`.
+///
+/// Delegates to [`taktora_connector_ui_contract::manifest_service_name`] so the
+/// server and every client derive this one bootstrap name from a single shared
+/// definition and can never drift.
 #[must_use]
 pub fn manifest_service_name(instance: &str) -> String {
-    format!("{instance}.{MANIFEST_SUFFIX}")
+    taktora_connector_ui_contract::manifest_service_name(instance)
 }
 
 /// The service name for a ViewModel `name` under `instance`.
@@ -163,7 +167,7 @@ where
         serde_json::to_writer(&mut *out, &manifest).ok()?;
         Some(true)
     });
-    PumpEntry::new(MANIFEST_SUFFIX, true, encode, Box::new(publisher))
+    PumpEntry::new(MANIFEST_ENTRY_NAME, true, encode, Box::new(publisher))
 }
 
 #[cfg(test)]
