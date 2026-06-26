@@ -256,7 +256,17 @@ impl Pump {
     /// The thread runs until [`PumpHandle::stop`] is called, then performs one
     /// final tick so the latest values are flushed before exit (mirroring
     /// `taktora-telemetry-export`'s final drain). Returns a [`PumpHandle`].
-    pub fn spawn(mut self, cadence: Duration) -> PumpHandle {
+    ///
+    /// `on_tick` is invoked with the [`PumpTickStats`] after **every** tick
+    /// (including the final drain tick), so the connector can drive its
+    /// [`PublishHealth`](crate::PublishHealth) — e.g. degrade when
+    /// `publish_errors > 0` and recover otherwise (`REQ_0883`). Without this seam
+    /// the per-tick error count would be dropped on the pump thread.
+    pub fn spawn(
+        mut self,
+        cadence: Duration,
+        mut on_tick: impl FnMut(&PumpTickStats) + Send + 'static,
+    ) -> PumpHandle {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
         let handle = thread::spawn(move || -> u64 {
@@ -265,6 +275,7 @@ impl Pump {
                 let stopping = stop_thread.load(Ordering::Acquire);
                 let stats = self.tick();
                 total_published += stats.published as u64;
+                on_tick(&stats);
                 if stopping {
                     // This tick was the final drain.
                     break;
@@ -563,7 +574,7 @@ mod tests {
         pump.add_entry(property_entry("Scalar", prop.reader(), mock.clone()));
         prop.set(&Scalar { v: 42.0 });
 
-        let handle = pump.spawn(Duration::from_millis(2));
+        let handle = pump.spawn(Duration::from_millis(2), |_stats| {});
         // Give the thread a few ticks.
         thread::sleep(Duration::from_millis(30));
         let total = handle.stop();
@@ -573,5 +584,39 @@ mod tests {
         // After the first publish, coalescing means the value is not republished
         // every tick — exactly one payload for one unchanged value.
         assert_eq!(mock.publish_count(), 1);
+    }
+
+    #[test]
+    fn spawn_surfaces_publish_errors_to_the_on_tick_observer() {
+        // A failing publisher (back-pressure) must show up in the per-tick stats
+        // the spawned thread hands to `on_tick`, so the connector can degrade
+        // health (`REQ_0883`). Before this seam existed, `spawn` dropped the
+        // error count entirely.
+        let prop = Property::<Scalar>::new();
+        let mock = MockPublisher::with_subscribers(1);
+        mock.set_backpressure(true);
+        let mut pump = Pump::new();
+        pump.add_entry(property_entry("Scalar", prop.reader(), mock.clone()));
+        prop.set(&Scalar { v: 1.0 });
+
+        let observed: Arc<Mutex<Vec<PumpTickStats>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&observed);
+        let handle = pump.spawn(Duration::from_millis(2), move |stats| {
+            sink.lock().expect("observer lock").push(*stats);
+        });
+        thread::sleep(Duration::from_millis(30));
+        handle.stop();
+
+        let ticks = observed.lock().expect("observer lock");
+        assert!(!ticks.is_empty(), "on_tick was never invoked");
+        assert!(
+            ticks.iter().any(|s| s.publish_errors > 0),
+            "on_tick never observed a publish error"
+        );
+        assert!(
+            ticks.iter().all(|s| s.published == 0),
+            "a back-pressured publish must never count as published"
+        );
+        assert_eq!(mock.publish_count(), 0);
     }
 }
