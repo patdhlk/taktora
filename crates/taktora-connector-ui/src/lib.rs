@@ -1,10 +1,10 @@
 //! Server-side MVVM UI connector for the taktora-connector framework
 //! (FEAT_0092).
 //!
-//! This crate is the *authoring layer*: the [`ViewModel`] (and, in a later
-//! slice, `CommandParams`) traits an application implements (usually via the
-//! re-exported derives), the [`UiRouting`] routing type, and the POD building
-//! blocks the generated image types are built from ([`ImageEnum`]).
+//! This crate is the *authoring layer*: the [`ViewModel`] and [`CommandParams`]
+//! traits an application implements (usually via the re-exported derives), the
+//! [`UiRouting`] routing type, and the POD building blocks the generated image
+//! types are built from ([`BoundedString`], [`ImageEnum`]).
 //!
 //! The non-RT publisher pump, the seqlock cell, the command handler, and the
 //! `Connector` impl land in later slices; this crate currently exposes the
@@ -17,6 +17,7 @@
 //! crate.
 
 pub mod bounded_string;
+pub mod command;
 pub mod routing;
 pub mod viewmodel;
 
@@ -24,6 +25,7 @@ pub mod viewmodel;
 pub use taktora_connector_ui_contract as contract;
 
 pub use bounded_string::BoundedString;
+pub use command::CommandParams;
 pub use routing::UiRouting;
 pub use viewmodel::{ImageEnum, ViewModel};
 
