@@ -1,0 +1,28 @@
+[package]
+name        = "ui-demo-view"
+version     = "0.1.0"
+edition     = "2024"
+publish     = false
+description = "taktora integration example: an egui/eframe reference View for the MVVM UI connector, binding the 'ui-demo' producer purely over the published JSON contract (FEAT_0092)"
+license     = "Apache-2.0 OR MIT"
+
+[[bin]]
+name = "ui-demo-view"
+path = "src/main.rs"
+
+[workspace]
+# Empty — its own workspace (the parent repo `exclude`s `examples`). The heavy
+# egui/eframe GUI dependencies live ONLY in this example crate: never in any
+# published library crate and never in the root workspace deps.
+
+[dependencies]
+# The client is unpublished (0.1.0 on this branch) -> path dependency. This View
+# depends on NEITHER the executor NOR the server crate: it binds the running
+# producer entirely over the language-neutral JSON contract.
+taktora-connector-ui-client = { path = "../../crates/taktora-connector-ui-client" }
+
+# GUI deps, scoped to this example only. `glow` (OpenGL) keeps the build lighter
+# than the default wgpu backend; `default_fonts` so text renders out of the box.
+eframe     = { version = "0.31", default-features = false, features = ["glow", "default_fonts"] }
+egui       = "0.31"
+serde_json = "1"
