@@ -21,6 +21,7 @@
 
 pub mod bounded_string;
 pub mod command;
+pub mod health;
 pub mod iox_publisher;
 pub mod manifest;
 pub mod property;
@@ -39,6 +40,7 @@ pub use taktora_connector_ui_contract as contract;
 
 pub use bounded_string::BoundedString;
 pub use command::CommandParams;
+pub use health::PublishHealth;
 pub use iox_publisher::IoxVmPublisher;
 pub use manifest::ManifestBuilder;
 pub use property::{Property, PropertyReader};
