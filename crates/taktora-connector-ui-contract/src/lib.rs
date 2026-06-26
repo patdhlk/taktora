@@ -9,6 +9,8 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
+pub mod field;
 pub mod kind;
 
+pub use field::{FieldSchema, FieldType};
 pub use kind::Kind;
