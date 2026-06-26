@@ -15,8 +15,11 @@ description  = "Server-side MVVM UI connector for the taktora-connector framewor
 [dependencies]
 taktora-connector-core          = { workspace = true }
 taktora-connector-transport-iox = { workspace = true }
+taktora-connector-host          = { workspace = true }
+taktora-connector-codec         = { workspace = true }
 taktora-connector-ui-contract   = { workspace = true }
 taktora-connector-ui-derive     = { workspace = true }
+taktora-executor                = { workspace = true }
 iceoryx2                        = { workspace = true }
 serde                           = { workspace = true, features = ["std", "derive"] }
 serde_json                      = { workspace = true, features = ["std"] }

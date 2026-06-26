@@ -22,7 +22,10 @@ taktora-connector-ui            = { workspace = true }
 taktora-connector-ui-derive     = { workspace = true }
 taktora-connector-ui-contract   = { workspace = true }
 taktora-connector-transport-iox = { workspace = true }
+taktora-connector-host          = { workspace = true }
+taktora-executor                = { workspace = true }
 iceoryx2                        = { workspace = true }
-serde      = { workspace = true, features = ["std", "derive"] }
-serde_json = { workspace = true, features = ["std"] }
-trybuild   = { workspace = true }
+serde             = { workspace = true, features = ["std", "derive"] }
+serde_json        = { workspace = true, features = ["std"] }
+crossbeam-channel = { workspace = true }
+trybuild          = { workspace = true }

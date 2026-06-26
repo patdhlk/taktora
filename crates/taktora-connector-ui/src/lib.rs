@@ -21,9 +21,12 @@
 
 pub mod bounded_string;
 pub mod command;
+pub mod connector;
 pub mod health;
+pub mod hot_scalar;
 pub mod iox_publisher;
 pub mod manifest;
+pub mod options;
 pub mod property;
 pub mod pump;
 pub mod routing;
@@ -44,9 +47,12 @@ pub use command::{
     CommandTransport, CorrelationId, IoxCommandTransport, MockCommandTransport, RegisteredCommand,
     can_execute_entry, command_channel,
 };
+pub use connector::UiConnector;
 pub use health::PublishHealth;
+pub use hot_scalar::{HotScalar, HotScalarValue};
 pub use iox_publisher::IoxVmPublisher;
 pub use manifest::{ManifestBuilder, manifest_entry};
+pub use options::{UiConnectorOptions, UiConnectorOptionsBuilder};
 pub use property::{Property, PropertyReader};
 pub use pump::{
     EncodeFn, MockPublisher, Pump, PumpEntry, PumpHandle, PumpTickStats, VmPublisher,
