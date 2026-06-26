@@ -7,18 +7,23 @@
 //! and is exempt from the zero-subscriber skip (`REQ_0862`) so a UI can always
 //! attach and detect liveness.
 //!
-//! # Epoch derivation (no wall-clock)
+//! # Epoch derivation (restart- and instance-distinct)
 //!
-//! `REQ_0879` requires only that the epoch *uniquely identify the process
-//! instance*, not global uniqueness. [`default_epoch`] therefore uses
-//! [`std::process::id`] — distinct between two concurrently-running taktora
-//! applications, and changed across a restart (the OS hands out a fresh pid),
-//! which is exactly what `REQ_0882` (application restart bumps epoch) needs. It
-//! deliberately avoids ambient wall-clock, and is stable within one process (a
-//! `OnceLock` caches the first observation). A caller may override it via
-//! [`system_entry`]'s `epoch` argument.
+//! `REQ_0879` requires the epoch to identify *this* process instance, and
+//! `REQ_0882` requires an application restart to bump it. A bare
+//! [`std::process::id`] is **not** restart-distinct: pids are recycled, and a
+//! containerised application is frequently pid 1 every run. [`default_epoch`]
+//! therefore mixes the wall-clock nanosecond reading at first observation with
+//! the pid: the time term makes it distinct across restarts (a fresh start
+//! reads a later clock), and XOR-ing the pid keeps two applications that launch
+//! in the same nanosecond distinct. Wall-clock is the correct source here —
+//! this is runtime code reporting liveness, not a build-reproducibility
+//! constraint. The value is stable within one process (a `OnceLock` caches the
+//! first observation). A caller may override it via [`system_entry`]'s `epoch`
+//! argument.
 
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use taktora_connector_ui_contract::{FieldSchema, FieldType, ViewModelSchema};
@@ -62,13 +67,23 @@ impl SystemViewModel {
     }
 }
 
-/// The process epoch: [`std::process::id`], cached so it is stable within the
-/// process (see the module docs for why this satisfies `REQ_0879`/`REQ_0882`
-/// without wall-clock).
+/// The process epoch: the first-observation wall-clock nanosecond reading
+/// XOR-ed with [`std::process::id`], cached so it is stable within the process.
+///
+/// Mixing both sources makes the epoch **restart-distinct** (the time term
+/// advances every launch, unlike a recycled or container-pinned pid) and
+/// **instance-distinct** (the pid term separates two applications that start in
+/// the same nanosecond), satisfying `REQ_0879`/`REQ_0882`. See the module docs.
 #[must_use]
 pub fn default_epoch() -> u64 {
     static EPOCH: OnceLock<u64> = OnceLock::new();
-    *EPOCH.get_or_init(|| u64::from(std::process::id()))
+    *EPOCH.get_or_init(|| {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        nanos ^ (std::process::id() as u64)
+    })
 }
 
 /// Build the exempt pump entry that publishes the [`SystemViewModel`] heartbeat.
@@ -119,6 +134,21 @@ mod tests {
     #[test]
     fn epoch_is_stable_within_the_process() {
         assert_eq!(default_epoch(), default_epoch());
+    }
+
+    #[test]
+    fn epoch_mixes_time_and_pid_so_it_is_not_bare_pid() {
+        // Restart-distinctness comes from the wall-clock term, instance-
+        // distinctness from the pid term. The defining property we can assert
+        // without sleeps is that the epoch is *not* the bare pid (the time term
+        // contributed high bits), so PID recycling / pid-1 containers cannot
+        // collapse it to a non-restart-distinct value.
+        let pid = u64::from(std::process::id());
+        assert_ne!(
+            default_epoch(),
+            pid,
+            "epoch must incorporate wall-clock, not just the pid"
+        );
     }
 
     #[test]
