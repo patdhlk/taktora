@@ -19,6 +19,7 @@ publish      = false
 
 [dev-dependencies]
 taktora-connector-ui            = { workspace = true }
+taktora-connector-ui-client     = { workspace = true }
 taktora-connector-ui-derive     = { workspace = true }
 taktora-connector-ui-contract   = { workspace = true }
 taktora-connector-transport-iox = { workspace = true }
