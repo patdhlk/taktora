@@ -8,3 +8,7 @@
 
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
+
+pub mod kind;
+
+pub use kind::Kind;
