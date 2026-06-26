@@ -16,12 +16,14 @@
 //! authoring derives are re-exported so an application only depends on this
 //! crate.
 
+pub mod bounded_string;
 pub mod routing;
 pub mod viewmodel;
 
 /// The language-neutral MVVM contract (manifest, schema, ack, hash).
 pub use taktora_connector_ui_contract as contract;
 
+pub use bounded_string::BoundedString;
 pub use routing::UiRouting;
 pub use viewmodel::{ImageEnum, ViewModel};
 

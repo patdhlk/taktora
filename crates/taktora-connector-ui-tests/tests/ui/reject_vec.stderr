@@ -1,0 +1,5 @@
+error: `Vec` is not a valid ViewModel field type: dynamically-sized `Vec` is not POD; use a fixed-length array `[T; N]`
+ --> tests/ui/reject_vec.rs:5:11
+  |
+5 |     data: Vec<u8>,
+  |           ^^^
