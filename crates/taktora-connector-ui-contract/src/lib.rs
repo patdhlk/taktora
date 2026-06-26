@@ -11,10 +11,12 @@
 
 pub mod ack;
 pub mod field;
+pub mod hash;
 pub mod kind;
 pub mod schema;
 
 pub use ack::{Ack, RejectedCode};
 pub use field::{FieldSchema, FieldType};
+pub use hash::contract_hash;
 pub use kind::Kind;
 pub use schema::{CommandSchema, Manifest, ViewModelSchema};
