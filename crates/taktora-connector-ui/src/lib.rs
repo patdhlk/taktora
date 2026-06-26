@@ -20,6 +20,7 @@
 #![deny(unsafe_code)]
 
 pub mod bounded_string;
+pub mod cell;
 pub mod command;
 pub mod routing;
 pub mod viewmodel;
