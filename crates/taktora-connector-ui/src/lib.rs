@@ -22,6 +22,7 @@
 pub mod bounded_string;
 pub mod cell;
 pub mod command;
+pub mod property;
 pub mod routing;
 pub mod viewmodel;
 
@@ -29,7 +30,9 @@ pub mod viewmodel;
 pub use taktora_connector_ui_contract as contract;
 
 pub use bounded_string::BoundedString;
+pub use cell::SeqlockBytes;
 pub use command::CommandParams;
+pub use property::Property;
 pub use routing::UiRouting;
 pub use viewmodel::{ImageEnum, ViewModel};
 
