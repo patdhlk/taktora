@@ -38,8 +38,10 @@ pub struct PropertyChange {
 /// fixed field set, so this only arises across an incompatible (read-only)
 /// binding, where surfacing a spurious "removed" notification would be noise.
 ///
-/// The result is in `next`'s key order (`serde_json::Map` is ordered), so the
-/// notification order is deterministic.
+/// The result order is deterministic: with default `serde_json` a `Map` is a
+/// `BTreeMap`, so iterating `next` yields its keys in **sorted** order — changed
+/// fields therefore come out sorted by key, not in struct-declaration / insertion
+/// order.
 #[must_use]
 pub fn diff_fields(prev: &Map<String, Value>, next: &Map<String, Value>) -> Vec<PropertyChange> {
     let mut changes = Vec::new();
@@ -86,6 +88,18 @@ impl Staleness {
 /// Pure and total: `last_received == None` → [`Staleness::NeverReceived`];
 /// otherwise the age is `now - last_received` and the result is
 /// [`Staleness::Fresh`] iff that age is `<= threshold`.
+///
+/// # Why the client receive [`Instant`], not the envelope `timestamp_ns`
+///
+/// Staleness is measured against the **client-side receive instant**, deliberately
+/// *not* the sender's envelope `timestamp_ns`. Every UI service is `history_size(1)`,
+/// so a freshly-attached subscriber is redelivered the last published sample — an
+/// envelope whose `timestamp_ns` may be arbitrarily old. To that new subscriber the
+/// value legitimately just arrived and is "fresh"; keying off the wire timestamp
+/// would spuriously mark a correctly-redelivered current value as stale. The
+/// envelope's `sequence_number` / `timestamp_ns` remain available via
+/// [`ViewModelState::last_sequence`] / [`ViewModelState::last_timestamp_ns`] for
+/// callers that want the producer-side timeline.
 #[must_use]
 pub fn staleness(last_received: Option<Instant>, now: Instant, threshold: Duration) -> Staleness {
     match last_received {
