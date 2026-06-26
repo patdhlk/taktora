@@ -3,7 +3,7 @@
 //! Maps each authored Rust field type onto the closed POD `FieldType` set, its
 //! `#[repr(C)]` image representation, and a conservative JSON-size budget. Any
 //! type outside the closed set (`Vec`, `String`, `HashMap`, `i128`, `u128`) is
-//! rejected with a `compile_error!` (REQ_0858/0859/0878).
+//! rejected with a `compile_error!` (`REQ_0858`/`REQ_0859`/`REQ_0878`).
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -96,7 +96,7 @@ const SCALARS: &[Scalar] = &[
     },
 ];
 
-/// Types rejected with an explicit message (REQ_0858).
+/// Types rejected with an explicit message (`REQ_0858`).
 const REJECTED: &[(&str, &str)] = &[
     (
         "String",
@@ -233,18 +233,20 @@ pub fn image_field_type(kind: &FieldKind, original: &Type) -> TokenStream {
 /// The expression lowering `self.#field` into the image.
 pub fn to_image_expr(kind: &FieldKind, field: &TokenStream) -> TokenStream {
     let krate = krate();
-    match kind {
-        FieldKind::Enum(_) => quote!(#krate::ImageEnum::to_repr(self.#field)),
-        _ => quote!(self.#field),
+    if let FieldKind::Enum(_) = kind {
+        quote!(#krate::ImageEnum::to_repr(self.#field))
+    } else {
+        quote!(self.#field)
     }
 }
 
 /// The expression reconstructing the field from `image.#field`.
 pub fn from_image_expr(kind: &FieldKind, field: &TokenStream) -> TokenStream {
     let krate = krate();
-    match kind {
-        FieldKind::Enum(ty) => quote!(<#ty as #krate::ImageEnum>::from_repr(image.#field)),
-        _ => quote!(image.#field),
+    if let FieldKind::Enum(ty) = kind {
+        quote!(<#ty as #krate::ImageEnum>::from_repr(image.#field))
+    } else {
+        quote!(image.#field)
     }
 }
 
@@ -259,11 +261,11 @@ pub fn field_type_expr(kind: &FieldKind) -> TokenStream {
         }
         FieldKind::Array { elem, len } => {
             let variant = syn::Ident::new(elem.field_type, proc_macro2::Span::call_site());
-            let len = *len as u32;
+            let len = u32::try_from(*len).unwrap_or(u32::MAX);
             quote!(#ft::Array { elem: ::std::boxed::Box::new(#ft::#variant), len: #len })
         }
         FieldKind::BoundedStr { cap } => {
-            let cap = *cap as u32;
+            let cap = u32::try_from(*cap).unwrap_or(u32::MAX);
             quote!(#ft::Str { cap: #cap })
         }
         FieldKind::Enum(ty) => quote!(<#ty as #krate::ImageEnum>::field_type()),

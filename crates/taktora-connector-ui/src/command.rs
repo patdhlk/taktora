@@ -1,4 +1,4 @@
-//! The [`CommandParams`] authoring trait (REQ_0868, REQ_0873).
+//! The [`CommandParams`] authoring trait (`REQ_0868`, `REQ_0873`).
 //!
 //! A command's parameter struct describes the JSON request payload a UI sends
 //! to invoke the command, and whether the command is safe to auto-retry under
@@ -26,7 +26,7 @@ pub trait CommandParams: Sized {
 
     /// Assemble the full [`CommandSchema`] contribution for the manifest.
     ///
-    /// The connector supplies the instance-namespaced service names (REQ_0873);
+    /// The connector supplies the instance-namespaced service names (`REQ_0873`);
     /// the kind is always [`Kind::Command`] and the idempotent flag comes from
     /// [`IDEMPOTENT`](CommandParams::IDEMPOTENT).
     #[must_use]

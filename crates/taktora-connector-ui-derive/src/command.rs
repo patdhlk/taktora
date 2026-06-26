@@ -2,7 +2,7 @@
 //!
 //! Generates a [`CommandParams`] impl: the parameter `FieldSchema` list (using
 //! the shared field lowering) and the `IDEMPOTENT` flag captured from
-//! `#[command(idempotent)]` (REQ_0868/0873).
+//! `#[command(idempotent)]` (`REQ_0868`/`REQ_0873`).
 
 use proc_macro2::TokenStream;
 use quote::quote;

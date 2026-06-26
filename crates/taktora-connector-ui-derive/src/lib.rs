@@ -1,4 +1,4 @@
-//! Authoring derive macros for the taktora UI connector (FEAT_0092).
+//! Authoring derive macros for the taktora UI connector (`FEAT_0092`).
 //!
 //! This is the first proc-macro crate in the workspace. It turns authored
 //! POD Rust types into the machinery the UI connector needs:
@@ -18,6 +18,9 @@
 //! `taktora-connector-ui` (which re-exports these macros).
 //!
 //! [`ViewModelSchema`]: https://docs.rs/taktora-connector-ui-contract
+
+#![warn(missing_docs)]
+#![deny(unsafe_code)]
 
 use proc_macro::TokenStream;
 

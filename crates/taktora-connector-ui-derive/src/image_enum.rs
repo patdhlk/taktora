@@ -183,6 +183,11 @@ fn eval_disc(expr: &Expr) -> syn::Result<i64> {
 }
 
 /// Build a `repr`-typed integer literal for a discriminant value.
+///
+/// The narrowing casts are deliberate: the discriminant is being re-expressed
+/// in the enum's own backing integer width, which the source already declared,
+/// so any "truncation" reproduces the exact pattern the compiler assigns.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn typed_literal(repr: &ReprInfo, value: i64) -> Literal {
     let _ = Span::call_site();
     if repr.signed {

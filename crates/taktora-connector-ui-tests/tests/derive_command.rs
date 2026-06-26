@@ -28,8 +28,12 @@ struct NoParams;
 
 #[test]
 fn idempotent_attribute_sets_the_flag() {
-    assert!(Enable::IDEMPOTENT);
-    assert!(!JogRelative::IDEMPOTENT);
+    // Bind through locals so clippy treats these as runtime values, not
+    // const-folded assertions.
+    let enable_idem = Enable::IDEMPOTENT;
+    let jog_idem = JogRelative::IDEMPOTENT;
+    assert!(enable_idem);
+    assert!(!jog_idem);
 }
 
 #[test]
@@ -63,7 +67,8 @@ fn params_lowers_fields_to_schema() {
 #[test]
 fn unit_struct_has_no_params() {
     assert!(NoParams::params().is_empty());
-    assert!(!NoParams::IDEMPOTENT);
+    let noparams_idem = NoParams::IDEMPOTENT;
+    assert!(!noparams_idem);
 }
 
 #[test]

@@ -1,5 +1,5 @@
 //! Server-side MVVM UI connector for the taktora-connector framework
-//! (FEAT_0092).
+//! (`FEAT_0092`).
 //!
 //! This crate is the *authoring layer*: the [`ViewModel`] and [`CommandParams`]
 //! traits an application implements (usually via the re-exported derives), the
@@ -15,6 +15,9 @@
 //! The language-neutral contract is re-exported as [`contract`], and the
 //! authoring derives are re-exported so an application only depends on this
 //! crate.
+
+#![warn(missing_docs)]
+#![deny(unsafe_code)]
 
 pub mod bounded_string;
 pub mod command;
