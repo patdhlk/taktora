@@ -13,11 +13,14 @@ categories   = { workspace = true }
 description  = "Server-side MVVM UI connector for the taktora-connector framework: ViewModel/CommandParams authoring traits, POD image lowering, and the UiRouting type. Implements FEAT_0092."
 
 [dependencies]
-taktora-connector-core        = { workspace = true }
-taktora-connector-ui-contract = { workspace = true }
-taktora-connector-ui-derive   = { workspace = true }
-serde                         = { workspace = true, features = ["std", "derive"] }
-serde_json                    = { workspace = true, features = ["std"] }
+taktora-connector-core          = { workspace = true }
+taktora-connector-transport-iox = { workspace = true }
+taktora-connector-ui-contract   = { workspace = true }
+taktora-connector-ui-derive     = { workspace = true }
+iceoryx2                        = { workspace = true }
+serde                           = { workspace = true, features = ["std", "derive"] }
+serde_json                      = { workspace = true, features = ["std"] }
+tracing                         = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true, features = ["std"] }

@@ -21,7 +21,9 @@
 
 pub mod bounded_string;
 pub mod command;
+pub mod iox_publisher;
 pub mod property;
+pub mod pump;
 pub mod routing;
 pub mod viewmodel;
 
@@ -35,7 +37,12 @@ pub use taktora_connector_ui_contract as contract;
 
 pub use bounded_string::BoundedString;
 pub use command::CommandParams;
+pub use iox_publisher::IoxVmPublisher;
 pub use property::{Property, PropertyReader};
+pub use pump::{
+    EncodeFn, MockPublisher, Pump, PumpEntry, PumpHandle, PumpTickStats, VmPublisher,
+    property_entry,
+};
 pub use routing::UiRouting;
 pub use viewmodel::{ImageEnum, ViewModel};
 
