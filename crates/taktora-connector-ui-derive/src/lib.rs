@@ -40,6 +40,14 @@ mod viewmodel;
 /// are not yet supported** (deferred from REQ_0858): a nested-struct field is
 /// classified as an enum and fails to compile with the `ImageEnum`
 /// `#[diagnostic::on_unimplemented]` message rather than a `compile_error!`.
+///
+/// The generated image type is named `{Ident}Image` (e.g. `Foo` → `FooImage`),
+/// so a user type named `FooImage` in the same module would collide.
+///
+/// Generic, lifetime, and const-generic structs are rejected, as are
+/// schema-desyncing `#[serde(rename = "...")]` / `#[serde(rename_all = "...")]`
+/// attributes on the container or any field (the manifest schema is derived from
+/// the Rust idents, so a rename would silently desync it from the wire).
 #[proc_macro_derive(ViewModel)]
 pub fn derive_view_model(input: TokenStream) -> TokenStream {
     viewmodel::derive(input.into())
@@ -51,6 +59,10 @@ pub fn derive_view_model(input: TokenStream) -> TokenStream {
 ///
 /// `#[command(idempotent)]` on the struct marks the command safe to auto-retry
 /// under the same correlation id.
+///
+/// Generic, lifetime, and const-generic structs are rejected, as are
+/// schema-desyncing `#[serde(rename = "...")]` / `#[serde(rename_all = "...")]`
+/// attributes on the container or any field.
 #[proc_macro_derive(CommandParams, attributes(command))]
 pub fn derive_command_params(input: TokenStream) -> TokenStream {
     command::derive(input.into())
@@ -62,6 +74,9 @@ pub fn derive_command_params(input: TokenStream) -> TokenStream {
 /// `ViewModel` / `CommandParams` field.
 ///
 /// The enum must carry an explicit integer `#[repr(...)]` (e.g. `#[repr(u8)]`).
+///
+/// Discriminants must fit in `i64`. A `#[repr(u64)]` enum with a discriminant
+/// above `i64::MAX` is rejected (the lowering tracks discriminants as `i64`).
 #[proc_macro_derive(ImageEnum)]
 pub fn derive_image_enum(input: TokenStream) -> TokenStream {
     image_enum::derive(input.into())

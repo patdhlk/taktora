@@ -1,0 +1,5 @@
+error: `#[serde(rename/rename_all)]` is not supported on ViewModel/command types: it desyncs the manifest schema from the wire
+ --> tests/ui/reject_serde_rename_container.rs:5:9
+  |
+5 | #[serde(rename_all = "camelCase")]
+  |         ^^^^^^^^^^

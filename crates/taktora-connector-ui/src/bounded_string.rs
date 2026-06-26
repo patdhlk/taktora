@@ -56,8 +56,11 @@ impl<const CAP: usize> BoundedString<CAP> {
     #[must_use]
     pub fn as_str(&self) -> &str {
         // SAFETY-free: the bytes in `[0, len)` are maintained as valid UTF-8 by
-        // every constructor, so this never fails.
-        std::str::from_utf8(&self.bytes[..self.len()]).unwrap_or("")
+        // every constructor, so this never fails. The end is clamped to `CAP` so
+        // a `len > CAP` value (possible from a future raw-byte / torn seqlock
+        // copy) cannot index past the buffer and panic.
+        let end = self.len().min(CAP);
+        std::str::from_utf8(&self.bytes[..end]).unwrap_or("")
     }
 
     /// Build from a `&str`, truncating on a UTF-8 boundary to fit `CAP`.
@@ -79,6 +82,17 @@ impl<const CAP: usize> BoundedString<CAP> {
             len: end as u16,
             bytes,
         }
+    }
+
+    /// Construct directly from raw fields, bypassing every invariant.
+    ///
+    /// Test-only: lets a test build a deliberately malformed value (e.g. with
+    /// `len > CAP`) to prove `as_str` clamps instead of panicking. No production
+    /// code path can produce such a value safely.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn from_raw_parts(len: u16, bytes: [u8; CAP]) -> Self {
+        Self { len, bytes }
     }
 }
 
@@ -170,6 +184,26 @@ mod tests {
         assert_eq!(s, c);
         // len: u16 (2) + [u8;16] = 18, padded to 18 (align 2).
         assert_eq!(std::mem::size_of::<BoundedString<16>>(), 18);
+    }
+
+    #[test]
+    fn as_str_does_not_panic_on_out_of_range_len() {
+        // Simulate a torn / raw-byte copy that left `len` larger than `CAP`.
+        let bytes = *b"hello\0\0\0";
+        let s = BoundedString::<8>::from_raw_parts(99, bytes);
+        // Must not panic; the end is clamped to `CAP`, so we get the valid
+        // UTF-8 prefix of the buffer back (the trailing NULs are valid UTF-8).
+        let out = s.as_str();
+        assert_eq!(out.len(), 8);
+        assert!(out.starts_with("hello"));
+    }
+
+    #[test]
+    fn as_str_returns_empty_on_invalid_utf8_with_bad_len() {
+        // Non-UTF-8 bytes plus an out-of-range len: still no panic, empty value.
+        let bytes = [0xFFu8; 8];
+        let s = BoundedString::<8>::from_raw_parts(255, bytes);
+        assert_eq!(s.as_str(), "");
     }
 
     #[test]

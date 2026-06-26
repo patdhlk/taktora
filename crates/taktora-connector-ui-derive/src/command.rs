@@ -15,6 +15,14 @@ pub fn derive(input: TokenStream) -> syn::Result<TokenStream> {
     let ident = &ast.ident;
     let krate = layout::krate();
 
+    if !ast.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &ast.generics,
+            "CommandParams does not support generic, lifetime, or const-generic structs",
+        ));
+    }
+    layout::reject_serde_rename(&ast.attrs)?;
+
     let idempotent = parse_idempotent(&ast)?;
 
     let Data::Struct(data) = &ast.data else {
@@ -30,6 +38,7 @@ pub fn derive(input: TokenStream) -> syn::Result<TokenStream> {
     match &data.fields {
         Fields::Named(named) => {
             for field in &named.named {
+                layout::reject_serde_rename(&field.attrs)?;
                 let fident = field.ident.as_ref().expect("named field");
                 let fname = fident.to_string();
                 let kind = layout::classify(&field.ty)?;

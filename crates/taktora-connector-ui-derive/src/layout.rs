@@ -15,6 +15,42 @@ pub fn krate() -> TokenStream {
     quote!(::taktora_connector_ui)
 }
 
+/// The error message emitted for a schema-desyncing serde attribute.
+const SERDE_RENAME_MSG: &str = "`#[serde(rename/rename_all)]` is not supported on ViewModel/command types: it desyncs the manifest schema from the wire";
+
+/// Reject schema-desyncing serde attributes (`rename` / `rename_all`).
+///
+/// The manifest schema field names and the JSON budget are derived from the Rust
+/// idents, but serialization honors `#[serde(rename = "...")]` /
+/// `#[serde(rename_all = "...")]`, which would silently desync the manifest from
+/// the wire. Call this on the container's attributes and on each field's
+/// attributes; it emits a spanned error pointing at the offending key.
+pub fn reject_serde_rename(attrs: &[syn::Attribute]) -> syn::Result<()> {
+    for attr in attrs {
+        if !attr.path().is_ident("serde") {
+            continue;
+        }
+        let mut bad: Option<proc_macro2::Span> = None;
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("rename") || meta.path.is_ident("rename_all") {
+                bad = Some(meta.path.span());
+            }
+            // Consume any `= value` or `(...)` group so the list parser can
+            // advance past serde keys we don't care about.
+            if meta.input.peek(syn::Token![=]) {
+                let _: Expr = meta.value()?.parse()?;
+            } else if meta.input.peek(syn::token::Paren) {
+                meta.parse_nested_meta(|_| Ok(()))?;
+            }
+            Ok(())
+        })?;
+        if let Some(span) = bad {
+            return Err(syn::Error::new(span, SERDE_RENAME_MSG));
+        }
+    }
+    Ok(())
+}
+
 /// A classified field type.
 pub enum FieldKind {
     /// A scalar (`bool`, integer, float).

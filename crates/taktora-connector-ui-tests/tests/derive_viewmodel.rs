@@ -128,6 +128,39 @@ fn max_encoded_size_is_a_sane_upper_bound() {
     );
 }
 
+/// A ViewModel whose fields exercise the longest possible JSON encodings: a
+/// full-width negative integer, a long-mantissa subnormal float, and a
+/// capacity-filling multibyte `BoundedString`.
+#[derive(Clone, Debug, PartialEq, Serialize, ViewModel)]
+struct WorstCaseVm {
+    big_neg: i64,
+    tiny: f64,
+    label: BoundedString<16>,
+}
+
+#[test]
+fn max_encoded_size_holds_for_worst_case_values() {
+    let vm = WorstCaseVm {
+        big_neg: i64::MIN,
+        // Smallest positive normal f64, negated: a long, fully-printed mantissa.
+        tiny: -2.2250738585072014e-308,
+        // Eight 2-byte chars exactly fill the 16-byte capacity.
+        label: BoundedString::from("\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}"),
+    };
+    // Confirm the string really fills capacity (so this is the worst case).
+    assert_eq!(vm.label.len(), 16);
+
+    let image = vm.to_image();
+    let mut buf = Vec::new();
+    WorstCaseVm::image_to_json(&image, &mut buf);
+    assert!(
+        buf.len() <= WorstCaseVm::MAX_ENCODED_SIZE,
+        "encoded {} exceeds MAX_ENCODED_SIZE {}",
+        buf.len(),
+        WorstCaseVm::MAX_ENCODED_SIZE
+    );
+}
+
 fn field(name: &str, ty: FieldType) -> taktora_connector_ui_contract::FieldSchema {
     taktora_connector_ui_contract::FieldSchema {
         name: name.to_owned(),

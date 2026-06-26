@@ -5,7 +5,7 @@
 //! reconstructs by discriminant, falling back to the first variant for any
 //! out-of-range value (so reconstruction is total and torn-read-safe).
 
-use proc_macro2::{Literal, Span, TokenStream};
+use proc_macro2::{Literal, TokenStream};
 use quote::quote;
 use syn::{Data, DeriveInput, Expr, Fields, Lit, UnOp};
 
@@ -162,7 +162,12 @@ fn eval_disc(expr: &Expr) -> syn::Result<i64> {
     match expr {
         Expr::Lit(el) => {
             if let Lit::Int(li) = &el.lit {
-                return li.base10_parse::<i64>();
+                return li.base10_parse::<i64>().map_err(|_| {
+                    syn::Error::new_spanned(
+                        li,
+                        "ImageEnum discriminants must fit in i64; a `#[repr(u64)]` value above i64::MAX is not supported",
+                    )
+                });
             }
         }
         Expr::Unary(u) => {
@@ -189,7 +194,6 @@ fn eval_disc(expr: &Expr) -> syn::Result<i64> {
 /// so any "truncation" reproduces the exact pattern the compiler assigns.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn typed_literal(repr: &ReprInfo, value: i64) -> Literal {
-    let _ = Span::call_site();
     if repr.signed {
         match repr.width {
             1 => Literal::i8_suffixed(value as i8),
