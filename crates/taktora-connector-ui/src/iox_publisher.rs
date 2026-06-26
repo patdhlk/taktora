@@ -1,9 +1,16 @@
 //! [`IoxVmPublisher`]: the production [`VmPublisher`] backed by an iceoryx2
 //! publish/subscribe service with **history depth 1** (latest-value, `REQ_0856`).
 //!
-//! A late-joining UI immediately receives the current value, and the pump can
-//! cheaply ask how many subscribers are attached so it can skip publishing a
-//! ViewModel nobody is watching (`REQ_0862`).
+//! iceoryx2 delivers the retained history sample to a new subscriber on the
+//! publisher's **next send**, not at the instant of attach. So for an idle,
+//! coalesced ViewModel the value a late-joining UI actually sees is delivered by
+//! the pump's reappear-force-republish on the next tick (a non-exempt entry that
+//! just regained a subscriber is republished even when unchanged), and exempt
+//! entries (manifest, heartbeat) republish every tick regardless. Either way the
+//! UI has the current value within one UI cadence — no resync handshake
+//! (`REQ_0856`, `REQ_0881`). The pump can also cheaply ask how many subscribers
+//! are attached so it skips publishing a ViewModel nobody is watching
+//! (`REQ_0862`).
 //!
 //! # Why not the transport crate's raw writer
 //!
