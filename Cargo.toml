@@ -24,6 +24,7 @@ members = [
     "crates/taktora-connector-host-tests",
     "crates/taktora-connector-transport-iox",
     "crates/taktora-connector-ui-contract",
+    "crates/taktora-connector-ui-derive",
     "crates/taktora-connector-zenoh",
     "crates/taktora-connector-zenoh-tests",
     "crates/taktora-executor",
@@ -82,6 +83,7 @@ taktora-connector-ethercat       = { path = "crates/taktora-connector-ethercat",
 taktora-connector-host           = { path = "crates/taktora-connector-host", version = "0.1.15" }
 taktora-connector-transport-iox  = { path = "crates/taktora-connector-transport-iox", version = "0.1.9" }
 taktora-connector-ui-contract    = { path = "crates/taktora-connector-ui-contract", version = "0.1.0" }
+taktora-connector-ui-derive      = { path = "crates/taktora-connector-ui-derive", version = "0.1.0" }
 taktora-connector-zenoh          = { path = "crates/taktora-connector-zenoh", version = "0.2.14" }
 taktora-executor                 = { path = "crates/taktora-executor", version = "0.4.1" }
 taktora-executor-tracing         = { path = "crates/taktora-executor-tracing", version = "0.1.14" }
