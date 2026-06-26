@@ -39,7 +39,11 @@ mod cell;
 pub use taktora_connector_ui_contract as contract;
 
 pub use bounded_string::BoundedString;
-pub use command::CommandParams;
+pub use command::{
+    CanExecute, CommandHandler, CommandHandlerHandle, CommandInvocation, CommandParams,
+    CommandTransport, CorrelationId, IoxCommandTransport, MockCommandTransport, RegisteredCommand,
+    can_execute_entry, command_channel,
+};
 pub use health::PublishHealth;
 pub use iox_publisher::IoxVmPublisher;
 pub use manifest::{ManifestBuilder, manifest_entry};
