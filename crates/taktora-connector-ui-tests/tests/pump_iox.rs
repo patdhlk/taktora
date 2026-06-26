@@ -13,8 +13,11 @@ use iceoryx2::node::Node;
 use iceoryx2::prelude::{NodeBuilder, ipc};
 use serde::Serialize;
 use taktora_connector_transport_iox::ServiceFactory;
+use taktora_connector_ui::contract::Manifest;
 use taktora_connector_ui::pump::{Pump, VmPublisher, property_entry};
-use taktora_connector_ui::{ImageEnum, IoxVmPublisher, Property, ViewModel};
+use taktora_connector_ui::{
+    ImageEnum, IoxVmPublisher, ManifestBuilder, Property, ViewModel, manifest_entry,
+};
 
 const N: usize = 256;
 
@@ -46,8 +49,10 @@ fn unique_name(tag: &str) -> String {
 }
 
 /// Read one envelope, polling briefly for delivery.
-fn recv(reader: &taktora_connector_transport_iox::RawChannelReader<N>) -> Option<Vec<u8>> {
-    let mut dest = [0u8; N];
+fn recv<const M: usize>(
+    reader: &taktora_connector_transport_iox::RawChannelReader<M>,
+) -> Option<Vec<u8>> {
+    let mut dest = [0u8; M];
     for _ in 0..200 {
         if let Ok(Some(sample)) = reader.try_recv_into(&mut dest) {
             return Some(dest[..sample.payload_len].to_vec());
@@ -126,14 +131,16 @@ fn zero_subscriber_view_model_is_not_published_over_iox() {
 }
 
 #[test]
-fn late_joiner_receives_current_value_via_history_depth_one() {
+fn late_joiner_receives_current_value_on_next_tick() {
     let node = make_node();
     let name = unique_name("late");
 
     let publisher = IoxVmPublisher::<N>::create(&node, &name).expect("create publisher");
 
     // Publish a value before any subscriber attaches. With history_size(1) the
-    // service retains it.
+    // service retains it, but iceoryx2 only delivers the retained sample to a
+    // new subscriber on the publisher's NEXT send — not at the instant of
+    // attach.
     let early = StepperVm {
         active: true,
         position: 7.0,
@@ -149,9 +156,10 @@ fn late_joiner_receives_current_value_via_history_depth_one() {
         .create_raw_reader_named::<N>(&name)
         .expect("late reader");
 
-    // The connector's pump keeps publishing (here we publish once more, as the
-    // next pump tick would). The late joiner receives a current value with no
-    // resync handshake (REQ_0856 / REQ_0881).
+    // The send that actually carries the current value to the late joiner is the
+    // pump's next publish (the reappear-force-republish on the next tick, modeled
+    // here by one more publish). Within one UI cadence, no resync handshake
+    // (REQ_0856 / REQ_0881).
     publisher
         .publish(&serde_json::to_vec(&early).unwrap())
         .expect("publish after late join");
@@ -159,4 +167,43 @@ fn late_joiner_receives_current_value_via_history_depth_one() {
     let bytes = recv(&reader).expect("late joiner received a value");
     let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(json["position"], 7.0);
+}
+
+#[test]
+fn manifest_entry_reaches_a_late_joiner_on_the_next_tick() {
+    // The manifest is published by the pump as an exempt entry, so a UI that
+    // attaches then ticks once receives the current manifest and can bind
+    // against it (REQ_0872): a late joiner gets the contract within one tick.
+    const MN: usize = 512;
+    let node = make_node();
+    let name = unique_name("manifest");
+
+    let publisher = IoxVmPublisher::<MN>::create(&node, &name).expect("create publisher");
+
+    // A UI attaches before the next tick.
+    let factory = ServiceFactory::new(&node);
+    let reader = factory
+        .create_raw_reader_named::<MN>(&name)
+        .expect("late reader");
+
+    let manifest = ManifestBuilder::new("stepper_app", 9)
+        .with_view_model(StepperVm::schema())
+        .build();
+    let expected_hash = manifest.contract_hash.clone();
+    assert!(!expected_hash.is_empty());
+
+    let mut pump = Pump::new();
+    pump.add_entry(manifest_entry(manifest, publisher));
+
+    // One tick publishes the manifest (exempt: no subscriber gate needed).
+    assert_eq!(pump.tick().published, 1);
+
+    let bytes = recv(&reader).expect("manifest delivered on next tick");
+    let parsed: Manifest = serde_json::from_slice(&bytes).expect("manifest parses");
+    assert_eq!(parsed.instance, "stepper_app");
+    assert!(
+        !parsed.contract_hash.is_empty(),
+        "manifest must carry a contract hash"
+    );
+    assert_eq!(parsed.contract_hash, expected_hash);
 }

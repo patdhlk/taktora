@@ -42,7 +42,7 @@ pub use bounded_string::BoundedString;
 pub use command::CommandParams;
 pub use health::PublishHealth;
 pub use iox_publisher::IoxVmPublisher;
-pub use manifest::ManifestBuilder;
+pub use manifest::{ManifestBuilder, manifest_entry};
 pub use property::{Property, PropertyReader};
 pub use pump::{
     EncodeFn, MockPublisher, Pump, PumpEntry, PumpHandle, PumpTickStats, VmPublisher,

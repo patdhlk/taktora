@@ -14,6 +14,8 @@
 
 use taktora_connector_ui_contract::{CommandSchema, Manifest, ViewModelSchema, contract_hash};
 
+use crate::pump::{EncodeFn, PumpEntry, VmPublisher};
+
 /// The well-known suffix of the per-instance manifest service.
 const MANIFEST_SUFFIX: &str = "manifest";
 
@@ -140,9 +142,34 @@ impl ManifestBuilder {
     }
 }
 
+/// Build the exempt pump entry that publishes the assembled [`Manifest`] JSON
+/// (`REQ_0872`).
+///
+/// Like [`system_entry`](crate::system::system_entry) the entry is **exempt**
+/// from the zero-subscriber skip and re-serializes the (immutable) manifest
+/// every tick, always reporting a change so it publishes each tick. Combined
+/// with the manifest service's history depth 1, a UI that joins late receives
+/// the current manifest within one pump tick — no resync handshake.
+#[must_use]
+pub fn manifest_entry<P>(manifest: Manifest, publisher: P) -> PumpEntry
+where
+    P: VmPublisher + 'static,
+{
+    let encode: EncodeFn = Box::new(move |out: &mut Vec<u8>| {
+        out.clear();
+        // Serializing a plain-data manifest is infallible; on the off chance it
+        // errs we report "no value this tick" rather than panicking on the pump
+        // thread (mirroring `system_entry`).
+        serde_json::to_writer(&mut *out, &manifest).ok()?;
+        Some(true)
+    });
+    PumpEntry::new(MANIFEST_SUFFIX, true, encode, Box::new(publisher))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pump::{MockPublisher, Pump};
     use taktora_connector_ui_contract::{FieldSchema, FieldType, Kind};
 
     fn vm(name: &str) -> ViewModelSchema {
@@ -235,5 +262,28 @@ mod tests {
         let inst = default_instance();
         assert!(!inst.is_empty());
         assert!(inst.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+    }
+
+    #[test]
+    fn manifest_entry_is_exempt_and_publishes_parseable_json_every_tick() {
+        let manifest = ManifestBuilder::new("app", 3)
+            .with_view_model(vm("Stepper"))
+            .build();
+        let mock = MockPublisher::new(); // zero subscribers on purpose
+        let mut pump = Pump::new();
+        pump.add_entry(manifest_entry(manifest.clone(), mock.clone()));
+
+        // Exempt: publishes even with no subscribers, every tick.
+        let s1 = pump.tick();
+        let s2 = pump.tick();
+        assert_eq!(s1.published, 1);
+        assert_eq!(s1.skipped_zero_sub, 0);
+        assert_eq!(s2.published, 1);
+        assert_eq!(mock.publish_count(), 2);
+
+        // The payload round-trips back to the source manifest.
+        let parsed: Manifest = serde_json::from_slice(&mock.last_published().unwrap()).unwrap();
+        assert_eq!(parsed, manifest);
+        assert!(!parsed.contract_hash.is_empty());
     }
 }
