@@ -573,3 +573,91 @@ that ``:refines:`` the requirement or feature it answers.
    pattern without coordinating with the framework. ❌ Plugin-side
    ``ZenohQuerier::try_recv`` and ``ZenohQueryable::reply`` add a
    single-byte skip / write step relative to pub/sub channels.
+
+.. arch-decision:: UI connector is a passive, MVVM-shaped, language-neutral transport
+   :id: ADR_0107
+   :status: accepted
+   :refines: FEAT_0092
+
+   **Context.** A local human-machine interface needs to observe and
+   command a taktora-executor application without binding taktora to
+   any one UI toolkit or runtime. The grill that produced
+   :need:`FEAT_0092` resolved five tightly-coupled forks, each with a
+   rejected alternative: (1) the boundary's reach — Rust-GUI-only vs
+   language/runtime-agnostic; (2) who builds the ViewModel — a passive
+   transport the app pushes into vs an active aggregator that reaches
+   into executor/stats/other connectors; (3) the substrate — desugar
+   onto the existing ``Connector`` trait vs a parallel
+   ``ViewModelHost`` abstraction; (4) the publish granularity and RT
+   posture — struct-per-ViewModel over a telemetry-export-style
+   seqlock+pump split vs service-per-property or publishing from the
+   RT task; (5) command semantics — acceptance-ack request/response vs
+   fire-and-forget or a held-open completion future. These are not
+   independent: the language-neutral choice forces a self-describing
+   wire contract, which (with RT-safety) forces fixed-layout POD
+   fields, which makes struct-per-ViewModel and a seqlock cell the
+   natural fit.
+
+   **Decision.** Adopt the following bundled posture for the UI
+   connector, captured as the requirements cited:
+
+   * **Language/runtime-agnostic, manifest-normative
+     (:need:`REQ_0872`–:need:`REQ_0878`).** The normative boundary is
+     a self-describing manifest plus a closed, fixed-layout POD field
+     type system (:need:`REQ_0858` / :need:`REQ_0875`) carried as JSON
+     over iceoryx2, with a contract hash (:need:`REQ_0874`). Any
+     language with an iceoryx2 binding binds dynamically; a Rust
+     reference client is the v1 ergonomic consumer; per-language typed
+     codegen is deferred.
+   * **Passive transport, not an aggregator (:need:`FEAT_0093`).** The
+     connector knows nothing of taktora's internal types; the
+     application owns the ViewModel binding glue. Standard-source
+     bridges (executor ``Observer`` telemetry, connector health) are
+     reserved for optional ``-adapters`` crates, keeping the core
+     decoupled — consistent with telemetry-export reaching the
+     executor through a separate ``Observer`` seam rather than a
+     connector.
+   * **Desugared onto the ``Connector`` trait (:need:`REQ_0855`).**
+     ``UiConnector`` implements the shared trait
+     (``Routing = UiRouting``, ``Codec = C``, ``JsonCodec`` default);
+     ``Property`` / ``Command`` / ``CanExecute`` are additive
+     ergonomics over ``create_writer`` / ``create_reader``. The trait
+     is not modified — mirroring :need:`ADR_0040`'s posture for Zenoh
+     queries.
+   * **Struct-per-ViewModel over a seqlock + non-RT pump
+     (:need:`REQ_0856`, :need:`REQ_0860`, :need:`REQ_0861`).** A
+     ViewModel is one iceoryx2 service publishing one POD struct with
+     latest-value (history-depth-1) semantics. The producer writes a
+     seqlock cell on the (possibly RT) hot path with no allocation; a
+     non-RT pump snapshots, JSON-encodes off-RT, and publishes at a
+     configurable UI cadence with coalescing — the
+     ``taktora-telemetry-export`` discipline (:need:`FEAT_0038`)
+     applied to bidirectional UI state.
+   * **Acceptance-ack commands, at-most-once (:need:`REQ_0865`,
+     :need:`REQ_0867`, :need:`REQ_0868`).** Commands are
+     request/response keyed by ``correlation_id`` returning
+     ``Accepted`` / ``Rejected``; progress and outcome are observed
+     through properties, not a held-open call. Delivery is
+     at-most-once via dedupe, with opt-in auto-retry only for commands
+     flagged idempotent.
+
+   **Consequences.** ✅ A WPF/.NET, web, C++, or Python UI can bind off
+   the manifest on day one — the stated goal — without taktora shipping
+   N language generators. ✅ The deterministic executor is never
+   encoded on, blocked, or back-pressured by a UI consumer
+   (:need:`REQ_0860` / :need:`REQ_0870`). ✅ Health, lifecycle,
+   ``ConnectorHost`` registration, envelope, and codec are inherited,
+   not re-solved, by being a first-class ``Connector``. ✅ The POD-only
+   constraint makes each ViewModel's envelope ``N`` derivable by the
+   derive macro (:need:`REQ_0859`) and the wire layout trivial for
+   every language. ❌ Property loses per-field independence — a
+   "property" is a field of a published struct, so per-field change is
+   reconstructed by client-side diff (:need:`REQ_0864`) and per-field
+   metadata (timestamps, staleness) must be modeled inside the struct.
+   ❌ POD-only fields exclude heap/variable-length state and
+   data-carrying tagged unions in v1 (:need:`REQ_0858`); enums that
+   carry data become an authoring pattern, not a language feature. ❌
+   Lossy coalescing suits state but not alarms/audit, so a lossless
+   ``Event`` primitive is deferred to v2 with a reserved ``kind`` slot
+   (:need:`REQ_0857`). ❌ Trust is OS/iceoryx2-mediated only in v1
+   (:need:`REQ_0884`).
