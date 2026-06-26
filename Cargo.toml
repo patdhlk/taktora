@@ -26,6 +26,7 @@ members = [
     "crates/taktora-connector-ui-contract",
     "crates/taktora-connector-ui-derive",
     "crates/taktora-connector-ui",
+    "crates/taktora-connector-ui-tests",
     "crates/taktora-connector-zenoh",
     "crates/taktora-connector-zenoh-tests",
     "crates/taktora-executor",
@@ -130,6 +131,7 @@ libm              = "0.2"
 
 # dev-only
 proptest          = "1"
+trybuild          = "1"
 loom              = "0.7"
 tempfile          = "3"
 rsruckig          = "2"

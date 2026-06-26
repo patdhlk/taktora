@@ -1,0 +1,26 @@
+[package]
+name         = "taktora-connector-ui-tests"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Integration tests for the taktora UI connector that exercise the authoring derives against sibling crates. Not published; holds version-bearing dev-deps on in-tree crates so the published crates' manifests stay free of internal-crate dev-deps that would race release-plz's topological publish order."
+publish      = false
+
+[lib]
+# Empty stub — the crate exists solely to host integration tests under
+# `tests/`. A `src/lib.rs` is required so Cargo treats this as a package.
+
+[dev-dependencies]
+taktora-connector-ui          = { workspace = true }
+taktora-connector-ui-derive   = { workspace = true }
+taktora-connector-ui-contract = { workspace = true }
+serde      = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+trybuild   = { workspace = true }
