@@ -34,9 +34,11 @@
 //!
 //! # Dedupe, back-pressure, gating
 //!
-//! * **Dedupe (`REQ_0867`):** a bounded LRU `correlation_id -> Ack`. A retry
-//!   with a seen id replays the cached ack **without** re-enqueuing the effect
-//!   (at-most-once delivery).
+//! * **Dedupe (`REQ_0867`):** a bounded LRU `correlation_id -> Ack`. Only
+//!   `Accepted` acks are cached; rejections are re-evaluated on retry (a
+//!   transient `BackPressure`/`CanExecuteFalse` must be retryable under the same
+//!   id). A retry with a seen (accepted) id replays the cached ack **without**
+//!   re-enqueuing the effect (at-most-once delivery).
 //! * **Back-pressure (`REQ_0871`):** the effect channel is bounded; when full,
 //!   the handler replies [`RejectedCode::BackPressure`] rather than block or
 //!   drop.
@@ -308,9 +310,12 @@ where
 /// A bounded LRU cache of `correlation_id -> Ack` for retry dedupe (`REQ_0867`).
 ///
 /// A `get` refreshes recency; an `insert` past capacity evicts the
-/// least-recently-used entry. Caching **every** ack (accepted or rejected)
-/// guarantees at-most-once effect delivery: a retried id never re-enters
-/// dispatch, so its effect is never enqueued a second time.
+/// least-recently-used entry. Only `Accepted` acks are cached (the caller
+/// inserts nothing else); rejections are re-evaluated on retry — a transient
+/// `BackPressure`/`CanExecuteFalse` must be retryable under the same id.
+/// Caching only effect-bearing acks guarantees at-most-once effect delivery: a
+/// retried accepted id never re-enters dispatch, so its effect is never
+/// enqueued a second time, while a rejected id remains free to succeed on retry.
 struct DedupeCache {
     cap: usize,
     entries: HashMap<CorrelationId, Ack>,
@@ -410,13 +415,18 @@ impl<T: CommandTransport> CommandHandler<T> {
     }
 
     /// Resolve one invocation to an ack: replay a cached ack on a dedupe hit
-    /// (no re-enqueue), otherwise dispatch and cache the result.
+    /// (no re-enqueue), otherwise dispatch and cache **only** effect-bearing
+    /// (`Accepted`) acks. Rejections are deliberately *not* cached so a
+    /// transient `BackPressure`/`CanExecuteFalse` is re-evaluated on retry under
+    /// the same id (`REQ_0867`, `REQ_0868`).
     fn resolve(&mut self, id: CorrelationId, invocation: &CommandInvocation) -> Ack {
         if let Some(cached) = self.dedupe.get(&id) {
             return cached;
         }
         let ack = self.dispatch(invocation);
-        self.dedupe.insert(id, ack.clone());
+        if matches!(ack, Ack::Accepted) {
+            self.dedupe.insert(id, ack.clone());
+        }
         ack
     }
 
@@ -789,6 +799,46 @@ mod tests {
             Ack::Rejected { code, .. } => assert_eq!(*code, RejectedCode::BackPressure),
             other => panic!("expected back-pressure rejection, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn transient_backpressure_is_retryable_under_same_id() {
+        // REQ_0867/REQ_0868: a rejection must NOT poison the correlation id.
+        // Capacity 1: a first effect fills the channel, so an invocation under
+        // id X is rejected with BackPressure; once the application drains the
+        // channel, retrying the SAME id X must succeed and enqueue the effect.
+        let (mut handler, transport, rx, _can) = handler_with_jog(1, true);
+
+        // Fill the single channel slot via a distinct id.
+        transport.push(corr(1), jog_invocation(1.0));
+        handler.poll();
+        assert_eq!(transport.last_ack(), Some(Ack::Accepted));
+
+        // id X (corr 2) hits the now-full channel -> BackPressure.
+        transport.push(corr(2), jog_invocation(2.0));
+        handler.poll();
+        match transport.last_ack().unwrap() {
+            Ack::Rejected { code, .. } => assert_eq!(code, RejectedCode::BackPressure),
+            other => panic!("expected back-pressure rejection, got {other:?}"),
+        }
+
+        // Application catches up and drains the channel.
+        assert_eq!(rx.try_recv().ok(), Some(Jog { delta: 1.0 }));
+
+        // Retry the SAME id X: the transient rejection must not be cached, so
+        // this re-dispatches, is Accepted, and the effect IS enqueued.
+        transport.push(corr(2), jog_invocation(2.0));
+        handler.poll();
+        assert_eq!(
+            transport.last_ack(),
+            Some(Ack::Accepted),
+            "a transient BackPressure must be retryable under the same id"
+        );
+        assert_eq!(
+            rx.try_recv().ok(),
+            Some(Jog { delta: 2.0 }),
+            "the retry must enqueue the effect"
+        );
     }
 
     #[test]
