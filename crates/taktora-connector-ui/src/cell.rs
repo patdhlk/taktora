@@ -23,12 +23,13 @@
 //! residual strict-aliasing caveat of the racy read is inherent to the seqlock
 //! pattern; a fully MIRI-clean per-word-atomic variant is deferred.
 //!
-//! The single-producer / single-consumer invariant is a **user contract, not
-//! type-enforced**: [`SeqlockBytes`] is `Sync` so a [`Property`](crate::Property)
-//! and its pump clone can hold it across threads. Calling
-//! [`write`](SeqlockBytes::write) from more than one thread concurrently is a
-//! data race on the payload — drive each cell from a single RT task (the
-//! documented use).
+//! The single-producer invariant is **type-enforced** one level up:
+//! [`SeqlockBytes::write`] is `pub(crate)`, reachable only through the move-only
+//! [`Property`](crate::Property) handle, of which exactly one can exist per cell
+//! (it is not `Clone`). [`SeqlockBytes`] is `Sync` so that `Property` and the
+//! clone-able [`PropertyReader`](crate::property::PropertyReader)s can hold it
+//! across threads; concurrent *readers* are sound for a seqlock, and the unique
+//! writer rules out the two-writer data race at the type level.
 
 // The seqlock requires `unsafe` to mediate the racy read of `UnsafeCell` bytes
 // across threads; the crate otherwise forbids it via `#![deny(unsafe_code)]`.
@@ -57,7 +58,7 @@ const READ_RETRY_LIMIT: u32 = 64;
 
 /// A latest-value seqlock cell holding `len` bytes (the integer-lowered image
 /// of one ViewModel). Single producer, single consumer; never blocks.
-pub struct SeqlockBytes {
+pub(crate) struct SeqlockBytes {
     /// Sequence of the bytes currently in `buf`, with [`WRITING`] set
     /// transiently while they are being overwritten. `0` means "never written".
     seq: AtomicU64,
@@ -94,26 +95,18 @@ impl SeqlockBytes {
         }
     }
 
-    /// The fixed image length this cell holds.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Whether the cell holds zero bytes.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
     /// Publish `src` as the latest value. Wait-free, allocation-free. Must be
-    /// called from a single thread (the RT producer).
+    /// called from a single thread (the RT producer); `pub(crate)` so only the
+    /// move-only [`Property`](crate::Property) can drive the producer side.
     ///
     /// # Panics
     ///
-    /// In debug builds, panics if `src.len()` differs from the cell length.
-    pub fn write(&self, src: &[u8]) {
-        debug_assert_eq!(src.len(), self.len, "image length mismatch");
+    /// Panics if `src.len()` differs from the cell length. This is a real
+    /// `assert_eq!` (negligible next to the byte copy below): it is
+    /// defense-in-depth against an out-of-bounds `copy_nonoverlapping`, since
+    /// the copy length is `self.len` and a shorter `src` would read OOB.
+    pub(crate) fn write(&self, src: &[u8]) {
+        assert_eq!(src.len(), self.len, "image length mismatch");
 
         // SAFETY: `write_seq` is producer-owned (single-producer contract), so
         // this is the only thread reading or writing it; no aliasing.
@@ -187,8 +180,9 @@ impl SeqlockBytes {
         false
     }
 
-    /// Convenience reader that allocates a fresh `Vec`. Intended for tests; the
-    /// RT/pump paths use [`read_into`](Self::read_into) to stay alloc-free.
+    /// Convenience reader that allocates a fresh `Vec`. Test-only; the RT/pump
+    /// paths use [`read_into`](Self::read_into) to stay alloc-free.
+    #[cfg(test)]
     #[must_use]
     pub fn read(&self) -> Option<Vec<u8>> {
         let mut buf = Vec::new();
@@ -230,13 +224,6 @@ mod tests {
     }
 
     #[test]
-    fn len_and_is_empty_report_image_size() {
-        assert_eq!(SeqlockBytes::with_len(16).len(), 16);
-        assert!(SeqlockBytes::with_len(0).is_empty());
-        assert!(!SeqlockBytes::with_len(1).is_empty());
-    }
-
-    #[test]
     fn read_under_concurrent_writes_is_never_torn() {
         use std::sync::Arc;
         use std::sync::atomic::AtomicBool;
@@ -257,8 +244,10 @@ mod tests {
         });
 
         let mut buf = Vec::new();
+        let mut successful_reads: u64 = 0;
         for _ in 0..200_000 {
             if cell.read_into(&mut buf) {
+                successful_reads += 1;
                 let first = buf[0];
                 assert!(
                     buf.iter().all(|&b| b == first),
@@ -269,5 +258,12 @@ mod tests {
 
         stop.store(true, Ordering::Relaxed);
         writer.join().unwrap();
+
+        // Guard against a vacuous pass: if the loop never observed a tear-free
+        // value the "never torn" assertion above would be trivially satisfied.
+        assert!(
+            successful_reads > 0,
+            "stress test made no successful reads — torn-read assertion was vacuous"
+        );
     }
 }

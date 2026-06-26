@@ -1,4 +1,5 @@
-//! Integration tests for the server-side `Property<V>` RT-update handle.
+//! Integration tests for the server-side `Property<V>` RT-update handle and its
+//! clone-able `PropertyReader<V>` pump-side reader.
 
 use serde::Serialize;
 use taktora_connector_ui::{ImageEnum, Property, ViewModel};
@@ -21,7 +22,7 @@ struct StepperVm {
 #[test]
 fn snapshot_is_none_before_first_set() {
     let prop = Property::<StepperVm>::new();
-    assert_eq!(prop.snapshot(), None);
+    assert_eq!(prop.reader().snapshot(), None);
 }
 
 #[test]
@@ -33,7 +34,7 @@ fn set_then_snapshot_round_trips() {
         state: StepperState::Running,
     };
     prop.set(&vm);
-    assert_eq!(prop.snapshot(), Some(vm));
+    assert_eq!(prop.reader().snapshot(), Some(vm));
 }
 
 #[test]
@@ -50,13 +51,13 @@ fn snapshot_returns_latest_set() {
         state: StepperState::Faulted,
     };
     prop.set(&latest);
-    assert_eq!(prop.snapshot(), Some(latest));
+    assert_eq!(prop.reader().snapshot(), Some(latest));
 }
 
 #[test]
-fn clone_shares_the_cell_with_the_pump_side() {
+fn reader_shares_the_cell_with_the_pump_side() {
     let rt = Property::<StepperVm>::new();
-    let pump = rt.clone();
+    let pump = rt.reader();
     let vm = StepperVm {
         active: true,
         position: 7.0,
@@ -67,16 +68,32 @@ fn clone_shares_the_cell_with_the_pump_side() {
 }
 
 #[test]
+fn cloned_readers_observe_the_same_latest_value() {
+    let rt = Property::<StepperVm>::new();
+    let reader_a = rt.reader();
+    let reader_b = reader_a.clone();
+    let vm = StepperVm {
+        active: false,
+        position: 9.0,
+        state: StepperState::Faulted,
+    };
+    rt.set(&vm);
+    assert_eq!(reader_a.snapshot(), Some(vm.clone()));
+    assert_eq!(reader_b.snapshot(), Some(vm));
+}
+
+#[test]
 fn snapshot_into_reuses_buffer_and_avoids_realloc_when_warm() {
     let prop = Property::<StepperVm>::new();
+    let reader = prop.reader();
     let mut buf = Vec::new();
-    assert_eq!(prop.snapshot_into(&mut buf), None);
+    assert_eq!(reader.snapshot_into(&mut buf), None);
     prop.set(&StepperVm {
         active: true,
         position: 3.0,
         state: StepperState::Idle,
     });
-    let got = prop.snapshot_into(&mut buf).unwrap();
+    let got = reader.snapshot_into(&mut buf).unwrap();
     assert_eq!(got.position, 3.0);
     let cap = buf.capacity();
     // Second warm call must not grow the buffer.
@@ -85,7 +102,7 @@ fn snapshot_into_reuses_buffer_and_avoids_realloc_when_warm() {
         position: 4.0,
         state: StepperState::Running,
     });
-    let _ = prop.snapshot_into(&mut buf).unwrap();
+    let _ = reader.snapshot_into(&mut buf).unwrap();
     assert_eq!(buf.capacity(), cap, "warm snapshot reallocated");
 }
 
@@ -95,12 +112,13 @@ fn concurrent_set_and_snapshot_never_reconstructs_an_invalid_image() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
 
-    let rt = Arc::new(Property::<StepperVm>::new());
+    let rt = Property::<StepperVm>::new();
+    let reader = rt.reader();
     let stop = Arc::new(AtomicBool::new(false));
 
     let writer = {
-        let rt = Arc::clone(&rt);
         let stop = Arc::clone(&stop);
+        // `rt` is move-only (the sole writer); hand it to the writer thread.
         thread::spawn(move || {
             let states = [
                 StepperState::Idle,
@@ -127,10 +145,11 @@ fn concurrent_set_and_snapshot_never_reconstructs_an_invalid_image() {
         })
     };
 
-    let reader = rt.clone();
     let mut buf = Vec::new();
+    let mut successful_reads: u64 = 0;
     for _ in 0..200_000 {
         if let Some(vm) = reader.snapshot_into(&mut buf) {
+            successful_reads += 1;
             let expected = match vm.state {
                 StepperState::Idle => 1.0,
                 StepperState::Running => 2.0,
@@ -146,4 +165,11 @@ fn concurrent_set_and_snapshot_never_reconstructs_an_invalid_image() {
 
     stop.store(true, Ordering::Relaxed);
     writer.join().unwrap();
+
+    // Guard against a vacuous pass: if no snapshot ever succeeded the torn-read
+    // assertion in the loop would be trivially satisfied.
+    assert!(
+        successful_reads > 0,
+        "stress test made no successful reads — torn-read assertion was vacuous"
+    );
 }

@@ -1,11 +1,19 @@
 //! [`Property<V>`]: the server-side handle that publishes a [`ViewModel`] into
-//! its [`SeqlockBytes`] cell.
+//! its [`SeqlockBytes`] cell, and [`PropertyReader<V>`]: the clone-able pump-side
+//! reader of that cell.
 //!
 //! A `Property` is a cheap (`Arc`-backed) handle around one latest-value cell.
 //! The RT control task calls [`Property::set`] once per cycle (allocation-free,
-//! never blocks); a clone handed to the non-RT pump calls
-//! [`Property::snapshot`] / [`snapshot_into`](Property::snapshot_into) to
-//! reconstruct the typed ViewModel for JSON encoding off the RT path.
+//! never blocks). It is the **sole writer**: `Property` is move-only (not
+//! `Clone`), so the seqlock's single-producer invariant is enforced at the type
+//! level — there is no way to obtain a second writer for the same cell.
+//!
+//! Reads go through [`PropertyReader<V>`], obtained via [`Property::reader`].
+//! The reader *is* `Clone`-able: a seqlock tolerates any number of concurrent
+//! readers, so the non-RT pump may hand clones to multiple consumers. A reader
+//! calls [`snapshot`](PropertyReader::snapshot) /
+//! [`snapshot_into`](PropertyReader::snapshot_into) to reconstruct the typed
+//! ViewModel for JSON encoding off the RT path.
 //!
 //! # Image-byte soundness
 //!
@@ -37,21 +45,16 @@ use std::sync::Arc;
 use crate::cell::SeqlockBytes;
 use crate::viewmodel::ViewModel;
 
-/// A handle that publishes a [`ViewModel`] into one latest-value seqlock cell.
+/// The sole, move-only writer that publishes a [`ViewModel`] into one
+/// latest-value seqlock cell.
 ///
-/// Clone it to share the same cell between the RT setter and the non-RT pump.
+/// `Property` is intentionally **not** `Clone`: the seqlock is sound with many
+/// readers but is undefined behaviour with two concurrent writers, so the only
+/// writer handle is move-only and unique by construction. Obtain clone-able
+/// reader handles for the non-RT pump via [`reader`](Self::reader).
 pub struct Property<V: ViewModel> {
     cell: Arc<SeqlockBytes>,
     _marker: PhantomData<fn() -> V>,
-}
-
-impl<V: ViewModel> Clone for Property<V> {
-    fn clone(&self) -> Self {
-        Self {
-            cell: Arc::clone(&self.cell),
-            _marker: PhantomData,
-        }
-    }
 }
 
 impl<V: ViewModel> Default for Property<V> {
@@ -63,7 +66,7 @@ impl<V: ViewModel> Default for Property<V> {
 impl<V: ViewModel> Property<V> {
     /// Create a property with a freshly allocated cell sized to `V::IMAGE_SIZE`.
     /// This is the only allocation on the property's lifecycle; neither
-    /// [`set`](Self::set) nor [`snapshot_into`](Self::snapshot_into) allocates.
+    /// [`set`](Self::set) nor [`PropertyReader::snapshot_into`] allocates.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -72,11 +75,17 @@ impl<V: ViewModel> Property<V> {
         }
     }
 
-    /// Clone the underlying cell handle. Equivalent to [`Clone::clone`]; named
-    /// for the pump-side call site.
+    /// Obtain a clone-able reader handle for the non-RT pump.
+    ///
+    /// A seqlock tolerates any number of concurrent readers, so the returned
+    /// [`PropertyReader`] (and its clones) may read the cell from any thread
+    /// while this `Property` drives the single writer.
     #[must_use]
-    pub fn pump_handle(&self) -> Self {
-        self.clone()
+    pub fn reader(&self) -> PropertyReader<V> {
+        PropertyReader {
+            cell: Arc::clone(&self.cell),
+            _marker: PhantomData,
+        }
     }
 
     /// Publish `vm` as the latest value. Runs on the RT path: lowers `vm` to its
@@ -96,10 +105,32 @@ impl<V: ViewModel> Property<V> {
         };
         self.cell.write(bytes);
     }
+}
 
+/// A clone-able reader of the [`ViewModel`] published by a [`Property`].
+///
+/// Obtained via [`Property::reader`]. Reading concurrently from multiple
+/// `PropertyReader` clones is sound: a seqlock supports any number of readers
+/// (only multiple *writers* would be undefined behaviour, which the move-only
+/// [`Property`] prevents). Each clone shares the same underlying cell.
+pub struct PropertyReader<V: ViewModel> {
+    cell: Arc<SeqlockBytes>,
+    _marker: PhantomData<fn() -> V>,
+}
+
+impl<V: ViewModel> Clone for PropertyReader<V> {
+    fn clone(&self) -> Self {
+        Self {
+            cell: Arc::clone(&self.cell),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<V: ViewModel> PropertyReader<V> {
     /// Reconstruct the latest tear-free ViewModel into a caller-owned byte
     /// buffer (reused across calls; alloc-free once warm). Returns `None` if the
-    /// property was never [`set`](Self::set) or the cell stayed torn.
+    /// property was never [`set`](Property::set) or the cell stayed torn.
     ///
     /// Runs off the RT path (the pump).
     pub fn snapshot_into(&self, buf: &mut Vec<u8>) -> Option<V> {

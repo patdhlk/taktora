@@ -20,19 +20,22 @@
 #![deny(unsafe_code)]
 
 pub mod bounded_string;
-pub mod cell;
 pub mod command;
 pub mod property;
 pub mod routing;
 pub mod viewmodel;
 
+// The seqlock cell is an internal implementation detail of `Property`; it is
+// crate-private so the only way to drive the producer side is the move-only
+// `Property` handle (single-writer invariant, type-enforced).
+mod cell;
+
 /// The language-neutral MVVM contract (manifest, schema, ack, hash).
 pub use taktora_connector_ui_contract as contract;
 
 pub use bounded_string::BoundedString;
-pub use cell::SeqlockBytes;
 pub use command::CommandParams;
-pub use property::Property;
+pub use property::{Property, PropertyReader};
 pub use routing::UiRouting;
 pub use viewmodel::{ImageEnum, ViewModel};
 
