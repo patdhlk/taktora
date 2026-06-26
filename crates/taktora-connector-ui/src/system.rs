@@ -1,0 +1,154 @@
+//! [`SystemViewModel`]: the mandatory liveness heartbeat (`REQ_0879`).
+//!
+//! The connector **always** publishes a `SystemViewModel` carrying a monotonic
+//! `counter` that advances every pump tick and a process `epoch` that uniquely
+//! identifies this application instance. It is the canonical "application alive
+//! and pump running" signal — distinguishable from a static-but-live ViewModel —
+//! and is exempt from the zero-subscriber skip (`REQ_0862`) so a UI can always
+//! attach and detect liveness.
+//!
+//! # Epoch derivation (no wall-clock)
+//!
+//! `REQ_0879` requires only that the epoch *uniquely identify the process
+//! instance*, not global uniqueness. [`default_epoch`] therefore uses
+//! [`std::process::id`] — distinct between two concurrently-running taktora
+//! applications, and changed across a restart (the OS hands out a fresh pid),
+//! which is exactly what `REQ_0882` (application restart bumps epoch) needs. It
+//! deliberately avoids ambient wall-clock, and is stable within one process (a
+//! `OnceLock` caches the first observation). A caller may override it via
+//! [`system_entry`]'s `epoch` argument.
+
+use std::sync::OnceLock;
+
+use serde::Serialize;
+use taktora_connector_ui_contract::{FieldSchema, FieldType, ViewModelSchema};
+
+use crate::pump::{EncodeFn, PumpEntry, VmPublisher};
+
+/// The logical name of the heartbeat ViewModel (and its manifest entry).
+pub const SYSTEM_VIEW_MODEL_NAME: &str = "System";
+
+/// The mandatory liveness heartbeat ViewModel (`REQ_0879`).
+///
+/// Both fields are `u64`, so this is a plain POD struct; it is hand-described
+/// via [`SystemViewModel::schema`] rather than `#[derive(ViewModel)]` because
+/// the derive targets `::taktora_connector_ui` and cannot run inside this crate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct SystemViewModel {
+    /// Monotonic counter, advanced once per pump tick.
+    pub counter: u64,
+    /// Process-unique epoch identifying this application instance.
+    pub epoch: u64,
+}
+
+impl SystemViewModel {
+    /// The manifest schema contribution for the heartbeat.
+    #[must_use]
+    pub fn schema() -> ViewModelSchema {
+        ViewModelSchema {
+            name: SYSTEM_VIEW_MODEL_NAME.to_owned(),
+            service: String::new(),
+            fields: vec![
+                FieldSchema {
+                    name: "counter".to_owned(),
+                    ty: FieldType::U64,
+                },
+                FieldSchema {
+                    name: "epoch".to_owned(),
+                    ty: FieldType::U64,
+                },
+            ],
+        }
+    }
+}
+
+/// The process epoch: [`std::process::id`], cached so it is stable within the
+/// process (see the module docs for why this satisfies `REQ_0879`/`REQ_0882`
+/// without wall-clock).
+#[must_use]
+pub fn default_epoch() -> u64 {
+    static EPOCH: OnceLock<u64> = OnceLock::new();
+    *EPOCH.get_or_init(|| u64::from(std::process::id()))
+}
+
+/// Build the exempt pump entry that publishes the [`SystemViewModel`] heartbeat.
+///
+/// The returned entry is exempt from the zero-subscriber skip and advances its
+/// `counter` every tick, always reporting a change so it publishes each tick.
+#[must_use]
+pub fn system_entry<P>(epoch: u64, publisher: P) -> PumpEntry
+where
+    P: VmPublisher + 'static,
+{
+    let mut counter: u64 = 0;
+    let encode: EncodeFn = Box::new(move |out: &mut Vec<u8>| {
+        let vm = SystemViewModel { counter, epoch };
+        counter = counter.wrapping_add(1);
+        out.clear();
+        serde_json::to_writer(&mut *out, &vm).ok()?;
+        Some(true)
+    });
+    PumpEntry::new(SYSTEM_VIEW_MODEL_NAME, true, encode, Box::new(publisher))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pump::{MockPublisher, Pump};
+
+    fn parse(bytes: &[u8]) -> SystemViewModel {
+        // SystemViewModel is serialize-only (it is only ever published); parse
+        // the wire JSON via a generic Value in tests rather than widening the
+        // type with a Deserialize derive it does not otherwise need.
+        let v: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        SystemViewModel {
+            counter: v["counter"].as_u64().unwrap(),
+            epoch: v["epoch"].as_u64().unwrap(),
+        }
+    }
+
+    #[test]
+    fn schema_describes_counter_and_epoch() {
+        let s = SystemViewModel::schema();
+        assert_eq!(s.name, "System");
+        assert_eq!(s.fields.len(), 2);
+        assert_eq!(s.fields[0].name, "counter");
+        assert_eq!(s.fields[1].name, "epoch");
+    }
+
+    #[test]
+    fn epoch_is_stable_within_the_process() {
+        assert_eq!(default_epoch(), default_epoch());
+    }
+
+    #[test]
+    fn counter_advances_each_tick() {
+        let mock = MockPublisher::new(); // zero subscribers on purpose
+        let mut pump = Pump::new();
+        pump.add_entry(system_entry(7, mock.clone()));
+
+        pump.tick();
+        pump.tick();
+        pump.tick();
+
+        let published = mock.published();
+        assert_eq!(published.len(), 3, "heartbeat must publish every tick");
+        let counters: Vec<u64> = published.iter().map(|b| parse(b).counter).collect();
+        assert_eq!(counters, vec![0, 1, 2]);
+        // Epoch is constant across ticks.
+        for b in &published {
+            assert_eq!(parse(b).epoch, 7);
+        }
+    }
+
+    #[test]
+    fn heartbeat_is_exempt_from_zero_subscriber_skip() {
+        let mock = MockPublisher::new(); // zero subscribers
+        let mut pump = Pump::new();
+        pump.add_entry(system_entry(default_epoch(), mock.clone()));
+
+        let stats = pump.tick();
+        assert_eq!(stats.published, 1);
+        assert_eq!(stats.skipped_zero_sub, 0);
+    }
+}

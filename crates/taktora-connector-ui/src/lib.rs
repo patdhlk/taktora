@@ -26,6 +26,7 @@ pub mod manifest;
 pub mod property;
 pub mod pump;
 pub mod routing;
+pub mod system;
 pub mod viewmodel;
 
 // The seqlock cell is an internal implementation detail of `Property`; it is
@@ -46,6 +47,7 @@ pub use pump::{
     property_entry,
 };
 pub use routing::UiRouting;
+pub use system::SystemViewModel;
 pub use viewmodel::{ImageEnum, ViewModel};
 
 // Re-export the authoring derive macros so an application only depends on this
