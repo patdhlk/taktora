@@ -297,14 +297,22 @@ pub struct PumpHandle {
 
 impl PumpHandle {
     /// Signal the pump to perform one final tick, then join it. Returns the
-    /// total number of envelopes published over the thread's lifetime.
+    /// total number of envelopes published over the thread's lifetime, or `0` if
+    /// the pump thread had panicked.
     ///
-    /// # Panics
-    ///
-    /// Panics if the pump thread panicked.
+    /// A join error is logged and swallowed rather than propagated as a panic:
+    /// this runs on [`UiConnector`](crate::UiConnector)'s `Drop` path, where a
+    /// panic would be a panic-in-`Drop` (process abort). The happy path is
+    /// unchanged.
     pub fn stop(self) -> u64 {
         self.stop.store(true, Ordering::Release);
-        self.handle.join().expect("pump thread panicked")
+        match self.handle.join() {
+            Ok(total) => total,
+            Err(_) => {
+                tracing::error!("ui pump thread panicked; ignoring join error during shutdown");
+                0
+            }
+        }
     }
 }
 

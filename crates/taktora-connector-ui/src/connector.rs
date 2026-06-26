@@ -90,6 +90,10 @@ type EntryBuilder =
 struct VmRegistration {
     name: String,
     schema: ViewModelSchema,
+    /// `V::MAX_ENCODED_SIZE`, captured at authoring time so
+    /// [`register_with`](Connector::register_with) can fail fast when a single
+    /// ViewModel's worst-case JSON cannot fit [`ENVELOPE_CAPACITY`].
+    max_encoded_size: usize,
     build_entry: EntryBuilder,
 }
 
@@ -186,6 +190,7 @@ impl<C: PayloadCodec> UiConnector<C> {
     /// # Panics
     ///
     /// Panics if called after [`register_with`](Connector::register_with).
+    #[must_use = "the returned Property is the only writer; dropping it means the ViewModel never updates"]
     pub fn add_view_model<V>(&mut self, name: &str) -> Property<V>
     where
         V: ViewModel + Serialize + Send + 'static,
@@ -203,6 +208,7 @@ impl<C: PayloadCodec> UiConnector<C> {
         self.vm_regs.push(VmRegistration {
             name: name.to_owned(),
             schema,
+            max_encoded_size: V::MAX_ENCODED_SIZE,
             build_entry,
         });
         prop
@@ -218,6 +224,7 @@ impl<C: PayloadCodec> UiConnector<C> {
     /// # Panics
     ///
     /// Panics if called after [`register_with`](Connector::register_with).
+    #[must_use = "the returned Property is the only writer; dropping it means the ViewModel never updates"]
     pub fn add_hot_scalar<T>(&mut self, name: &str) -> Property<HotScalar<T>>
     where
         T: HotScalarValue,
@@ -238,6 +245,7 @@ impl<C: PayloadCodec> UiConnector<C> {
     /// # Panics
     ///
     /// Panics if called after [`register_with`](Connector::register_with).
+    #[must_use]
     pub fn add_command<P>(&mut self, name: &str) -> (Receiver<P>, CanExecute)
     where
         P: CommandParams + DeserializeOwned + Send + 'static,
@@ -324,6 +332,29 @@ where
             manifest_builder = manifest_builder.with_command(reg.schema.clone());
         }
         let manifest = manifest_builder.build();
+
+        // Fail fast on an oversized envelope (`ENVELOPE_CAPACITY` is fixed for
+        // every UI service). The manifest is the sole source of service names, so
+        // a manifest that cannot fit the envelope would silently disable the
+        // whole UI plane at runtime (the pump only logs + degrades health).
+        // Catch it at registration instead, before any service is opened.
+        let encoded_manifest = serde_json::to_vec(&manifest).map_err(ConnectorError::stack)?;
+        if encoded_manifest.len() > ENVELOPE_CAPACITY {
+            return Err(ConnectorError::PayloadOverflow {
+                actual: encoded_manifest.len(),
+                max: ENVELOPE_CAPACITY,
+            });
+        }
+        // Likewise, a single ViewModel whose worst-case JSON exceeds the envelope
+        // can never publish; reject it here rather than at the first pump tick.
+        for reg in &vm_regs {
+            if reg.max_encoded_size > ENVELOPE_CAPACITY {
+                return Err(ConnectorError::PayloadOverflow {
+                    actual: reg.max_encoded_size,
+                    max: ENVELOPE_CAPACITY,
+                });
+            }
+        }
 
         // Assemble the pump and command handler under one node borrow, so the
         // borrow is released before we mutate `self` (store the handles) below.
@@ -522,6 +553,40 @@ mod tests {
         }
     }
 
+    /// A ViewModel whose worst-case JSON cannot fit [`ENVELOPE_CAPACITY`].
+    /// Its `MAX_ENCODED_SIZE` deliberately overflows the fixed envelope so
+    /// registration must reject it (the encoded bytes are irrelevant — the
+    /// associated const alone drives the fail-fast check).
+    #[derive(Clone, Debug, PartialEq, Serialize)]
+    struct Big {
+        v: f64,
+    }
+
+    impl ViewModel for Big {
+        type Image = ScalarImage;
+        const IMAGE_SIZE: usize = core::mem::size_of::<ScalarImage>();
+        const MAX_ENCODED_SIZE: usize = ENVELOPE_CAPACITY + 1;
+        fn schema() -> ViewModelSchema {
+            ViewModelSchema {
+                name: "Big".into(),
+                service: String::new(),
+                fields: vec![taktora_connector_ui_contract::FieldSchema {
+                    name: "v".into(),
+                    ty: taktora_connector_ui_contract::FieldType::F64,
+                }],
+            }
+        }
+        fn to_image(&self) -> ScalarImage {
+            ScalarImage { v: self.v }
+        }
+        fn from_image(image: &ScalarImage) -> Self {
+            Self { v: image.v }
+        }
+        fn image_to_json(image: &ScalarImage, buf: &mut Vec<u8>) {
+            serde_json::to_writer(buf, &Self::from_image(image)).expect("infallible");
+        }
+    }
+
     #[derive(Clone, Debug, PartialEq, Deserialize)]
     struct Jog {
         delta: f64,
@@ -610,6 +675,26 @@ mod tests {
             .expect("executor");
         c.register_with(&mut executor).expect("register");
         let _ = c.add_command::<Jog>("late");
+    }
+
+    #[test]
+    fn register_with_oversized_view_model_returns_payload_overflow() {
+        // A ViewModel whose MAX_ENCODED_SIZE exceeds the fixed envelope must be
+        // rejected at registration (fail fast) rather than silently degrading the
+        // whole UI plane at runtime.
+        let mut c = connector();
+        let _writer = c.add_view_model::<Big>("Big");
+        let mut executor = Executor::builder()
+            .worker_threads(0)
+            .build()
+            .expect("executor");
+        match c.register_with(&mut executor) {
+            Err(ConnectorError::PayloadOverflow { actual, max }) => {
+                assert_eq!(actual, Big::MAX_ENCODED_SIZE);
+                assert_eq!(max, UiConnector::<JsonCodec>::ENVELOPE_CAPACITY);
+            }
+            other => panic!("expected PayloadOverflow, got {other:?}"),
+        }
     }
 
     #[test]
