@@ -1,5 +1,5 @@
 //! [`Property<V>`]: the server-side handle that publishes a [`ViewModel`] into
-//! its [`SeqlockBytes`] cell, and [`PropertyReader<V>`]: the clone-able pump-side
+//! its `SeqlockBytes` cell, and [`PropertyReader<V>`]: the clone-able pump-side
 //! reader of that cell.
 //!
 //! A `Property` is a cheap (`Arc`-backed) handle around one latest-value cell.
