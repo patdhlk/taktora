@@ -27,6 +27,7 @@ members = [
     "crates/taktora-connector-ui-derive",
     "crates/taktora-connector-ui",
     "crates/taktora-connector-ui-client",
+    "crates/taktora-connector-ui-adapters",
     "crates/taktora-connector-ui-tests",
     "crates/taktora-connector-zenoh",
     "crates/taktora-connector-zenoh-tests",
