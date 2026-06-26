@@ -83,7 +83,10 @@ typos
 - `unsafe`: every block needs a `// SAFETY:` comment naming the
   invariant.
 - New connectors: ship a mock back-end alongside the real one,
-  gate the real one behind a `*-integration` Cargo feature.
+  gate the real one behind a `*-integration` Cargo feature. See the
+  step-by-step [Adding a new connector](docs/guides/adding-a-connector.md)
+  guide for the full recipe (spec loop, crate scaffold, the `Connector`
+  contract, tests, and the build/lint gate).
 - Tests for cross-crate behavior live in dedicated `*-tests`
   crates (e.g. `taktora-connector-ethercat-tests`).
 
