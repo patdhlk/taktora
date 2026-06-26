@@ -135,6 +135,10 @@ pub struct Client {
     vms: HashMap<String, VmSub>,
     can_exec: HashMap<String, CanSub>,
     cmd_ports: HashMap<String, CmdPort>,
+    /// A reusable receive buffer for the per-tick reads (`poll_view_model`,
+    /// `poll_can_execute`, `refresh_manifest`), sized once to
+    /// [`ENVELOPE_CAPACITY`] so those paths allocate no scratch per call.
+    scratch: Vec<u8>,
 }
 
 impl Client {
@@ -180,6 +184,7 @@ impl Client {
             vms: HashMap::new(),
             can_exec: HashMap::new(),
             cmd_ports: HashMap::new(),
+            scratch: vec![0u8; ENVELOPE_CAPACITY],
         })
     }
 
@@ -211,21 +216,28 @@ impl Client {
     /// Returns a transport / codec error if the latest manifest cannot be read.
     pub fn refresh_manifest(&mut self) -> Result<bool, ClientError> {
         let previous_epoch = self.manifest.epoch;
-        let mut scratch = vec![0u8; ENVELOPE_CAPACITY];
-        self.refresh_manifest_into(&mut scratch)?;
+        self.refresh_manifest_into()?;
         Ok(self.manifest.epoch != previous_epoch)
     }
 
     /// Drain the manifest reader to the newest sample; if a manifest arrived,
     /// replace the held one and recompute the bind mode. Returns the current
-    /// epoch.
-    fn refresh_manifest_into(&mut self, scratch: &mut [u8]) -> Result<u64, ClientError> {
-        if let Some((bytes, _)) = drain_latest(&self.manifest_reader, scratch)? {
-            let manifest: Manifest = serde_json::from_slice(&bytes)?;
-            self.mode = bind_mode_for(&self.expected_hash, &manifest);
-            self.manifest = manifest;
+    /// epoch. Reuses the shared [`Client::scratch`] buffer.
+    fn refresh_manifest_into(&mut self) -> Result<u64, ClientError> {
+        let Self {
+            manifest_reader,
+            scratch,
+            mode,
+            manifest,
+            expected_hash,
+            ..
+        } = self;
+        if let Some((bytes, _)) = drain_latest(manifest_reader, scratch)? {
+            let next: Manifest = serde_json::from_slice(&bytes)?;
+            *mode = bind_mode_for(expected_hash, &next);
+            *manifest = next;
         }
-        Ok(self.manifest.epoch)
+        Ok(manifest.epoch)
     }
 
     /// Subscribe to the ViewModel named `vm_name` (service from the manifest,
@@ -270,12 +282,11 @@ impl Client {
     /// Returns [`ClientError::UnknownViewModel`] if not subscribed, or a
     /// transport / codec error.
     pub fn poll_view_model(&mut self, vm_name: &str) -> Result<Vec<PropertyChange>, ClientError> {
-        let mut scratch = vec![0u8; ENVELOPE_CAPACITY];
-        let sub = self
-            .vms
+        let Self { vms, scratch, .. } = self;
+        let sub = vms
             .get_mut(vm_name)
             .ok_or_else(|| ClientError::UnknownViewModel(vm_name.to_owned()))?;
-        let Some((bytes, sample)) = drain_latest(&sub.reader, &mut scratch)? else {
+        let Some((bytes, sample)) = drain_latest(&sub.reader, scratch)? else {
             return Ok(Vec::new());
         };
         let value: Value = serde_json::from_slice(&bytes)?;
@@ -346,13 +357,19 @@ impl Client {
     ///
     /// Returns a transport / codec error if a sample cannot be read / parsed.
     pub fn poll_can_execute(&mut self, command: &str) -> Result<Option<bool>, ClientError> {
-        let mut scratch = vec![0u8; ENVELOPE_CAPACITY];
-        let Some(sub) = self.can_exec.get_mut(command) else {
+        let Self {
+            can_exec, scratch, ..
+        } = self;
+        let Some(sub) = can_exec.get_mut(command) else {
             return Ok(None);
         };
-        if let Some((bytes, _)) = drain_latest(&sub.reader, &mut scratch)? {
-            let value: bool = serde_json::from_slice(&bytes)?;
-            sub.last = Some(value);
+        if let Some((bytes, _)) = drain_latest(&sub.reader, scratch)? {
+            // A gate frame is always a JSON bool; skip a malformed (non-bool)
+            // frame and keep the last known value rather than erroring, so one
+            // bad frame can't wedge the UI (mirrors `poll_view_model`).
+            if let Ok(value) = serde_json::from_slice::<bool>(&bytes) {
+                sub.last = Some(value);
+            }
         }
         Ok(sub.last)
     }
@@ -380,7 +397,7 @@ impl Client {
         if !self.mode.commands_enabled() {
             return Err(ClientError::ReadOnly);
         }
-        let schema = self
+        let mut schema = self
             .manifest
             .commands
             .iter()
@@ -412,7 +429,7 @@ impl Client {
 
             // Timed out: re-read the manifest, re-validate the hash, rebind
             // (REQ_0882), then decide whether to retry.
-            let current_epoch = self.refresh_manifest_into(&mut scratch)?;
+            let current_epoch = self.refresh_manifest_into()?;
             if !self.mode.commands_enabled() {
                 // A restart changed the contract incompatibly -> read-only.
                 return Err(ClientError::ReadOnly);
@@ -424,7 +441,25 @@ impl Client {
                 attempts,
                 self.config.command.max_attempts,
             ) {
-                RetryDecision::Retry => continue,
+                RetryDecision::Retry => {
+                    if epoch_changed {
+                        // A restart (with a still-compatible contract): the
+                        // captured schema and the open command port may point at
+                        // the *pre-restart* incarnation's services. Re-resolve
+                        // the command from the refreshed manifest and reopen the
+                        // port before resending (REQ_0882).
+                        schema = self
+                            .manifest
+                            .commands
+                            .iter()
+                            .find(|c| c.name == command)
+                            .ok_or_else(|| ClientError::UnknownCommand(command.to_owned()))?
+                            .clone();
+                        self.cmd_ports.remove(command);
+                        self.ensure_command_port(&schema)?;
+                    }
+                    continue;
+                }
                 RetryDecision::GiveUp => {
                     return Err(ClientError::CommandTimeout {
                         command: command.to_owned(),
