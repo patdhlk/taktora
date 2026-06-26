@@ -160,9 +160,12 @@ enum EnqueueOutcome {
     Enqueued,
     /// The params were malformed (`RejectedCode::InvalidArgs`).
     InvalidArgs(String),
-    /// The effect channel was full or the application dropped its receiver
+    /// The effect channel was full — a transient condition the UI may retry
     /// (`RejectedCode::BackPressure`).
     BackPressure,
+    /// The application dropped its receiver — a non-transient fault, not
+    /// back-pressure (`RejectedCode::Faulted`).
+    Faulted,
 }
 
 /// A type-erased "parse JSON params and enqueue the effect" step for one
@@ -183,10 +186,11 @@ pub struct RegisteredCommand {
 impl RegisteredCommand {
     /// Build a command that parses params into `P` and enqueues them on `sender`.
     ///
-    /// Parsing failure yields [`RejectedCode::InvalidArgs`]; a full (or
-    /// disconnected) channel yields [`RejectedCode::BackPressure`] — never a
-    /// block or a silent drop (`REQ_0871`). The effect is only enqueued, never
-    /// run here (`REQ_0870`).
+    /// Parsing failure yields [`RejectedCode::InvalidArgs`]; a full channel
+    /// yields [`RejectedCode::BackPressure`] (transient, retryable) and a
+    /// disconnected channel (the application dropped its receiver) yields
+    /// [`RejectedCode::Faulted`] — never a block or a silent drop (`REQ_0871`).
+    /// The effect is only enqueued, never run here (`REQ_0870`).
     #[must_use]
     pub fn new<P>(can_execute: &CanExecute, sender: Sender<P>) -> Self
     where
@@ -196,9 +200,8 @@ impl RegisteredCommand {
             move |bytes: &[u8]| match serde_json::from_slice::<P>(bytes) {
                 Ok(parsed) => match sender.try_send(parsed) {
                     Ok(()) => EnqueueOutcome::Enqueued,
-                    Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
-                        EnqueueOutcome::BackPressure
-                    }
+                    Err(TrySendError::Full(_)) => EnqueueOutcome::BackPressure,
+                    Err(TrySendError::Disconnected(_)) => EnqueueOutcome::Faulted,
                 },
                 Err(e) => EnqueueOutcome::InvalidArgs(e.to_string()),
             },
@@ -370,6 +373,15 @@ impl DedupeCache {
 /// LRU. Drive it synchronously with [`poll`](Self::poll) (tests) or hand it to
 /// its own OS thread with [`spawn`](Self::spawn) (production). It never touches
 /// the executor's RT/WaitSet thread.
+///
+/// # Correlation-id uniqueness invariant
+///
+/// The single [`DedupeCache`] is keyed by the bare [`CorrelationId`] across
+/// **all** commands. Clients MUST mint globally-unique correlation ids across
+/// commands (the client mints them, `REQ_0867`); two distinct invocations
+/// sharing an id — even for different commands — is a client contract
+/// violation, and the second would be answered with the first's cached ack
+/// rather than re-dispatched.
 pub struct CommandHandler<T: CommandTransport> {
     transport: T,
     commands: HashMap<String, RegisteredCommand>,
@@ -389,8 +401,20 @@ impl<T: CommandTransport> CommandHandler<T> {
     }
 
     /// Register `command` under `name`. Returns `&mut self` for chaining.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name` is already registered. A duplicate command name is a
+    /// build-time configuration bug — the connector wires each command exactly
+    /// once at setup, off the UI-input path — so it fails loudly here rather
+    /// than silently overwriting the prior registration.
     pub fn register(&mut self, name: impl Into<String>, command: RegisteredCommand) -> &mut Self {
-        self.commands.insert(name.into(), command);
+        let name = name.into();
+        assert!(
+            !self.commands.contains_key(&name),
+            "duplicate command registration: '{name}' is already registered",
+        );
+        self.commands.insert(name, command);
         self
     }
 
@@ -452,6 +476,13 @@ impl<T: CommandTransport> CommandHandler<T> {
                 RejectedCode::BackPressure,
                 format!("command '{}' effect channel is full", invocation.name),
             ),
+            EnqueueOutcome::Faulted => rejected(
+                RejectedCode::Faulted,
+                format!(
+                    "command '{}' effect channel is disconnected (application receiver dropped)",
+                    invocation.name
+                ),
+            ),
         }
     }
 }
@@ -502,8 +533,27 @@ impl CommandHandlerHandle {
     }
 }
 
-/// Helper: build a rejection ack.
-fn rejected(code: RejectedCode, message: String) -> Ack {
+/// The maximum byte length of a [`Ack::Rejected`] `message`.
+///
+/// Rejection messages echo caller-controlled input (a command name, a serde
+/// parse error) and can be arbitrarily long. The encoded ack must fit the
+/// command envelope's payload capacity `N`, or [`reply`](CommandTransport::reply)
+/// returns [`ConnectorError::PayloadOverflow`] — which `poll` only logs, leaving
+/// the UI with no ack at all (a timeout). Truncating every message to this fixed
+/// cap keeps the encoded ack within `N` so the UI always gets an answer.
+const ACK_MESSAGE_CAP: usize = 200;
+
+/// Helper: build a rejection ack, truncating an oversized `message` to
+/// [`ACK_MESSAGE_CAP`] bytes on a UTF-8 char boundary so the encoded ack always
+/// fits the envelope.
+fn rejected(code: RejectedCode, mut message: String) -> Ack {
+    if message.len() > ACK_MESSAGE_CAP {
+        let mut end = ACK_MESSAGE_CAP;
+        while end > 0 && !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        message.truncate(end);
+    }
     Ack::Rejected { code, message }
 }
 
@@ -531,12 +581,19 @@ struct IoxCommandPort<const N: usize> {
 /// back-pressure, gating, unknown command) is covered by unit tests over
 /// [`MockCommandTransport`]; the heavy shared-memory round-trip lives in
 /// `taktora-connector-ui-tests`.
+///
+/// # Correlation-id uniqueness invariant
+///
+/// `pending` is keyed by the bare [`CorrelationId`] across **all** command
+/// ports, so clients MUST mint globally-unique correlation ids across commands
+/// (the client mints them, `REQ_0867`). Two in-flight invocations sharing an id
+/// — even on different command ports — is a client contract violation: the
+/// second overwrites the first's pending reply-routing entry.
 pub struct IoxCommandTransport<const N: usize> {
     commands: Vec<IoxCommandPort<N>>,
     pending: HashMap<CorrelationId, usize>,
     cursor: usize,
     recv_scratch: Vec<u8>,
-    send_scratch: Vec<u8>,
 }
 
 impl<const N: usize> Default for IoxCommandTransport<N> {
@@ -554,7 +611,6 @@ impl<const N: usize> IoxCommandTransport<N> {
             pending: HashMap::new(),
             cursor: 0,
             recv_scratch: vec![0u8; N],
-            send_scratch: vec![0u8; N],
         }
     }
 
@@ -563,14 +619,26 @@ impl<const N: usize> IoxCommandTransport<N> {
     /// The connector (Task 3.10) opens these raw handles against the
     /// instance-namespaced `request_service` / `reply_service` and hands them
     /// here. Returns `&mut self` for chaining.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name` is already registered. A duplicate command name is a
+    /// build-time configuration bug (commands are wired once at setup), so it
+    /// fails loudly here rather than adding a shadow port that could never be
+    /// reached by the round-robin receive.
     pub fn add_command(
         &mut self,
         name: impl Into<String>,
         reader: RawChannelReader<N>,
         writer: RawChannelWriter<N>,
     ) -> &mut Self {
+        let name = name.into();
+        assert!(
+            !self.commands.iter().any(|c| c.name == name),
+            "duplicate command registration: '{name}' is already registered",
+        );
         self.commands.push(IoxCommandPort {
-            name: name.into(),
+            name,
             reader,
             writer,
         });
@@ -623,10 +691,9 @@ impl<const N: usize> CommandTransport for IoxCommandTransport<N> {
                 max: N,
             });
         }
-        self.send_scratch[..encoded.len()].copy_from_slice(&encoded);
-        self.commands[idx]
-            .writer
-            .send_raw_bytes(&self.send_scratch[..encoded.len()], id)?;
+        // `encoded` is already a contiguous buffer; send it directly rather than
+        // copying through a scratch intermediate.
+        self.commands[idx].writer.send_raw_bytes(&encoded, id)?;
         Ok(())
     }
 }
@@ -932,6 +999,58 @@ mod tests {
         // poll must not panic even though every reply errors.
         assert_eq!(handler.poll(), 1);
         assert!(transport.replies().is_empty());
+    }
+
+    #[test]
+    fn disconnected_channel_rejects_with_faulted() {
+        // A dropped application receiver is a non-transient fault, not
+        // back-pressure: the handler must reject with Faulted, not BackPressure.
+        let (mut handler, transport, rx, _can) = handler_with_jog(4, true);
+        drop(rx); // application dropped its receiver.
+        transport.push(corr(1), jog_invocation(1.0));
+
+        handler.poll();
+
+        match transport.last_ack().unwrap() {
+            Ack::Rejected { code, .. } => assert_eq!(code, RejectedCode::Faulted),
+            other => panic!("expected faulted rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn oversized_rejection_message_is_capped() {
+        // An arbitrarily long (caller-controlled) rejection message must be
+        // truncated so the encoded ack always fits the envelope; otherwise the
+        // UI would get no ack at all (a PayloadOverflow the poll loop only logs).
+        let (mut handler, transport, _rx, _can) = handler_with_jog(4, true);
+        let long_name = "x".repeat(1000);
+        transport.push(corr(1), CommandInvocation::new(long_name, b"{}".to_vec()));
+
+        handler.poll();
+
+        match transport.last_ack().unwrap() {
+            Ack::Rejected { code, message } => {
+                assert_eq!(code, RejectedCode::UnknownCommand);
+                assert!(
+                    message.len() <= ACK_MESSAGE_CAP,
+                    "rejection message must be capped at {ACK_MESSAGE_CAP} bytes, got {}",
+                    message.len()
+                );
+            }
+            other => panic!("expected rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate command registration")]
+    fn duplicate_registration_panics() {
+        let transport = MockCommandTransport::new();
+        let can = CanExecute::new(true);
+        let (command_a, _rx_a) = command_channel::<Jog>(&can, 4);
+        let (command_b, _rx_b) = command_channel::<Jog>(&can, 4);
+        let mut handler = CommandHandler::new(transport, 16);
+        handler.register("jog", command_a);
+        handler.register("jog", command_b); // duplicate name -> panic.
     }
 
     #[test]
