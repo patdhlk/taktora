@@ -32,8 +32,15 @@ mod viewmodel;
 /// Derive the `ViewModel` trait for a POD struct.
 ///
 /// See the crate docs and `taktora_connector_ui::ViewModel`. Rejects non-POD
-/// field types (`Vec`, `String`, `HashMap`, `i128`, `u128`) at compile time.
-#[proc_macro_derive(ViewModel, attributes(viewmodel))]
+/// field types (`Vec`, `String`, `HashMap`, `i128`, `u128`) at compile time with
+/// a `compile_error!`.
+///
+/// Any field whose type is not a scalar, a fixed array, or a `BoundedString` is
+/// treated as a **C-like enum** implementing `ImageEnum`. **Nested POD structs
+/// are not yet supported** (deferred from REQ_0858): a nested-struct field is
+/// classified as an enum and fails to compile with the `ImageEnum`
+/// `#[diagnostic::on_unimplemented]` message rather than a `compile_error!`.
+#[proc_macro_derive(ViewModel)]
 pub fn derive_view_model(input: TokenStream) -> TokenStream {
     viewmodel::derive(input.into())
         .unwrap_or_else(syn::Error::into_compile_error)

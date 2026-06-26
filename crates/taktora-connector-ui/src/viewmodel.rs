@@ -23,6 +23,12 @@ use taktora_connector_ui_contract::{FieldType, ViewModelSchema};
 /// principle surface) is mapped to the **first declared variant**. This keeps
 /// reconstruction infallible and deterministic; round-tripping any *in-range*
 /// value through [`to_repr`](ImageEnum::to_repr) / `from_repr` is the identity.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be a ViewModel/command field",
+    label = "not a supported field type",
+    note = "ViewModel/command fields must be one of: bool, i8..i64, u8..u64, f32/f64, fixed arrays of those, BoundedString<CAP>, or a C-like enum deriving ImageEnum",
+    note = "nested POD structs are part of REQ_0858 but are not yet supported by the derive (deferred)"
+)]
 pub trait ImageEnum: Copy + Sized {
     /// The backing integer the enum lowers to (e.g. `u8`).
     type Repr: Copy + Send + 'static;

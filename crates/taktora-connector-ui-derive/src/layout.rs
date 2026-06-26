@@ -183,7 +183,11 @@ pub fn classify(ty: &Type) -> syn::Result<FieldKind> {
         return Ok(FieldKind::BoundedStr { cap });
     }
 
-    // Anything else is assumed to be a C-like enum implementing `ImageEnum`.
+    // Anything else (any non-scalar / non-array / non-`BoundedString` type) is
+    // treated as a C-like enum implementing `ImageEnum`. Nested POD structs are
+    // *not yet supported* (deferred from REQ_0858): a nested-struct field lands
+    // here and fails to compile via `ImageEnum`'s `#[diagnostic::on_unimplemented]`
+    // message rather than a `compile_error!`.
     Ok(FieldKind::Enum(ty.clone()))
 }
 
