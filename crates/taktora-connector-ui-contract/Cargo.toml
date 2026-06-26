@@ -10,12 +10,11 @@ homepage     = { workspace = true }
 readme       = { workspace = true }
 keywords     = { workspace = true }
 categories   = { workspace = true }
-description  = "Language-neutral MVVM contract (manifest, POD field schema, command ack, contract hash) for the taktora UI connector. Implements FEAT_0095."
+description  = "Language-neutral MVVM contract (manifest, POD field schema, command ack, contract hash) for the taktora UI connector (FEAT_0092); implements the FEAT_0095 manifest/schema/discovery cluster."
 
 [dependencies]
-serde      = { workspace = true, features = ["std", "derive"] }
-serde_json = { workspace = true, features = ["std"] }
-sha2       = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"] }
+sha2  = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true, features = ["std"] }

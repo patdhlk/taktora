@@ -1,5 +1,6 @@
 //! taktora-connector-ui-contract — the language-neutral MVVM contract for the
-//! taktora UI connector (FEAT_0092).
+//! taktora UI connector (FEAT_0092); it implements the FEAT_0095
+//! manifest/schema/discovery cluster.
 //!
 //! This crate is pure data + serde + a structural hash: no framework deps, no
 //! iceoryx2, no async. Its JSON serialization *is* the cross-language wire
@@ -17,6 +18,6 @@ pub mod schema;
 
 pub use ack::{Ack, RejectedCode};
 pub use field::{FieldSchema, FieldType};
-pub use hash::contract_hash;
+pub use hash::{contract_hash, validate_name};
 pub use kind::Kind;
 pub use schema::{CommandSchema, Manifest, ViewModelSchema};

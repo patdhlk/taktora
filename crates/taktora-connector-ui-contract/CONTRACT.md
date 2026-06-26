@@ -1,7 +1,8 @@
 # UI connector wire contract
 
 This crate defines the **language-neutral MVVM contract** for the taktora UI
-connector (FEAT_0092). Its JSON serialization *is* the cross-language wire
+connector (FEAT_0092); it implements the FEAT_0095 manifest/schema/discovery
+cluster. Its JSON serialization *is* the cross-language wire
 contract: any UI process — Rust, Python, or otherwise — binds dynamically by
 reading the published [manifest](#manifest) and validating its
 [`contract_hash`](#contract-hash). Nothing here depends on iceoryx2, the
@@ -95,6 +96,25 @@ is built from the manifest **structure only** — `instance`, `epoch`,
 `contract_hash`, and *all* service names are excluded (they depend on the
 instance namespace and must not affect compatibility). Any other language MUST
 reproduce byte-identical `canonical_utf8`.
+
+### Name preconditions
+
+The canonical encoding writes names raw and uses `:`, `;`, `{`, `}`, `<`, `>`,
+`=`, and `,` as structural delimiters with **no escaping**. To keep the grammar
+unambiguous — so two structurally-distinct manifests can never collide by
+smuggling a delimiter into a name — every name in a manifest (ViewModel,
+command, field, param, enum type, enum variant) **MUST** match
+`^[A-Za-z0-9_]+$`. This charset contains none of the delimiters, so the encoding
+is injective over valid inputs. The reference implementation exposes the
+predicate as `hash::validate_name` and `debug_assert!`s it at every
+name-encoding site.
+
+Names are additionally **unique within their section**: ViewModel names are
+unique across the manifest, command names are unique across the manifest, and
+field/param names are unique within a single schema. Uniqueness makes the
+by-name sort total, so the hash is fully input-order-independent; the reference
+implementation `debug_assert!`s it. Both preconditions are obligations of the
+manifest author.
 
 Grammar (ViewModels and commands sorted by `name`; fields and params sorted by
 `name`; enum variants sorted by `(discriminant, name)`; UTF-8 byte order

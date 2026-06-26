@@ -8,7 +8,7 @@ use crate::kind::Kind;
 
 /// The schema of one ViewModel: a fixed-layout POD struct published
 /// latest-value over a single service.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ViewModelSchema {
     /// The ViewModel's logical name.
     pub name: String,
@@ -19,7 +19,7 @@ pub struct ViewModelSchema {
 }
 
 /// The schema of one command: an acceptance-acked request/response action.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CommandSchema {
     /// The command's logical name.
     pub name: String,
@@ -43,7 +43,7 @@ pub struct CommandSchema {
 /// It is the sole source of service names (REQ_0873) and carries a structural
 /// [`contract_hash`](Manifest::contract_hash) for compatibility validation
 /// (REQ_0874).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Manifest {
     /// The instance namespace prefixing every service name.
     pub instance: String,

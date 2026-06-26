@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Serializes to a stable `snake_case` string tag — this tag is part of the
 /// cross-language wire contract (REQ_0875) and must not change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     /// An observable value published latest-value over its own service.

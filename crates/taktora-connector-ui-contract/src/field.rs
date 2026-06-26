@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// ever stored here, so the type derives [`Eq`] without floating-point hazard.
 /// The JSON form is internally tagged on `"type"` with `snake_case` tags and is
 /// part of the cross-language wire contract (REQ_0858, REQ_0875).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FieldType {
     /// A boolean.
@@ -63,7 +63,7 @@ pub enum FieldType {
 }
 
 /// A named field within a ViewModel or command-params schema.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FieldSchema {
     /// The field name.
     pub name: String,
