@@ -1,0 +1,30 @@
+[package]
+name         = "taktora-connector-ui"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Server-side MVVM UI connector for the taktora-connector framework: ViewModel/CommandParams authoring traits, POD image lowering, and the UiRouting type. Implements FEAT_0092."
+
+[dependencies]
+taktora-connector-core          = { workspace = true }
+taktora-connector-transport-iox = { workspace = true }
+taktora-connector-host          = { workspace = true }
+taktora-connector-codec         = { workspace = true }
+taktora-connector-ui-contract   = { workspace = true }
+taktora-connector-ui-derive     = { workspace = true }
+taktora-executor                = { workspace = true }
+iceoryx2                        = { workspace = true }
+serde                           = { workspace = true, features = ["std", "derive"] }
+serde_json                      = { workspace = true, features = ["std"] }
+tracing                         = { workspace = true }
+crossbeam-channel               = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["std"] }

@@ -22,4 +22,5 @@ body cites the Rust test path that runs it.
    ethercat
    zenoh
    can
+   ui
    cross-cutting

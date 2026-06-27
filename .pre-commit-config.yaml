@@ -47,7 +47,9 @@ repos:
         # Vendor ESI fixtures carry verbatim German message catalogs; they
         # are vendor data, not our prose. Never pass them to typos. Same
         # fixtures live under crates/*/esi/ (codegen test corpus) too.
-        exclude: '/esi/.*\.xml$'
+        # trybuild .stderr fixtures are generated compiler output (carry
+        # crate-path fragments from serde and friends), not prose.
+        exclude: '/esi/.*\.xml$|/tests/ui/.*\.stderr$'
 
   # ---------------------------------------------------------- rust formatting
   - repo: local

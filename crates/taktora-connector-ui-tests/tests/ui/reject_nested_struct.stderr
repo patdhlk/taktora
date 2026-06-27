@@ -1,0 +1,153 @@
+error[E0277]: `Nested` cannot be a ViewModel/command field
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^ not a supported field type
+   |
+help: the trait `ImageEnum` is not implemented for `Nested`
+  --> tests/ui/reject_nested_struct.rs:12:1
+   |
+12 | struct Nested {
+   | ^^^^^^^^^^^^^
+   = note: ViewModel/command fields must be one of: bool, i8..i64, u8..u64, f32/f64, fixed arrays of those, BoundedString<CAP>, or a C-like enum deriving ImageEnum
+   = note: nested POD structs are part of REQ_0858 but are not yet supported by the derive (deferred)
+note: required by a bound in `taktora_connector_ui::__private::EnumImage`
+  --> $WORKSPACE/crates/taktora-connector-ui/src/lib.rs
+   |
+   |     pub struct EnumImage<E: crate::ImageEnum>(pub <E as crate::ImageEnum>::Repr);
+   |                             ^^^^^^^^^^^^^^^^ required by this bound in `EnumImage`
+   = note: this error originates in the derive macro `ViewModel` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0204]: the trait `Copy` cannot be implemented for this type
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^ this field does not implement `Copy`
+   |
+note: the `Copy` impl for `taktora_connector_ui::__private::EnumImage<Nested>` requires that `Nested: ImageEnum`
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^
+   = note: this error originates in the derive macro `::std::marker::Copy` which comes from the expansion of the derive macro `ViewModel` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `Nested` cannot be a ViewModel/command field
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^ not a supported field type
+   |
+help: within `BadImage`, the trait `ImageEnum` is not implemented for `Nested`
+  --> tests/ui/reject_nested_struct.rs:12:1
+   |
+12 | struct Nested {
+   | ^^^^^^^^^^^^^
+   = note: ViewModel/command fields must be one of: bool, i8..i64, u8..u64, f32/f64, fixed arrays of those, BoundedString<CAP>, or a C-like enum deriving ImageEnum
+   = note: nested POD structs are part of REQ_0858 but are not yet supported by the derive (deferred)
+note: required because it appears within the type `BadImage`
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^
+   = note: this error originates in the derive macro `ViewModel` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `Nested` cannot be a ViewModel/command field
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^ not a supported field type
+   |
+help: within `BadImage`, the trait `ImageEnum` is not implemented for `Nested`
+  --> tests/ui/reject_nested_struct.rs:12:1
+   |
+12 | struct Nested {
+   | ^^^^^^^^^^^^^
+   = note: ViewModel/command fields must be one of: bool, i8..i64, u8..u64, f32/f64, fixed arrays of those, BoundedString<CAP>, or a C-like enum deriving ImageEnum
+   = note: nested POD structs are part of REQ_0858 but are not yet supported by the derive (deferred)
+note: required because it appears within the type `BadImage`
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^
+   = note: required for `<Bad as ViewModel>::Image` to implement `Copy`
+note: required by a bound in `taktora_connector_ui::ViewModel::Image`
+  --> $WORKSPACE/crates/taktora-connector-ui/src/viewmodel.rs
+   |
+   |     type Image: Copy + Send + 'static;
+   |                 ^^^^ required by this bound in `ViewModel::Image`
+   = note: this error originates in the derive macro `ViewModel` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `Nested` cannot be a ViewModel/command field
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^ not a supported field type
+   |
+help: within `BadImage`, the trait `ImageEnum` is not implemented for `Nested`
+  --> tests/ui/reject_nested_struct.rs:12:1
+   |
+12 | struct Nested {
+   | ^^^^^^^^^^^^^
+   = note: ViewModel/command fields must be one of: bool, i8..i64, u8..u64, f32/f64, fixed arrays of those, BoundedString<CAP>, or a C-like enum deriving ImageEnum
+   = note: nested POD structs are part of REQ_0858 but are not yet supported by the derive (deferred)
+note: required because it appears within the type `BadImage`
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^
+   = note: the return type of a function must have a statically known size
+   = note: this error originates in the derive macro `ViewModel` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `Nested` cannot be a ViewModel/command field
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^ not a supported field type
+   |
+help: within `BadImage`, the trait `ImageEnum` is not implemented for `Nested`
+  --> tests/ui/reject_nested_struct.rs:12:1
+   |
+12 | struct Nested {
+   | ^^^^^^^^^^^^^
+   = note: ViewModel/command fields must be one of: bool, i8..i64, u8..u64, f32/f64, fixed arrays of those, BoundedString<CAP>, or a C-like enum deriving ImageEnum
+   = note: nested POD structs are part of REQ_0858 but are not yet supported by the derive (deferred)
+note: required because it appears within the type `BadImage`
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^
+note: required by an implicit `Sized` bound in `taktora_connector_ui::__private::image_size`
+  --> $WORKSPACE/crates/taktora-connector-ui/src/lib.rs
+   |
+   |     pub const fn image_size<T>() -> usize {
+   |                             ^ required by the implicit `Sized` requirement on this type parameter in `image_size`
+   = note: this error originates in the derive macro `ViewModel` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `Nested` cannot be a ViewModel/command field
+  --> tests/ui/reject_nested_struct.rs:18:13
+   |
+18 |     nested: Nested,
+   |             ^^^^^^ not a supported field type
+   |
+help: the trait `ImageEnum` is not implemented for `Nested`
+  --> tests/ui/reject_nested_struct.rs:12:1
+   |
+12 | struct Nested {
+   | ^^^^^^^^^^^^^
+   = note: ViewModel/command fields must be one of: bool, i8..i64, u8..u64, f32/f64, fixed arrays of those, BoundedString<CAP>, or a C-like enum deriving ImageEnum
+   = note: nested POD structs are part of REQ_0858 but are not yet supported by the derive (deferred)
+
+error[E0277]: `Nested` cannot be a ViewModel/command field
+  --> tests/ui/reject_nested_struct.rs:16:21
+   |
+16 | #[derive(Serialize, ViewModel)]
+   |                     ^^^^^^^^^ not a supported field type
+   |
+help: the trait `ImageEnum` is not implemented for `Nested`
+  --> tests/ui/reject_nested_struct.rs:12:1
+   |
+12 | struct Nested {
+   | ^^^^^^^^^^^^^
+   = note: ViewModel/command fields must be one of: bool, i8..i64, u8..u64, f32/f64, fixed arrays of those, BoundedString<CAP>, or a C-like enum deriving ImageEnum
+   = note: nested POD structs are part of REQ_0858 but are not yet supported by the derive (deferred)
+   = note: this error originates in the derive macro `ViewModel` (in Nightly builds, run with -Z macro-backtrace for more info)

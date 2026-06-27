@@ -11,7 +11,13 @@
 # data, not our prose — exclude them wholesale rather than allow-listing
 # each German word. The same fixtures are mirrored into the codegen test
 # corpus under crates/*/esi/, so exclude that path too.
-extend-exclude = ["examples/*/esi/*.xml", "crates/*/esi/*.xml"]
+extend-exclude = [
+    "examples/*/esi/*.xml",
+    "crates/*/esi/*.xml",
+    # trybuild compile-fail fixtures: generated compiler output (carries
+    # crate-path fragments from serde and friends), not our prose.
+    "crates/*/tests/ui/*.stderr",
+]
 
 [default.extend-words]
 # EtherCAT vocabulary.

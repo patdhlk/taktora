@@ -1,0 +1,5 @@
+error: ViewModel does not support generic, lifetime, or const-generic structs
+ --> tests/ui/reject_generic.rs:4:11
+  |
+4 | struct Bad<T> {
+  |           ^^^

@@ -415,3 +415,82 @@ two crates that carry the most logic.
    Windows without depending on the real ``socketcan`` crate or
    a Linux kernel CAN module. Mirrors :need:`BB_0040`'s
    ``MockZenohSession`` posture under :need:`REQ_0445`.
+
+.. building-block:: taktora-connector-ui-contract crate
+   :id: BB_0045
+   :status: open
+   :implements: REQ_0857, REQ_0869, REQ_0873, REQ_0874, REQ_0875
+
+   The language-neutral schema shared by server and client so they
+   cannot disagree — its JSON *is* the cross-language spec. Defines the
+   ``Manifest`` / ``ViewModelSchema`` / ``CommandSchema`` /
+   ``FieldSchema`` types, the closed ``FieldType`` descriptor set
+   (scalars, fixed arrays, inline bounded UTF-8 strings, nested
+   ``Struct``, C-like enums), the ``Kind`` discriminant
+   (``Property`` | ``Command`` | ``CanExecute``, reserving ``Event``),
+   the closed ``RejectedCode`` reason set, the ``Ack`` reply shape, and
+   the canonical ``contract_hash`` algorithm. Depends on nothing in the
+   connector stack; pure ``serde``. No executor, no iceoryx2.
+
+.. building-block:: taktora-connector-ui crate (server)
+   :id: BB_0046
+   :status: open
+   :implements: REQ_0855, REQ_0856, REQ_0857, REQ_0860, REQ_0861, REQ_0862, REQ_0863, REQ_0865, REQ_0866, REQ_0867, REQ_0870, REQ_0871, REQ_0872, REQ_0879, REQ_0883, REQ_0884
+
+   The server side: ``UiConnector<C: PayloadCodec>`` implementing the
+   shared ``Connector`` trait with ``type Routing = UiRouting`` and the
+   MVVM ergonomics layer (``Property`` / ``CanExecute`` / command
+   authoring) desugared onto ``create_writer`` / ``create_reader``.
+   Hosts the per-ViewModel seqlock latest-value cells written on the
+   (possibly RT) hot path (:need:`REQ_0860`), the non-RT publisher
+   ``Pump`` that snapshots / JSON-encodes / publishes at a configurable
+   cadence with coalescing and zero-subscriber skip
+   (:need:`REQ_0861`, :need:`REQ_0862`), the off-RT ``CommandHandler``
+   with its bounded effect channel, ``correlation_id`` LRU dedupe and
+   acceptance-ack replies (:need:`REQ_0865`–:need:`REQ_0871`), the
+   manifest publisher (:need:`REQ_0872`), the mandatory
+   ``SystemViewModel`` heartbeat with process epoch (:need:`REQ_0879`),
+   the hot-scalar promotion API (``add_hot_scalar`` —
+   :need:`REQ_0863`), and the local-publish health state machine
+   (:need:`REQ_0883`). Trust is OS- and iceoryx2-mediated
+   (:need:`REQ_0884`); the crate exposes no authentication surface.
+   Depends on ``taktora-connector-core``,
+   ``taktora-connector-transport-iox``,
+   ``taktora-connector-ui-contract``, and ``taktora-executor``.
+
+.. building-block:: taktora-connector-ui-derive crate
+   :id: BB_0047
+   :status: open
+   :implements: REQ_0858, REQ_0859, REQ_0868, REQ_0878
+
+   The ``#[derive(ViewModel)]`` / ``#[derive(CommandParams)]`` /
+   ``#[derive(ImageEnum)]`` proc-macros and the ``#[command(idempotent)]``
+   attribute. From the authored Rust type the macro computes the
+   compile-time maximum encoded size and instantiates
+   ``ConnectorEnvelope<N>`` (:need:`REQ_0859`), emits the manifest
+   contribution — field names, ``FieldType`` schema descriptors,
+   command signatures, kinds, and idempotent flags (:need:`REQ_0878`),
+   and enforces the closed POD field-type set by rejecting heap-backed
+   types, data-carrying unions, and 128-bit integers at compile time
+   with a clear diagnostic (:need:`REQ_0858`). Nested-struct fields are
+   not yet generated (the deferred slice of :need:`REQ_0858`): they
+   currently land on a purposeful "not yet supported" ``compile_error!``
+   rather than silently mis-encoding.
+
+.. building-block:: taktora-connector-ui-client crate
+   :id: BB_0048
+   :status: open
+   :implements: REQ_0864, REQ_0876, REQ_0877, REQ_0880, REQ_0881, REQ_0882
+
+   The Rust reference consumer (no executor dependency). Discovers live
+   applications by scanning the iceoryx2 service registry for the
+   manifest naming pattern (:need:`REQ_0877`), reads and hash-validates
+   the manifest, binding read-write on a match and entering the
+   read-only inspect fallback (commands disabled) on a mismatch
+   (:need:`REQ_0876`). Reconstructs per-field ``PropertyChanged`` by
+   diffing each received ViewModel against the last held copy
+   (:need:`REQ_0864`) and computes per-ViewModel staleness from the
+   envelope ``timestamp_ns`` / ``sequence_number`` (:need:`REQ_0880`).
+   Recovers statelessly on UI restart via history-depth-1 redelivery
+   (:need:`REQ_0881`) and re-reads / re-validates the manifest on an
+   epoch change (:need:`REQ_0882`).

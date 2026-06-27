@@ -1,0 +1,115 @@
+{
+  "instance": "ethercat-stepper",
+  "epoch": 1,
+  "contract_hash": "7868546358bff1644b7e09533ce25741e6a282a1c5ba192ba9829a6e35738cee",
+  "view_models": [
+    {
+      "name": "System",
+      "service": "ethercat-stepper/vm/System",
+      "fields": [
+        {
+          "name": "counter",
+          "type": {
+            "type": "u64"
+          }
+        },
+        {
+          "name": "epoch",
+          "type": {
+            "type": "u64"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stepper",
+      "service": "ethercat-stepper/vm/Stepper",
+      "fields": [
+        {
+          "name": "position",
+          "type": {
+            "type": "f64"
+          }
+        },
+        {
+          "name": "state",
+          "type": {
+            "type": "enum",
+            "name": "StepperState",
+            "variants": [
+              [
+                "Idle",
+                0
+              ],
+              [
+                "Running",
+                1
+              ],
+              [
+                "Faulted",
+                2
+              ]
+            ],
+            "width": 1
+          }
+        },
+        {
+          "name": "can_jog",
+          "type": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "label",
+          "type": {
+            "type": "str",
+            "cap": 16
+          }
+        },
+        {
+          "name": "history",
+          "type": {
+            "type": "array",
+            "elem": {
+              "type": "f64"
+            },
+            "len": 4
+          }
+        }
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "name": "enable",
+      "request_service": "ethercat-stepper/cmd/enable/req",
+      "reply_service": "ethercat-stepper/cmd/enable/rep",
+      "params": [
+        {
+          "name": "force",
+          "type": {
+            "type": "bool"
+          }
+        }
+      ],
+      "kind": "command",
+      "idempotent": true,
+      "can_execute_service": "ethercat-stepper/cmd/enable/can"
+    },
+    {
+      "name": "jog_relative",
+      "request_service": "ethercat-stepper/cmd/jog_relative/req",
+      "reply_service": "ethercat-stepper/cmd/jog_relative/rep",
+      "params": [
+        {
+          "name": "delta",
+          "type": {
+            "type": "f64"
+          }
+        }
+      ],
+      "kind": "command",
+      "idempotent": false
+    }
+  ]
+}

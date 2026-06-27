@@ -1,0 +1,20 @@
+[package]
+name         = "taktora-connector-ui-contract"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Language-neutral MVVM contract (manifest, POD field schema, command ack, contract hash) for the taktora UI connector (FEAT_0092); implements the FEAT_0095 manifest/schema/discovery cluster."
+
+[dependencies]
+serde = { workspace = true, features = ["std", "derive"] }
+sha2  = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["std"] }

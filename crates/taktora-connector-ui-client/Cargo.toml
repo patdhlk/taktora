@@ -1,0 +1,24 @@
+[package]
+name         = "taktora-connector-ui-client"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Rust reference consumer (UI client) for the taktora MVVM UI connector: manifest discovery, contract-hash validation with read-only fallback, per-field PropertyChanged diffing, and acceptance-ack command invocation with an epoch-aware retry policy. Implements FEAT_0092 (client side)."
+
+[dependencies]
+taktora-connector-ui-contract   = { workspace = true }
+taktora-connector-transport-iox = { workspace = true }
+taktora-connector-core          = { workspace = true }
+iceoryx2                        = { workspace = true }
+serde      = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["std"] }

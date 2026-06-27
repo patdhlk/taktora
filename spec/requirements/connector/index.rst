@@ -26,8 +26,9 @@ connector trait and routing (:need:`FEAT_0033`), connection lifecycle
 (:need:`FEAT_0034`), process-boundary deployments (:need:`FEAT_0035`),
 connector cycle telemetry (:need:`FEAT_0038`), host wiring and builder
 (:need:`FEAT_0037`), and the reference connectors — MQTT (:need:`FEAT_0036`),
-EtherCAT (:need:`FEAT_0041`), Zenoh (:need:`FEAT_0042`), and CAN
-(:need:`FEAT_0046`). The deliberately rejected anti-goals, the umbrella-level
+EtherCAT (:need:`FEAT_0041`), Zenoh (:need:`FEAT_0042`), CAN
+(:need:`FEAT_0046`), and the MVVM UI connector (:need:`FEAT_0092`). The
+deliberately rejected anti-goals, the umbrella-level
 traceability tables, and the safety refinements live on :doc:`cross-cutting`.
 
 Top-level umbrella
@@ -60,7 +61,7 @@ Requirements at a glance
 .. needtable::
    :columns: id, title, status, satisfies
    :show_filters:
-   :filter: "FEAT_0030" in satisfies or "FEAT_0031" in satisfies or "FEAT_0032" in satisfies or "FEAT_0033" in satisfies or "FEAT_0034" in satisfies or "FEAT_0035" in satisfies or "FEAT_0036" in satisfies or "FEAT_0037" in satisfies or "FEAT_0038" in satisfies or "FEAT_0041" in satisfies or "FEAT_0042" in satisfies or "FEAT_0043" in satisfies or "FEAT_0044" in satisfies or "FEAT_0045" in satisfies or "FEAT_0046" in satisfies or "FEAT_0047" in satisfies or "FEAT_0048" in satisfies or "FEAT_0049" in satisfies
+   :filter: "FEAT_0030" in satisfies or "FEAT_0031" in satisfies or "FEAT_0032" in satisfies or "FEAT_0033" in satisfies or "FEAT_0034" in satisfies or "FEAT_0035" in satisfies or "FEAT_0036" in satisfies or "FEAT_0037" in satisfies or "FEAT_0038" in satisfies or "FEAT_0041" in satisfies or "FEAT_0042" in satisfies or "FEAT_0043" in satisfies or "FEAT_0044" in satisfies or "FEAT_0045" in satisfies or "FEAT_0046" in satisfies or "FEAT_0047" in satisfies or "FEAT_0048" in satisfies or "FEAT_0049" in satisfies or "FEAT_0092" in satisfies or "FEAT_0093" in satisfies or "FEAT_0094" in satisfies or "FEAT_0095" in satisfies or "FEAT_0096" in satisfies
 
 .. toctree::
    :maxdepth: 2
@@ -75,5 +76,6 @@ Requirements at a glance
    host-wiring
    zenoh
    can
+   ui
    telemetry
    cross-cutting
