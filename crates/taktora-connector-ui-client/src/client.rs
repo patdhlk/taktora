@@ -116,6 +116,14 @@ struct CanSub {
     last: Option<bool>,
 }
 
+/// The next step after an ack timeout, as decided by [`retry_decision`].
+enum RetryStep {
+    /// Resend the command under the same correlation id.
+    Retry,
+    /// Stop the retry loop and return this terminal outcome.
+    Done(CommandOutcome),
+}
+
 /// One command's request publisher + reply subscriber.
 struct CmdPort {
     request: RawChannelWriter<ENVELOPE_CAPACITY>,
@@ -397,13 +405,7 @@ impl Client {
         if !self.mode.commands_enabled() {
             return Err(ClientError::ReadOnly);
         }
-        let mut schema = self
-            .manifest
-            .commands
-            .iter()
-            .find(|c| c.name == command)
-            .ok_or_else(|| ClientError::UnknownCommand(command.to_owned()))?
-            .clone();
+        let mut schema = self.resolve_command_schema(command)?;
         self.ensure_command_port(&schema)?;
 
         let params_bytes = serde_json::to_vec(params)?;
@@ -413,61 +415,84 @@ impl Client {
         let mut attempts: u32 = 0;
 
         loop {
-            // Resend under the same correlation id (server dedupes; REQ_0867).
-            self.cmd_ports
-                .get(command)
-                .expect("port ensured above")
-                .request
-                .send_raw_bytes(&params_bytes, id)?;
             attempts += 1;
-
-            if let Some(ack) =
-                self.await_ack(command, id, self.config.command.timeout, &mut scratch)?
-            {
+            if let Some(ack) = self.send_and_await_ack(command, &params_bytes, id, &mut scratch)? {
                 return Ok(ack.into());
             }
+            // Timed out: refresh / rebind / apply the retry decision (REQ_0882).
+            match self.on_ack_timeout(command, &mut schema, start_epoch, attempts)? {
+                RetryStep::Retry => continue,
+                RetryStep::Done(outcome) => return Ok(outcome),
+            }
+        }
+    }
 
-            // Timed out: re-read the manifest, re-validate the hash, rebind
-            // (REQ_0882), then decide whether to retry.
-            let current_epoch = self.refresh_manifest_into()?;
-            if !self.mode.commands_enabled() {
-                // A restart changed the contract incompatibly -> read-only.
-                return Err(ClientError::ReadOnly);
+    /// Resolve `command` to a cloned [`CommandSchema`] from the current manifest.
+    fn resolve_command_schema(&self, command: &str) -> Result<CommandSchema, ClientError> {
+        Ok(self
+            .manifest
+            .commands
+            .iter()
+            .find(|c| c.name == command)
+            .ok_or_else(|| ClientError::UnknownCommand(command.to_owned()))?
+            .clone())
+    }
+
+    /// One retry-loop attempt: resend the params under the same correlation id
+    /// (the server dedupes; REQ_0867) and await the acceptance ack up to the
+    /// configured timeout. Returns `None` on timeout.
+    fn send_and_await_ack(
+        &self,
+        command: &str,
+        params_bytes: &[u8],
+        id: CorrelationId,
+        scratch: &mut [u8],
+    ) -> Result<Option<Ack>, ClientError> {
+        self.cmd_ports
+            .get(command)
+            .expect("port ensured by caller")
+            .request
+            .send_raw_bytes(params_bytes, id)?;
+        self.await_ack(command, id, self.config.command.timeout, scratch)
+    }
+
+    /// Handle an ack timeout: re-read the manifest, re-validate the hash and
+    /// rebind the [`BindMode`] (REQ_0882), then translate the [`RetryDecision`]
+    /// into the loop's next step. On an epoch change that still permits retry,
+    /// re-resolves `schema` and reopens the command port (the captured schema and
+    /// open port may point at the pre-restart incarnation's services).
+    fn on_ack_timeout(
+        &mut self,
+        command: &str,
+        schema: &mut CommandSchema,
+        start_epoch: u64,
+        attempts: u32,
+    ) -> Result<RetryStep, ClientError> {
+        let current_epoch = self.refresh_manifest_into()?;
+        if !self.mode.commands_enabled() {
+            // A restart changed the contract incompatibly -> read-only.
+            return Err(ClientError::ReadOnly);
+        }
+        let epoch_changed = current_epoch != start_epoch;
+        match retry_decision(
+            schema.idempotent,
+            epoch_changed,
+            attempts,
+            self.config.command.max_attempts,
+        ) {
+            RetryDecision::Retry => {
+                if epoch_changed {
+                    *schema = self.resolve_command_schema(command)?;
+                    self.cmd_ports.remove(command);
+                    self.ensure_command_port(schema)?;
+                }
+                Ok(RetryStep::Retry)
             }
-            let epoch_changed = current_epoch != start_epoch;
-            match retry_decision(
-                schema.idempotent,
-                epoch_changed,
+            RetryDecision::GiveUp => Err(ClientError::CommandTimeout {
+                command: command.to_owned(),
                 attempts,
-                self.config.command.max_attempts,
-            ) {
-                RetryDecision::Retry => {
-                    if epoch_changed {
-                        // A restart (with a still-compatible contract): the
-                        // captured schema and the open command port may point at
-                        // the *pre-restart* incarnation's services. Re-resolve
-                        // the command from the refreshed manifest and reopen the
-                        // port before resending (REQ_0882).
-                        schema = self
-                            .manifest
-                            .commands
-                            .iter()
-                            .find(|c| c.name == command)
-                            .ok_or_else(|| ClientError::UnknownCommand(command.to_owned()))?
-                            .clone();
-                        self.cmd_ports.remove(command);
-                        self.ensure_command_port(&schema)?;
-                    }
-                    continue;
-                }
-                RetryDecision::GiveUp => {
-                    return Err(ClientError::CommandTimeout {
-                        command: command.to_owned(),
-                        attempts,
-                    });
-                }
-                RetryDecision::OutcomeUnknown => return Ok(CommandOutcome::OutcomeUnknown),
-            }
+            }),
+            RetryDecision::OutcomeUnknown => Ok(RetryStep::Done(CommandOutcome::OutcomeUnknown)),
         }
     }
 

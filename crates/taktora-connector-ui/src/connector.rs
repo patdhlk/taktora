@@ -294,6 +294,129 @@ impl<C: PayloadCodec> UiConnector<C> {
              declared before the connector is registered with the executor",
         );
     }
+
+    /// Assemble the non-RT [`Pump`] (ViewModels, the exempt manifest + heartbeat
+    /// entries, and each command's `CanExecute` bool) together with the wired
+    /// [`CommandHandler`] over an [`IoxCommandTransport`].
+    ///
+    /// Done under a single node borrow so the borrow is released before the
+    /// caller mutates `self` to store the spawned handles. The transport must be
+    /// fully populated before the handler is constructed over it, so the command
+    /// registrations are collected during the loop and the handler wired after.
+    #[allow(clippy::type_complexity)]
+    fn build_pump_and_handler(
+        &self,
+        instance: &str,
+        epoch: u64,
+        vm_regs: Vec<VmRegistration>,
+        cmd_regs: Vec<CommandRegistration>,
+        manifest: taktora_connector_ui_contract::Manifest,
+    ) -> Result<(Pump, CommandHandler<IoxCommandTransport<ENVELOPE_CAPACITY>>), ConnectorError>
+    {
+        let factory = ServiceFactory::new(&self.node);
+        let mut pump = Pump::new();
+
+        // ViewModels — non-exempt (skipped while no UI is watching).
+        for reg in vm_regs {
+            let service = view_model_service_name(instance, &reg.name);
+            let entry = (reg.build_entry)(&self.node, &service)?;
+            pump.add_entry(entry);
+        }
+
+        // Manifest — exempt, published every tick (`REQ_0872`).
+        let manifest_pub = IoxVmPublisher::<ENVELOPE_CAPACITY>::create(
+            &self.node,
+            &manifest_service_name(instance),
+        )?;
+        pump.add_entry(manifest_entry(manifest, manifest_pub));
+
+        // SystemViewModel heartbeat — exempt (`REQ_0879`).
+        let system_pub = IoxVmPublisher::<ENVELOPE_CAPACITY>::create(
+            &self.node,
+            &view_model_service_name(instance, SYSTEM_VIEW_MODEL_NAME),
+        )?;
+        pump.add_entry(system_entry(epoch, system_pub));
+
+        // Command plane: one request/reply port pair + one CanExecute bool
+        // property per command.
+        let mut transport = IoxCommandTransport::<ENVELOPE_CAPACITY>::new();
+        let mut handler_cmds: Vec<(String, RegisteredCommand)> = Vec::new();
+        for reg in cmd_regs {
+            let CommandRegistration {
+                name,
+                schema: _,
+                registered,
+                can,
+            } = reg;
+            let req = command_request_service_name(instance, &name);
+            let rep = command_reply_service_name(instance, &name);
+            let reader = factory.create_raw_reader_named::<ENVELOPE_CAPACITY>(&req)?;
+            let writer = factory.create_raw_writer_named::<ENVELOPE_CAPACITY>(&rep)?;
+            transport.add_command(name.clone(), reader, writer);
+
+            let can_pub = IoxVmPublisher::<ENVELOPE_CAPACITY>::create(
+                &self.node,
+                &can_execute_service_name(instance, &name),
+            )?;
+            pump.add_entry(can_execute_entry(name.clone(), &can, can_pub));
+            handler_cmds.push((name, registered));
+        }
+
+        let mut handler = CommandHandler::new(transport, self.options.dedupe_capacity);
+        for (name, registered) in handler_cmds {
+            handler.register(name, registered);
+        }
+        Ok((pump, handler))
+    }
+}
+
+/// Build the manifest from every declared schema plus the mandatory
+/// [`SystemViewModel`] (`REQ_0879`), so a UI can discover the heartbeat too.
+fn build_manifest(
+    instance: &str,
+    epoch: u64,
+    vm_regs: &[VmRegistration],
+    cmd_regs: &[CommandRegistration],
+) -> taktora_connector_ui_contract::Manifest {
+    let mut builder =
+        ManifestBuilder::new(instance.to_owned(), epoch).with_view_model(SystemViewModel::schema());
+    for reg in vm_regs {
+        builder = builder.with_view_model(reg.schema.clone());
+    }
+    for reg in cmd_regs {
+        builder = builder.with_command(reg.schema.clone());
+    }
+    builder.build()
+}
+
+/// Fail fast on an oversized envelope (`ENVELOPE_CAPACITY` is fixed for every UI
+/// service), before any service is opened.
+///
+/// The manifest is the sole source of service names, so a manifest that cannot
+/// fit the envelope would silently disable the whole UI plane at runtime (the
+/// pump only logs + degrades health). Likewise, a single ViewModel whose
+/// worst-case JSON exceeds the envelope can never publish. Both are rejected here
+/// with [`ConnectorError::PayloadOverflow`] rather than at the first pump tick.
+fn validate_envelope_sizes(
+    manifest: &taktora_connector_ui_contract::Manifest,
+    vm_regs: &[VmRegistration],
+) -> Result<(), ConnectorError> {
+    let encoded_manifest = serde_json::to_vec(manifest).map_err(ConnectorError::stack)?;
+    if encoded_manifest.len() > ENVELOPE_CAPACITY {
+        return Err(ConnectorError::PayloadOverflow {
+            actual: encoded_manifest.len(),
+            max: ENVELOPE_CAPACITY,
+        });
+    }
+    for reg in vm_regs {
+        if reg.max_encoded_size > ENVELOPE_CAPACITY {
+            return Err(ConnectorError::PayloadOverflow {
+                actual: reg.max_encoded_size,
+                max: ENVELOPE_CAPACITY,
+            });
+        }
+    }
+    Ok(())
 }
 
 impl<C> Connector for UiConnector<C>
@@ -326,101 +449,13 @@ where
         let vm_regs = std::mem::take(&mut self.vm_regs);
         let cmd_regs = std::mem::take(&mut self.cmd_regs);
 
-        // Build the manifest from every declared schema plus the mandatory
-        // SystemViewModel (`REQ_0879`), so a UI can discover the heartbeat too.
-        let mut manifest_builder = ManifestBuilder::new(instance.clone(), epoch)
-            .with_view_model(SystemViewModel::schema());
-        for reg in &vm_regs {
-            manifest_builder = manifest_builder.with_view_model(reg.schema.clone());
-        }
-        for reg in &cmd_regs {
-            manifest_builder = manifest_builder.with_command(reg.schema.clone());
-        }
-        let manifest = manifest_builder.build();
-
-        // Fail fast on an oversized envelope (`ENVELOPE_CAPACITY` is fixed for
-        // every UI service). The manifest is the sole source of service names, so
-        // a manifest that cannot fit the envelope would silently disable the
-        // whole UI plane at runtime (the pump only logs + degrades health).
-        // Catch it at registration instead, before any service is opened.
-        let encoded_manifest = serde_json::to_vec(&manifest).map_err(ConnectorError::stack)?;
-        if encoded_manifest.len() > ENVELOPE_CAPACITY {
-            return Err(ConnectorError::PayloadOverflow {
-                actual: encoded_manifest.len(),
-                max: ENVELOPE_CAPACITY,
-            });
-        }
-        // Likewise, a single ViewModel whose worst-case JSON exceeds the envelope
-        // can never publish; reject it here rather than at the first pump tick.
-        for reg in &vm_regs {
-            if reg.max_encoded_size > ENVELOPE_CAPACITY {
-                return Err(ConnectorError::PayloadOverflow {
-                    actual: reg.max_encoded_size,
-                    max: ENVELOPE_CAPACITY,
-                });
-            }
-        }
+        let manifest = build_manifest(&instance, epoch, &vm_regs, &cmd_regs);
+        validate_envelope_sizes(&manifest, &vm_regs)?;
 
         // Assemble the pump and command handler under one node borrow, so the
         // borrow is released before we mutate `self` (store the handles) below.
-        let (pump, handler) = {
-            let factory = ServiceFactory::new(&self.node);
-            let mut pump = Pump::new();
-
-            // ViewModels — non-exempt (skipped while no UI is watching).
-            for reg in vm_regs {
-                let service = view_model_service_name(&instance, &reg.name);
-                let entry = (reg.build_entry)(&self.node, &service)?;
-                pump.add_entry(entry);
-            }
-
-            // Manifest — exempt, published every tick (`REQ_0872`).
-            let manifest_pub = IoxVmPublisher::<ENVELOPE_CAPACITY>::create(
-                &self.node,
-                &manifest_service_name(&instance),
-            )?;
-            pump.add_entry(manifest_entry(manifest, manifest_pub));
-
-            // SystemViewModel heartbeat — exempt (`REQ_0879`).
-            let system_pub = IoxVmPublisher::<ENVELOPE_CAPACITY>::create(
-                &self.node,
-                &view_model_service_name(&instance, SYSTEM_VIEW_MODEL_NAME),
-            )?;
-            pump.add_entry(system_entry(epoch, system_pub));
-
-            // Command plane: one request/reply port pair + one CanExecute bool
-            // property per command. The `IoxCommandTransport` must be fully
-            // assembled before the `CommandHandler` is constructed over it, so
-            // collect the registrations and wire the handler after the loop.
-            let mut transport = IoxCommandTransport::<ENVELOPE_CAPACITY>::new();
-            let mut handler_cmds: Vec<(String, RegisteredCommand)> = Vec::new();
-            for reg in cmd_regs {
-                let CommandRegistration {
-                    name,
-                    schema: _,
-                    registered,
-                    can,
-                } = reg;
-                let req = command_request_service_name(&instance, &name);
-                let rep = command_reply_service_name(&instance, &name);
-                let reader = factory.create_raw_reader_named::<ENVELOPE_CAPACITY>(&req)?;
-                let writer = factory.create_raw_writer_named::<ENVELOPE_CAPACITY>(&rep)?;
-                transport.add_command(name.clone(), reader, writer);
-
-                let can_pub = IoxVmPublisher::<ENVELOPE_CAPACITY>::create(
-                    &self.node,
-                    &can_execute_service_name(&instance, &name),
-                )?;
-                pump.add_entry(can_execute_entry(name.clone(), &can, can_pub));
-                handler_cmds.push((name, registered));
-            }
-
-            let mut handler = CommandHandler::new(transport, self.options.dedupe_capacity);
-            for (name, registered) in handler_cmds {
-                handler.register(name, registered);
-            }
-            (pump, handler)
-        };
+        let (pump, handler) =
+            self.build_pump_and_handler(&instance, epoch, vm_regs, cmd_regs, manifest)?;
 
         // Spawn the pump on its own thread, feeding PublishHealth from the
         // per-tick stats (`REQ_0883`): a publish error degrades, an otherwise
