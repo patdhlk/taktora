@@ -50,7 +50,7 @@ incompatible build. This cluster ``:satisfies:`` :need:`FEAT_0092`.
    :id: REQ_0874
    :status: implemented
    :satisfies: FEAT_0095
-   :links: BB_0045, TEST_0883, TEST_0884
+   :links: BB_0045, TEST_0883
 
    The manifest shall carry a contract hash computed over the structural
    contract — ViewModel and command names, field names and types, and command

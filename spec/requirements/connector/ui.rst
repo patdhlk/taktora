@@ -95,18 +95,24 @@ The connector follows the established multi-crate convention (the name
 v1 validation slice
 -------------------
 
-The first slice wires the connector into the existing ``ethercat-stepper``
-example: a ``StepperViewModel`` (position ``f64``, a C-like ``state`` enum, a
+The first slice models the connector against a stepper: a
+``StepperViewModel`` (position ``f64``, a C-like ``state`` enum, a
 ``can_jog`` CanExecute bool), the mandatory ``SystemViewModel`` heartbeat
-(:need:`REQ_0878`), one idempotent command (``enable``) and one
-non-idempotent command (``jog_relative``), and the mandatory
-``SystemViewModel`` heartbeat (:need:`REQ_0879`). The reference View is a
-minimal **egui** app on ``taktora-connector-ui-client``. The language-neutral
-claim
-is put under test in v1 by a small **Python** smoke consumer that reads the
-manifest and heartbeat ViewModel off the JSON contract (falling back to a
-documented contract round-trip test only if the iceoryx2 Python binding
-cannot be stood up cheaply).
+(:need:`REQ_0878`, :need:`REQ_0879`), one idempotent command (``enable``) and
+one non-idempotent command (``jog_relative``). The v1 behaviour — assembled
+``UiConnector``, publish/command/discovery round-trips, reference ``Client``,
+and the language-neutral contract — is validated in-tree by the
+``publish = false`` ``taktora-connector-ui-tests`` integration tests
+(:need:`TEST_0880`, :need:`TEST_0881`) and, from a non-Rust consumer, by the
+pure-stdlib ``crates/taktora-connector-ui-contract/py/smoke.py`` proof
+(:need:`TEST_0883`).
+
+The runnable ``ui-demo`` producer example (wiring the connector into the
+``ethercat-stepper`` example) and the minimal **egui** reference View on
+``taktora-connector-ui-client`` land in a follow-up PR once the UI connector
+crates are published to crates.io — the repo's examples build against published
+``version`` dependencies, so they cannot ship in the same PR that introduces
+the crates.
 
 Deferred / anti-goals
 ---------------------

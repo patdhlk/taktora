@@ -175,21 +175,9 @@ reproducibility check that recomputes the contract hash from the JSON alone.
    (:need:`REQ_0857`, :need:`REQ_0875`). Realised as
    ``crates/taktora-connector-ui-contract/tests/golden.rs`` (with the
    ``Kind::Event`` reservation pinned by the unit tests in
-   ``crates/taktora-connector-ui-contract/src/kind.rs``).
-
-.. test:: Language-neutral contract reproducibility and demo end-to-end
-   :id: TEST_0884
-   :status: implemented
-   :verifies: REQ_0855, REQ_0874
-
-   Proves the contract is language-neutral: a non-Rust consumer can
-   recompute the structural ``contract_hash`` from the published JSON
-   manifest alone using the canonical algorithm, asserted end to end
-   against the golden manifest (:need:`REQ_0874`). The demo end-to-end
-   check stands up the ``ui-demo`` producer's ``UiConnector`` + executor
-   in-process and drives a real ``Client`` through discover →
-   hash-validate → subscribe/poll → invoke over the example's exact model,
-   confirming the assembled connector works in a realistic application
-   (:need:`REQ_0855`). Realised as
-   ``examples/ui-demo/tests/contract_reproducible.rs`` and
-   ``examples/ui-demo/tests/e2e.rs``.
+   ``crates/taktora-connector-ui-contract/src/kind.rs``). The
+   language-neutral reproducibility of the ``contract_hash``
+   (:need:`REQ_0874`) is additionally proved from a non-Rust consumer by
+   ``crates/taktora-connector-ui-contract/py/smoke.py``, a pure-stdlib
+   Python script that recomputes the hash from the same checked-in golden
+   manifest via the canonical algorithm and asserts a bit-for-bit match.

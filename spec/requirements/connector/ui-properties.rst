@@ -22,7 +22,7 @@ UI consumer. This cluster ``:satisfies:`` :need:`FEAT_0092`.
    :id: REQ_0855
    :status: implemented
    :satisfies: FEAT_0093
-   :links: BB_0046, TEST_0880, TEST_0884
+   :links: BB_0046, TEST_0880
 
    The connector crate shall expose ``UiConnector<C: PayloadCodec>`` that
    implements the ``Connector`` trait with ``type Routing = UiRouting`` and
