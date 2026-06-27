@@ -1,0 +1,43 @@
+[package]
+name        = "ui-demo-view"
+version     = "0.1.0"
+edition     = "2024"
+publish     = false
+description = "taktora integration example: an egui/eframe reference View for the MVVM UI connector, binding the 'ui-demo' producer purely over the published JSON contract (FEAT_0092)"
+license     = "Apache-2.0 OR MIT"
+
+[[bin]]
+name = "ui-demo-view"
+path = "src/main.rs"
+
+[workspace]
+# Empty — its own workspace (the parent repo `exclude`s `examples`). The heavy
+# egui/eframe GUI dependencies live ONLY in this example crate: never in any
+# published library crate and never in the root workspace deps.
+
+[dependencies]
+# NOTE: version reqs must track the CURRENT published majors — a stale `^0.x`
+# req silently rejects the `[patch.crates-io]` path override (examples-local.sh
+# on becomes a no-op) and can split the dependency graph into two versions of a
+# shared crate, failing cross-crate API calls with type mismatches.
+#
+# This View depends on NEITHER the executor NOR the server crate: it binds the
+# running producer entirely over the language-neutral JSON contract.
+taktora-connector-ui-client = "0.1"
+
+# GUI deps, scoped to this example only. `glow` (OpenGL) keeps the build lighter
+# than the default wgpu backend; `default_fonts` so text renders out of the box.
+# `x11` + `wayland` enable winit's Linux windowing backends; without them winit
+# compiles to its "platform not supported" guard on Linux. They are no-ops on
+# macOS/Windows (eframe gates them per-target), so enabling both is portable.
+eframe     = { version = "0.31", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+egui       = "0.31"
+serde_json = "1"
+
+# >>> taktora-examples-local-deps >>>
+# [patch.crates-io]
+# taktora-connector-core          = { path = "../../crates/taktora-connector-core" }
+# taktora-connector-transport-iox = { path = "../../crates/taktora-connector-transport-iox" }
+# taktora-connector-ui-contract   = { path = "../../crates/taktora-connector-ui-contract" }
+# taktora-connector-ui-client     = { path = "../../crates/taktora-connector-ui-client" }
+# <<< taktora-examples-local-deps <<<

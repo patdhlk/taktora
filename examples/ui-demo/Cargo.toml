@@ -1,0 +1,64 @@
+[package]
+name        = "ui-demo"
+version     = "0.1.0"
+edition     = "2024"
+publish     = false
+description = "taktora integration example: a hardware-free MVVM UI connector producer (executor + UiConnector + simulated stepper) — the FEAT_0092 v1 validation slice"
+license     = "Apache-2.0 OR MIT"
+
+# Split into a library (the unit-tested simulation + domain model) and a thin
+# binary (the executor + connector wiring), mirroring the ethercat-stepper
+# example so `tests/` can import the model as `ui_demo::...`.
+[lib]
+name = "ui_demo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ui-demo"
+path = "src/main.rs"
+
+[workspace]
+# Empty — opt out of parent workspace discovery so this crate is its own
+# workspace (the parent repo `exclude`s `examples`). Established pattern across
+# every example in this directory.
+
+[dependencies]
+# NOTE: version reqs must track the CURRENT published majors — a `^0.1` req on a
+# crate whose local/published version is 0.2.x silently rejects the
+# `[patch.crates-io]` path override (examples-local.sh on becomes a no-op
+# building stale crates.io versions) and can split the dependency graph into
+# two versions of a shared crate, failing cross-crate API calls (e.g.
+# `register_with`) with type mismatches. Same trap previously fixed in the
+# ethercat-real-bus and ethercat-wago-coupler examples.
+taktora-executor       = "0.4"
+taktora-connector-core = "0.2"
+taktora-connector-host = "0.1"
+taktora-connector-ui   = "0.1"
+
+clap              = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
+serde             = { version = "1", features = ["derive"] }
+serde_json        = "1"
+tracing           = "0.1"
+
+[dev-dependencies]
+# The egui View binds the producer purely over the published JSON contract; the
+# headless e2e test (tests/e2e.rs) drives that same client path in-process.
+taktora-connector-ui-client = "0.1"
+
+# >>> taktora-examples-local-deps >>>
+# [patch.crates-io]
+# taktora-executor                = { path = "../../crates/taktora-executor" }
+# taktora-executor-tracing        = { path = "../../crates/taktora-executor-tracing" }
+# taktora-log                     = { path = "../../crates/taktora-log" }
+# taktora-log-dlt                 = { path = "../../crates/taktora-log-dlt" }
+# taktora-bounded-alloc           = { path = "../../crates/taktora-bounded-alloc" }
+# taktora-connector-core          = { path = "../../crates/taktora-connector-core" }
+# taktora-connector-transport-iox = { path = "../../crates/taktora-connector-transport-iox" }
+# taktora-connector-codec         = { path = "../../crates/taktora-connector-codec" }
+# taktora-connector-host          = { path = "../../crates/taktora-connector-host" }
+# taktora-connector-ui-contract   = { path = "../../crates/taktora-connector-ui-contract" }
+# taktora-connector-ui-derive     = { path = "../../crates/taktora-connector-ui-derive" }
+# taktora-connector-ui            = { path = "../../crates/taktora-connector-ui" }
+# taktora-connector-ui-client     = { path = "../../crates/taktora-connector-ui-client" }
+# <<< taktora-examples-local-deps <<<

@@ -1,0 +1,8 @@
+/target
+
+# Cargo.lock is intentionally NOT tracked for this example. With the local-deps
+# patch off (the committed state), resolution targets crates.io, which CI does
+# from a clean checkout. A committed off-state lock would resolve here against a
+# sandbox with no registry access; CI regenerates it. Regenerate locally with
+# `scripts/examples-local.sh on` then build.
+/Cargo.lock
