@@ -116,4 +116,38 @@ pub mod __private {
     //! public API.
     pub use serde_json;
     pub use taktora_connector_ui_contract as contract;
+
+    /// `size_of` routed through this crate so that, when a generated image type is
+    /// ill-formed (an enum field whose type does not implement
+    /// [`ImageEnum`](crate::ImageEnum)), the `Sized` obligation is reported
+    /// against this crate's source span rather than against `core::mem::size_of`.
+    /// std-internal diagnostic spans render differently across rustc versions,
+    /// which made `trybuild` fixtures drift; this crate's span is stable.
+    #[must_use]
+    pub const fn image_size<T>() -> usize {
+        ::core::mem::size_of::<T>()
+    }
+
+    /// The image-struct field type for a C-like enum field: the enum's backing
+    /// integer ([`ImageEnum::Repr`](crate::ImageEnum::Repr)), transparently.
+    ///
+    /// Generated `#[derive(ViewModel)]` images wrap every enum field in this
+    /// newtype instead of naming `<E as ImageEnum>::Repr` directly. The two are
+    /// layout-identical (`#[repr(transparent)]`), but the indirection means that
+    /// when `E` does **not** implement [`ImageEnum`](crate::ImageEnum) (e.g. a
+    /// nested POD struct, which is deferred), every downstream obligation
+    /// (`Copy`, `Clone`, `Sized`) is reported against *this crate's* `E: ImageEnum`
+    /// bound — a stable span — rather than against `core`'s `Copy`/`Clone` lang
+    /// items, whose diagnostic rendering drifts between rustc versions and made
+    /// the `trybuild` rejection fixtures non-portable.
+    #[repr(transparent)]
+    pub struct EnumImage<E: crate::ImageEnum>(pub <E as crate::ImageEnum>::Repr);
+
+    impl<E: crate::ImageEnum> ::std::clone::Clone for EnumImage<E> {
+        fn clone(&self) -> Self {
+            *self
+        }
+    }
+
+    impl<E: crate::ImageEnum> ::std::marker::Copy for EnumImage<E> {}
 }

@@ -266,7 +266,7 @@ pub fn image_field_type(kind: &FieldKind, original: &Type) -> TokenStream {
         FieldKind::Scalar(_) | FieldKind::Array { .. } | FieldKind::BoundedStr { .. } => {
             quote!(#original)
         }
-        FieldKind::Enum(ty) => quote!(<#ty as #krate::ImageEnum>::Repr),
+        FieldKind::Enum(ty) => quote!(#krate::__private::EnumImage<#ty>),
     }
 }
 
@@ -274,7 +274,7 @@ pub fn image_field_type(kind: &FieldKind, original: &Type) -> TokenStream {
 pub fn to_image_expr(kind: &FieldKind, field: &TokenStream) -> TokenStream {
     let krate = krate();
     if let FieldKind::Enum(_) = kind {
-        quote!(#krate::ImageEnum::to_repr(self.#field))
+        quote!(#krate::__private::EnumImage(#krate::ImageEnum::to_repr(self.#field)))
     } else {
         quote!(self.#field)
     }
@@ -284,7 +284,7 @@ pub fn to_image_expr(kind: &FieldKind, field: &TokenStream) -> TokenStream {
 pub fn from_image_expr(kind: &FieldKind, field: &TokenStream) -> TokenStream {
     let krate = krate();
     if let FieldKind::Enum(ty) = kind {
-        quote!(<#ty as #krate::ImageEnum>::from_repr(image.#field))
+        quote!(<#ty as #krate::ImageEnum>::from_repr(image.#field.0))
     } else {
         quote!(image.#field)
     }
