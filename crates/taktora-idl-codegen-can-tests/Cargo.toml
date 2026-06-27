@@ -1,0 +1,23 @@
+[package]
+name         = "taktora-idl-codegen-can-tests"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+publish      = false
+description   = "Verification crate: generates WireType code from a fixture DBC at build time and round-trips it (TEST_0880+). Not published."
+
+[dependencies]
+taktora-idl-wire = { workspace = true }
+
+[build-dependencies]
+taktora-idl-dbc         = { workspace = true }
+taktora-idl-codegen     = { workspace = true }
+taktora-idl-codegen-can = { workspace = true }
+quote                   = { workspace = true }
+syn                     = { workspace = true, features = ["parsing", "full"] }
+prettyplease            = { workspace = true }
+
+[lints.clippy]
+all = "allow"
