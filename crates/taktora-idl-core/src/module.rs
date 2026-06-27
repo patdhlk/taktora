@@ -58,9 +58,10 @@ impl Module {
     /// Returns the first [`IrError`] encountered.
     pub fn validate(&self) -> Result<(), IrError> {
         self.check_unique_names()?;
-        self.check_references()?;
-        // Computing the max size of every struct exercises the recursion guard
-        // and surfaces any cycle as a `RecursiveType` error.
+        // Computing the max size of every struct both resolves every type
+        // reference (an unknown name surfaces as `UnknownType`) and exercises
+        // the recursion guard (a cycle surfaces as `RecursiveType`), so a
+        // separate reference-only pass would be redundant.
         for s in &self.structs {
             self.struct_max_serialized_len(s)?;
         }
@@ -157,52 +158,6 @@ impl Module {
             seen.push(name);
         }
         Ok(())
-    }
-
-    fn check_references(&self) -> Result<(), IrError> {
-        for s in &self.structs {
-            for f in &s.fields {
-                self.check_type_ref(&f.ty, &s.name)?;
-            }
-        }
-        for svc in &self.services {
-            self.require_struct(svc.request.as_str(), &svc.name)?;
-            if let Some(resp) = &svc.response {
-                self.require_struct(resp.as_str(), &svc.name)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn check_type_ref(&self, ty: &Type, referrer: &str) -> Result<(), IrError> {
-        match ty {
-            Type::Scalar(_) | Type::String { .. } => Ok(()),
-            Type::Array { element, .. } | Type::Sequence { element, .. } => {
-                self.check_type_ref(element, referrer)
-            }
-            Type::Struct(name) => self.require_struct(name.as_str(), referrer),
-            Type::Enum(name) => {
-                if self.enum_by_name(name.as_str()).is_some() {
-                    Ok(())
-                } else {
-                    Err(IrError::UnknownType {
-                        referrer: referrer.to_owned(),
-                        name: name.as_str().to_owned(),
-                    })
-                }
-            }
-        }
-    }
-
-    fn require_struct(&self, name: &str, referrer: &str) -> Result<(), IrError> {
-        if self.struct_by_name(name).is_some() {
-            Ok(())
-        } else {
-            Err(IrError::UnknownType {
-                referrer: referrer.to_owned(),
-                name: name.to_owned(),
-            })
-        }
     }
 }
 

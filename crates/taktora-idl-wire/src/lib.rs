@@ -33,10 +33,18 @@ pub use error::WireError;
 /// contract is deliberately minimal so it can be audited and model-checked:
 /// fixed upper bound, in-place encode, owned decode.
 pub trait WireType: Sized {
-    /// Upper bound, in bytes, on a serialized value of this type. Equal to the
-    /// `idl-core` `max_serialized_len` of the source type (`REQ_0865`); for a
-    /// CAN message this is its `DLC`. A buffer of this length is always large
-    /// enough for [`encode`](WireType::encode).
+    /// Upper bound, in bytes, on a serialized value of this type: the fixed
+    /// wire length the backend frames into. A buffer of this length is always
+    /// large enough for [`encode`](WireType::encode), and `decode` requires at
+    /// least this many bytes.
+    ///
+    /// This is the backend's wire footprint and need not equal the `idl-core`
+    /// [`max_serialized_len`] of the source type (`REQ_0865`): a backend that
+    /// frames into a fixed envelope reports that envelope. For the CAN backend
+    /// it is the message `DLC` — the on-wire frame length — which can exceed the
+    /// packed extent of its signals.
+    ///
+    /// [`max_serialized_len`]: https://docs.rs/taktora-idl-core
     const MAX_SERIALIZED_LEN: usize;
 
     /// Serialize `self` into the start of `buf`, returning the number of bytes

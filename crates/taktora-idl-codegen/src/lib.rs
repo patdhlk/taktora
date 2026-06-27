@@ -117,6 +117,30 @@ pub enum CodegenError {
         /// Why.
         detail: String,
     },
+    /// Two distinct source names resolve to the same Rust type identifier.
+    /// IR validation only dedups verbatim source names, so collisions the
+    /// naming policy introduces (e.g. `Foo_Bar` and `FooBar`) surface here.
+    #[error("two types resolve to the same Rust identifier `{ident}`")]
+    DuplicateType {
+        /// The colliding identifier.
+        ident: String,
+    },
+    /// Two fields of one struct resolve to the same Rust identifier.
+    #[error("struct `{struct_name}` has two fields resolving to `{ident}`")]
+    DuplicateField {
+        /// Owning struct (source name).
+        struct_name: String,
+        /// The colliding identifier.
+        ident: String,
+    },
+    /// Two variants of one enum resolve to the same Rust identifier.
+    #[error("enum `{enum_name}` has two variants resolving to `{ident}`")]
+    DuplicateVariant {
+        /// Owning enum (source name).
+        enum_name: String,
+        /// The colliding identifier.
+        ident: String,
+    },
 }
 
 /// A backend that turns a [`ResolvedModule`]'s items into Rust token streams.
@@ -196,11 +220,64 @@ pub fn resolve(module: &Module) -> Result<ResolvedModule<'_>, CodegenError> {
         .map(|s| resolve_struct(s, &enums))
         .collect::<Result<Vec<_>, _>>()?;
 
+    check_unique_idents(&enums, &structs)?;
+
     Ok(ResolvedModule {
         name: &module.name,
         enums,
         structs,
     })
+}
+
+/// Reject identifier collisions the naming policy can introduce between source
+/// names that `idl-core` considered distinct. Without this, two such names emit
+/// duplicate Rust items and the generated module fails to compile.
+fn check_unique_idents(
+    enums: &[ResolvedEnum],
+    structs: &[ResolvedStruct],
+) -> Result<(), CodegenError> {
+    let mut type_idents = Vec::with_capacity(enums.len() + structs.len());
+    for ident in enums
+        .iter()
+        .map(|e| &e.ident)
+        .chain(structs.iter().map(|s| &s.ident))
+    {
+        let name = ident.to_string();
+        if type_idents.contains(&name) {
+            return Err(CodegenError::DuplicateType { ident: name });
+        }
+        type_idents.push(name);
+    }
+
+    for e in enums {
+        let mut seen = Vec::with_capacity(e.variants.len());
+        for (ident, _) in &e.variants {
+            let name = ident.to_string();
+            if seen.contains(&name) {
+                return Err(CodegenError::DuplicateVariant {
+                    enum_name: e.source_name.to_owned(),
+                    ident: name,
+                });
+            }
+            seen.push(name);
+        }
+    }
+
+    for s in structs {
+        let mut seen = Vec::with_capacity(s.fields.len());
+        for f in &s.fields {
+            let name = f.ident.to_string();
+            if seen.contains(&name) {
+                return Err(CodegenError::DuplicateField {
+                    struct_name: s.source_name.to_owned(),
+                    ident: name,
+                });
+            }
+            seen.push(name);
+        }
+    }
+
+    Ok(())
 }
 
 fn resolve_struct<'a>(
@@ -294,5 +371,78 @@ pub fn scalar_tokens(s: Scalar) -> TokenStream {
         Scalar::I64 => quote!(i64),
         Scalar::F32 => quote!(f32),
         Scalar::F64 => quote!(f64),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CodegenError, resolve};
+    use taktora_idl_core::{EnumDef, EnumVariant, Field, Module, Scalar, Struct, Type};
+
+    fn struct_with(name: &str, fields: Vec<Field>) -> Struct {
+        Struct {
+            name: name.to_owned(),
+            fields,
+        }
+    }
+
+    #[test]
+    fn colliding_type_idents_are_rejected() {
+        // `Foo_Bar` and `FooBar` both pascalize to `FooBar`.
+        let module = Module {
+            structs: vec![
+                struct_with("Foo_Bar", vec![]),
+                struct_with("FooBar", vec![]),
+            ],
+            ..Module::new("m")
+        };
+        assert!(matches!(
+            resolve(&module),
+            Err(CodegenError::DuplicateType { ident }) if ident == "FooBar"
+        ));
+    }
+
+    #[test]
+    fn colliding_field_idents_are_rejected() {
+        // `CoolantTemp` and `coolant_temp` both snake to `coolant_temp`.
+        let module = Module {
+            structs: vec![struct_with(
+                "Frame",
+                vec![
+                    Field::new("CoolantTemp", Type::scalar(Scalar::U8)),
+                    Field::new("coolant_temp", Type::scalar(Scalar::U8)),
+                ],
+            )],
+            ..Module::new("m")
+        };
+        assert!(matches!(
+            resolve(&module),
+            Err(CodegenError::DuplicateField { ident, .. }) if ident == "coolant_temp"
+        ));
+    }
+
+    #[test]
+    fn colliding_variant_idents_are_rejected() {
+        let module = Module {
+            enums: vec![EnumDef {
+                name: "E".to_owned(),
+                underlying: Scalar::U8,
+                variants: vec![
+                    EnumVariant {
+                        name: "Ab".to_owned(),
+                        value: 0,
+                    },
+                    EnumVariant {
+                        name: "ab".to_owned(),
+                        value: 1,
+                    },
+                ],
+            }],
+            ..Module::new("m")
+        };
+        assert!(matches!(
+            resolve(&module),
+            Err(CodegenError::DuplicateVariant { ident, .. }) if ident == "Ab"
+        ));
     }
 }

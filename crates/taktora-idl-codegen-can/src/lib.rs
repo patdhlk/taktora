@@ -175,6 +175,9 @@ fn encode_field(
         FieldKind::Signed(_) => quote! {
             pack_signed(buf, #start, #len, #order, self.#fident as i64)?;
         },
+        FieldKind::Enum { underlying, .. } if underlying.is_signed_integer() => quote! {
+            pack_signed(buf, #start, #len, #order, self.#fident.to_raw() as i64)?;
+        },
         FieldKind::Enum { .. } => quote! {
             pack_unsigned(buf, #start, #len, #order, self.#fident.to_raw() as u64)?;
         },
@@ -202,8 +205,15 @@ fn decode_field<'a>(
         },
         FieldKind::Enum { ident, underlying } => {
             let under = scalar_tokens(*underlying);
+            // A signed discriminant must be sign-extended from `bit_len`, so it
+            // decodes through the signed path; an unsigned one stays zero-extended.
+            let raw = if underlying.is_signed_integer() {
+                quote!(unpack_signed(buf, #start, #len, #order)? as #under)
+            } else {
+                quote!(unpack_unsigned(buf, #start, #len, #order)? as #under)
+            };
             quote! {
-                #ident::from_raw(unpack_unsigned(buf, #start, #len, #order)? as #under)?
+                #ident::from_raw(#raw)?
             }
         }
         FieldKind::Float(_) => return Err(reject_float(struct_name, f)),

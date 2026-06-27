@@ -87,15 +87,18 @@ fn check(
     Ok(())
 }
 
-/// Pack the low `bit_len` bits of `raw` into `frame` at the signal's position.
+/// Pack `raw` into `frame` at the signal's position.
 ///
 /// Each addressed bit is written explicitly (cleared then set), so the result
-/// does not depend on `frame`'s prior contents at those positions.
+/// does not depend on `frame`'s prior contents at those positions. `raw` must
+/// fit within `bit_len` bits; a wider value is rejected rather than silently
+/// truncated, so encode/decode cannot disagree.
 ///
 /// # Errors
 ///
-/// [`WireError::InvalidBitLength`] for `bit_len` outside `1..=64`, or
-/// [`WireError::SignalOutOfBounds`] if the signal does not fit in `frame`.
+/// [`WireError::InvalidBitLength`] for `bit_len` outside `1..=64`,
+/// [`WireError::SignalOutOfBounds`] if the signal does not fit in `frame`, or
+/// [`WireError::ValueOutOfRange`] if `raw` has bits set above `bit_len`.
 pub fn pack_unsigned(
     frame: &mut [u8],
     start_bit: u16,
@@ -104,6 +107,9 @@ pub fn pack_unsigned(
     raw: u64,
 ) -> Result<(), WireError> {
     check(frame.len(), start_bit, bit_len, order)?;
+    if raw & !mask(bit_len) != 0 {
+        return Err(WireError::ValueOutOfRange);
+    }
     for_each_bit(start_bit, bit_len, order, |value_bit, abs| {
         let byte = abs / 8;
         let mask = 1u8 << (abs % 8);
@@ -116,11 +122,15 @@ pub fn pack_unsigned(
     Ok(())
 }
 
-/// Pack a signed `value` (two's-complement, truncated to `bit_len` bits).
+/// Pack a signed `value` as two's-complement into `bit_len` bits.
+///
+/// `value` must be representable in `bit_len` bits; a value outside
+/// `-2^(bit_len-1) ..= 2^(bit_len-1) - 1` is rejected rather than truncated.
 ///
 /// # Errors
 ///
-/// As [`pack_unsigned`].
+/// As [`pack_unsigned`], where [`WireError::ValueOutOfRange`] additionally
+/// covers a `value` that does not fit `bit_len` bits.
 #[allow(clippy::cast_sign_loss)] // reinterpret two's-complement bits, by design
 pub fn pack_signed(
     frame: &mut [u8],
@@ -129,6 +139,15 @@ pub fn pack_signed(
     order: ByteOrder,
     value: i64,
 ) -> Result<(), WireError> {
+    check(frame.len(), start_bit, bit_len, order)?;
+    // `check` guarantees `1 <= bit_len <= 64`; for widths below 64 the value
+    // must land within the two's-complement range, else it would truncate.
+    if bit_len < 64 {
+        let limit = 1i64 << (bit_len - 1);
+        if value < -limit || value >= limit {
+            return Err(WireError::ValueOutOfRange);
+        }
+    }
     let raw = (value as u64) & mask(bit_len);
     pack_unsigned(frame, start_bit, bit_len, order, raw)
 }
@@ -261,6 +280,29 @@ mod tests {
             pack_unsigned(&mut frame, 0, 65, ByteOrder::LittleEndian, 0),
             Err(WireError::InvalidBitLength)
         );
+    }
+
+    #[test]
+    fn over_wide_values_are_rejected_not_truncated() {
+        let mut frame = [0u8; 8];
+        // 4-bit signal cannot hold 20 (0b10100): reject rather than store 4.
+        assert_eq!(
+            pack_unsigned(&mut frame, 0, 4, ByteOrder::LittleEndian, 20),
+            Err(WireError::ValueOutOfRange)
+        );
+        // Signed 4-bit range is -8..=7.
+        assert_eq!(
+            pack_signed(&mut frame, 0, 4, ByteOrder::LittleEndian, 8),
+            Err(WireError::ValueOutOfRange)
+        );
+        assert_eq!(
+            pack_signed(&mut frame, 0, 4, ByteOrder::LittleEndian, -9),
+            Err(WireError::ValueOutOfRange)
+        );
+        // The extremes of the range are accepted.
+        assert!(pack_signed(&mut frame, 0, 4, ByteOrder::LittleEndian, 7).is_ok());
+        assert!(pack_signed(&mut frame, 0, 4, ByteOrder::LittleEndian, -8).is_ok());
+        assert!(pack_unsigned(&mut frame, 0, 4, ByteOrder::LittleEndian, 15).is_ok());
     }
 
     #[test]

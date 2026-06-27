@@ -14,6 +14,8 @@ pub enum WireError {
     SignalOutOfBounds,
     /// A bit length outside the supported `1..=64` range was requested.
     InvalidBitLength,
+    /// A value does not fit the signal's bit width (it would be truncated).
+    ValueOutOfRange,
     /// An enum-typed field decoded to a raw value with no defined variant.
     UnknownEnumValue,
 }
@@ -24,6 +26,7 @@ impl fmt::Display for WireError {
             Self::BufferTooSmall => "destination buffer smaller than wire length",
             Self::SignalOutOfBounds => "signal bit range falls outside the frame",
             Self::InvalidBitLength => "bit length outside the supported 1..=64 range",
+            Self::ValueOutOfRange => "value does not fit the signal's bit width",
             Self::UnknownEnumValue => "enum field decoded to an undefined variant",
         };
         f.write_str(msg)

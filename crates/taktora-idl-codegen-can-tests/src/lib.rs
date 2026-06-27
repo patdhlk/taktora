@@ -11,7 +11,9 @@ include!(concat!(env!("OUT_DIR"), "/vehicle.rs"));
 
 #[cfg(test)]
 mod tests {
-    use crate::vehicle::{BodyControl, EngineData, EngineDataGear};
+    use crate::vehicle::{
+        BodyControl, EngineData, EngineDataGear, Transmission, TransmissionDirection,
+    };
     use taktora_idl_wire::{WireError, WireType};
 
     #[test]
@@ -80,6 +82,32 @@ mod tests {
         let mut buf = [0u8; 4];
         assert_eq!(msg.encode(&mut buf), Err(WireError::BufferTooSmall));
         assert_eq!(EngineData::decode(&buf), Err(WireError::BufferTooSmall));
+    }
+
+    #[test]
+    fn signed_enum_variant_round_trips() {
+        // Direction is a 4-bit signed signal whose value table includes -1
+        // ("Reverse"). encode packs the two's-complement bits; decode must
+        // sign-extend so the negative variant is recovered (not rejected).
+        let msg = Transmission {
+            direction: TransmissionDirection::Reverse,
+        };
+        let mut buf = [0u8; 1];
+        msg.encode(&mut buf).unwrap();
+        assert_eq!(Transmission::decode(&buf).unwrap(), msg);
+        assert_eq!(TransmissionDirection::Reverse.to_raw(), -1);
+    }
+
+    #[test]
+    fn out_of_range_field_value_is_rejected() {
+        // DoorState is a 4-bit signal; 20 does not fit and must error rather
+        // than silently truncate to 4 on the wire.
+        let msg = BodyControl {
+            mux: 0,
+            door_state: 20,
+        };
+        let mut buf = [0u8; 2];
+        assert_eq!(msg.encode(&mut buf), Err(WireError::ValueOutOfRange));
     }
 
     #[test]

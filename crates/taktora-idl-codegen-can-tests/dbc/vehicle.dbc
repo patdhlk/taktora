@@ -11,4 +11,8 @@ BO_ 512 BodyControl: 2 Dashboard
  SG_ Mux M : 0|8@1+ (1,0) [0|255] "" ECU
  SG_ DoorState m0 : 8|4@1+ (1,0) [0|15] "" ECU
 
+BO_ 768 Transmission: 1 ECU
+ SG_ Direction : 0|4@1- (1,0) [-8|7] "" Dashboard
+
 VAL_ 256 Gear 0 "Neutral" 1 "First" 2 "Second" ;
+VAL_ 768 Direction -1 "Reverse" 0 "Neutral" 1 "Forward" ;
