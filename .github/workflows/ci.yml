@@ -144,6 +144,16 @@ jobs:
             examples/ethercat-mock-loop
             examples/ethercat-real-bus
             examples/ethercat-wago-coupler
+            examples/ui-demo
+            examples/ui-demo-view
+      # GUI system libraries for the egui reference View (examples/ui-demo-view).
+      # eframe -> winit links against xkbcommon/wayland/X11 on Linux; these dev
+      # packages provide the headers/libs the headless runner otherwise lacks.
+      - name: Install GUI system libraries (egui example)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libxkbcommon-x11-dev libx11-dev
       - name: Check examples
         run: ./scripts/check-examples.sh
 
