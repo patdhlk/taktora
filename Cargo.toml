@@ -28,6 +28,8 @@ members = [
     "crates/taktora-connector-ethercat-tests",
     "crates/taktora-connector-host",
     "crates/taktora-connector-host-tests",
+    "crates/taktora-connector-j1939",
+    "crates/taktora-connector-j1939-tests",
     "crates/taktora-connector-transport-iox",
     "crates/taktora-connector-ui-contract",
     "crates/taktora-connector-ui-derive",
@@ -96,6 +98,7 @@ taktora-connector-codec          = { path = "crates/taktora-connector-codec", ve
 taktora-connector-core           = { path = "crates/taktora-connector-core", version = "0.2.8" }
 taktora-connector-ethercat       = { path = "crates/taktora-connector-ethercat", version = "0.4.4" }
 taktora-connector-host           = { path = "crates/taktora-connector-host", version = "0.1.15" }
+taktora-connector-j1939          = { path = "crates/taktora-connector-j1939", version = "0.1.0" }
 taktora-connector-transport-iox  = { path = "crates/taktora-connector-transport-iox", version = "0.1.9" }
 taktora-connector-ui-contract    = { path = "crates/taktora-connector-ui-contract", version = "0.1.0" }
 taktora-connector-ui-derive      = { path = "crates/taktora-connector-ui-derive", version = "0.1.0" }

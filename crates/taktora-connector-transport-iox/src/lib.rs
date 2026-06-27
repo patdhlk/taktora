@@ -13,6 +13,15 @@
 //! * [`ServiceFactory`] — opens / creates the iceoryx2 pub/sub service
 //!   for a given [`taktora_connector_core::ChannelDescriptor`]
 //!   (`REQ_0206`).
+//! * [`SliceChannelWriter`] / [`SliceChannelReader`] — a variable-length,
+//!   zero-copy channel pair over an iceoryx2 `[u8]` slice service
+//!   (`BB_0097` / `FEAT_0097`). Additive to the fixed-`N`
+//!   [`ConnectorEnvelope`] path: loans are sized to the message at send
+//!   time, the data segment grows by `AllocationStrategy::PowerOfTwo`
+//!   bounded by a configurable ceiling, and `sequence_number` /
+//!   `timestamp_ns` ride an iceoryx2 user-header
+//!   ([`SliceUserHeader`]) (`REQ_0885`–`REQ_0889`). This is the bulk path
+//!   the J1939 ETP connector will later consume.
 //!
 //! The `Connector` trait itself (`REQ_0220`) lives in the host crate
 //! `taktora-connector-host` because its method surface ties together
@@ -26,8 +35,13 @@ pub mod envelope;
 pub mod factory;
 mod now;
 pub mod raw;
+pub mod slice;
 
 pub use channel::{ChannelReader, ChannelWriter, RecvEnvelope};
 pub use envelope::ConnectorEnvelope;
 pub use factory::ServiceFactory;
 pub use raw::{RawChannelReader, RawChannelWriter, RawSample, RawSendOutcome};
+pub use slice::{
+    RecvSlice, SliceChannelConfig, SliceChannelReader, SliceChannelWriter, SliceSendOutcome,
+    SliceUserHeader,
+};

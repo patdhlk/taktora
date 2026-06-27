@@ -21,3 +21,6 @@
 # Generated jitter plots
 *.png
 xtask/preempt-rt/plots/*.png
+
+# Local-only bindgen/clang shim for iceoryx2 on this host (machine-specific).
+/.cargo/

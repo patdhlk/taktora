@@ -1,0 +1,60 @@
+[package]
+name         = "taktora-connector-j1939"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "J1939 reference connector for the taktora-connector framework. Implements BB_0098 (FEAT_0098)."
+
+[features]
+default = []
+# Passthrough to `taktora-connector-can`'s `socketcan-integration`
+# feature so real (Linux-only) CAN I/O is reachable through the
+# reused `CanInterfaceLike` driver layer (REQ_0899). Off by default;
+# `MockJ1939Interface` ships ungated for layer-1 tests on any host OS.
+socketcan-integration = ["taktora-connector-can/socketcan-integration"]
+
+[dependencies]
+taktora-connector-core           = { workspace = true }
+taktora-connector-transport-iox  = { workspace = true }
+taktora-connector-host           = { workspace = true }
+taktora-connector-codec          = { workspace = true }
+taktora-connector-can            = { workspace = true }
+taktora-executor                 = { workspace = true }
+iceoryx2                         = { workspace = true }
+crossbeam-channel                = { workspace = true }
+tokio                            = { workspace = true }
+serde                            = { workspace = true, features = ["std"] }
+thiserror                        = { workspace = true }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions        = "allow"
+must_use_candidate             = "allow"
+missing_errors_doc             = "allow"
+missing_panics_doc             = "allow"   # poisoned-mutex `expect` is the project convention
+cast_possible_truncation       = "allow"   # J1939 byte fields bounded by construction
+significant_drop_tightening    = "allow"   # registry guard intentionally held across iter
+manual_async_fn                = "allow"   # `impl Future` is intentional in CanInterfaceLike
+similar_names                  = "allow"   # r1/r2/r3 helper names in tests
+option_if_let_else             = "allow"   # readability preference
+unnecessary_literal_bound      = "allow"
+missing_const_for_fn           = "allow"
+unreadable_literal             = "allow"
+match_same_arms                = "allow"
+useless_conversion             = "allow"
+needless_continue              = "allow"
+ignored_unit_patterns          = "allow"
+items_after_statements         = "allow"
+too_long_first_doc_paragraph   = "allow"

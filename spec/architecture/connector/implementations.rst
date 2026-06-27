@@ -650,14 +650,14 @@ spec text that needed amendment during implementation.
    ``socketcan-integration`` CI job and the kernel ``vcan``
    module are wired into CI.
 
-.. impl:: taktora-connector-j1939 crate (planned)
+.. impl:: taktora-connector-j1939 crate
    :id: IMPL_0090
-   :status: draft
+   :status: implemented
    :implements: BB_0098
    :refines: REQ_0890, REQ_0891, REQ_0892, REQ_0893, REQ_0894, REQ_0895, REQ_0896, REQ_0897, REQ_0898, REQ_0899
 
-   **Crate.** ``crates/taktora-connector-j1939`` (planned; not yet
-   scaffolded). Default deps: ``taktora-connector-core``,
+   **Crate.** ``crates/taktora-connector-j1939``. Default deps:
+   ``taktora-connector-core``,
    ``taktora-connector-transport-iox`` (envelope **and** the
    :need:`BB_0097` slice channel), ``taktora-connector-host``,
    ``taktora-connector-codec``, ``taktora-executor``, ``tokio``, and
@@ -668,12 +668,11 @@ spec text that needed amendment during implementation.
    ``publish = false`` ``taktora-connector-j1939-tests`` crate per the
    connector guide's two-crate split.
 
-   **Status.** Planned surface only — the crate has not been scaffolded.
-   This directive locks the public API the forthcoming implementation is
-   measured against; status flips ``draft`` → ``open`` once the crate
-   lands and its surface matches the bulleted list below. The boundary,
-   delivery, and address-claim decisions are :need:`ADR_0108`,
-   :need:`ADR_0109`, and :need:`ADR_0110`.
+   **Status.** Implemented — the crate has landed and its surface
+   matches the bulleted list below (single-frame routing, the BAM /
+   RTS-CTS / ETP transport-protocol engine, and J1939-81 address
+   claiming). The boundary, delivery, and address-claim decisions are
+   :need:`ADR_0108`, :need:`ADR_0109`, and :need:`ADR_0110`.
 
    **Surface.**
 
@@ -697,9 +696,9 @@ spec text that needed amendment during implementation.
    bound), TEST_0893 (claim contention), TEST_0894 (claim → health + TX
    gate), TEST_0895 (mock harness).
 
-.. impl:: taktora-connector-transport-iox slice channel (planned)
+.. impl:: taktora-connector-transport-iox slice channel
    :id: IMPL_0091
-   :status: draft
+   :status: implemented
    :implements: BB_0097
    :refines: REQ_0885, REQ_0886, REQ_0887, REQ_0888, REQ_0889
 
@@ -709,9 +708,8 @@ spec text that needed amendment during implementation.
    over an iceoryx2 slice (``[u8]``) publish-subscribe service with an
    iceoryx2 user-header carrying ``sequence_number`` / ``timestamp_ns``.
 
-   **Status.** Planned surface only. Status flips ``draft`` → ``open``
-   once the slice channel lands and the ETP path (:need:`BB_0101`)
-   consumes it.
+   **Status.** Implemented — the slice channel has landed and the ETP
+   path (:need:`BB_0101`) consumes it.
 
    **Surface.**
 

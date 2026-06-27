@@ -497,7 +497,7 @@ two crates that carry the most logic.
 
 .. building-block:: Large-payload slice channel (transport-iox)
    :id: BB_0097
-   :status: draft
+   :status: implemented
    :implements: REQ_0885, REQ_0886, REQ_0887, REQ_0888, REQ_0889
 
    An additive transport in ``taktora-connector-transport-iox`` beside
@@ -514,7 +514,7 @@ two crates that carry the most logic.
 
 .. building-block:: taktora-connector-j1939 crate
    :id: BB_0098
-   :status: draft
+   :status: implemented
    :implements: REQ_0890, REQ_0899
 
    J1939 plugin (``J1939Connector<C>`` implementing ``Connector``) and
@@ -532,7 +532,7 @@ two crates that carry the most logic.
 
 .. building-block:: J1939Connector (sub-block of BB_0098, plugin side)
    :id: BB_0099
-   :status: draft
+   :status: implemented
    :implements: REQ_0890, REQ_0891
 
    Plugin-side ``J1939Connector<C: PayloadCodec>``. Implements
@@ -548,7 +548,7 @@ two crates that carry the most logic.
 
 .. building-block:: J1939Gateway (sub-block of BB_0098, gateway side)
    :id: BB_0100
-   :status: draft
+   :status: implemented
    :implements: REQ_0890, REQ_0895, REQ_0896, REQ_0898
 
    Gateway-side executable item that owns one ``CanInterfaceLike`` per
@@ -564,7 +564,7 @@ two crates that carry the most logic.
 
 .. building-block:: J1939 transport-protocol state machine (sub-block of BB_0100)
    :id: BB_0101
-   :status: draft
+   :status: implemented
    :implements: REQ_0892, REQ_0893, REQ_0894, REQ_0895, REQ_0896
 
    Userspace TP engine covering BAM (TP.CM + TP.DT), RTS/CTS
@@ -580,7 +580,7 @@ two crates that carry the most logic.
 
 .. building-block:: J1939 address-claim state machine (sub-block of BB_0100)
    :id: BB_0102
-   :status: draft
+   :status: implemented
    :implements: REQ_0897, REQ_0898
 
    J1939-81 address manager, one instance per owned interface. Claims a
@@ -594,7 +594,7 @@ two crates that carry the most logic.
 
 .. building-block:: MockJ1939Interface (sub-block of BB_0098)
    :id: BB_0103
-   :status: draft
+   :status: implemented
    :implements: REQ_0899
 
    In-process implementation harness for the layer-1 test pyramid, built

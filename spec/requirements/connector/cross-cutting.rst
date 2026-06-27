@@ -173,7 +173,8 @@ to keep the umbrella's traceability complete.
 
 .. req:: NO unbounded ETP reassembly
    :id: REQ_0903
-   :status: rejected
+   :status: implemented
+   :links: BB_0101, TEST_0890
    :satisfies: FEAT_0098
 
    The J1939 connector shall **not** allow ETP reassembly to grow

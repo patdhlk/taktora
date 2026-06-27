@@ -25,7 +25,8 @@ sample. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Slice-typed variable-length channel
    :id: REQ_0885
-   :status: draft
+   :status: implemented
+   :links: BB_0097, TEST_0884
    :satisfies: FEAT_0097
    :github: 121
 
@@ -36,7 +37,8 @@ sample. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Loans sized at send time
    :id: REQ_0886
-   :status: draft
+   :status: implemented
+   :links: BB_0097, TEST_0884
    :satisfies: FEAT_0097
    :github: 121
 
@@ -46,7 +48,8 @@ sample. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Segment grows by PowerOfTwo
    :id: REQ_0887
-   :status: draft
+   :status: implemented
+   :links: BB_0097, TEST_0885
    :satisfies: FEAT_0097
    :github: 121
 
@@ -57,7 +60,8 @@ sample. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Growth bounded by a configurable ceiling
    :id: REQ_0888
-   :status: draft
+   :status: implemented
+   :links: BB_0097, TEST_0885
    :satisfies: FEAT_0097
    :github: 121
 
@@ -69,7 +73,8 @@ sample. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Single-publisher topology and metadata parity
    :id: REQ_0889
-   :status: draft
+   :status: implemented
+   :links: BB_0097, TEST_0884
    :satisfies: FEAT_0097
    :github: 121
 

@@ -32,7 +32,8 @@ delivery model in :need:`ADR_0109`; full address-claim scope in
 
 .. req:: 29-bit ID decode and PGN routing
    :id: REQ_0890
-   :status: draft
+   :status: implemented
+   :links: BB_0100, TEST_0886
    :satisfies: FEAT_0098
    :github: 122
 
@@ -45,7 +46,8 @@ delivery model in :need:`ADR_0109`; full address-claim scope in
 
 .. req:: J1939Routing declares transport class; N validated
    :id: REQ_0891
-   :status: draft
+   :status: implemented
+   :links: BB_0099, TEST_0887
    :satisfies: FEAT_0098
    :github: 122
 
@@ -58,7 +60,8 @@ delivery model in :need:`ADR_0109`; full address-claim scope in
 
 .. req:: BAM reassembly and segmentation
    :id: REQ_0892
-   :status: draft
+   :status: implemented
+   :links: BB_0101, TEST_0888
    :satisfies: FEAT_0098
    :github: 123
 
@@ -68,7 +71,8 @@ delivery model in :need:`ADR_0109`; full address-claim scope in
 
 .. req:: RTS/CTS connection-mode reassembly and segmentation
    :id: REQ_0893
-   :status: draft
+   :status: implemented
+   :links: BB_0101, TEST_0889
    :satisfies: FEAT_0098
    :github: 124
 
@@ -79,7 +83,8 @@ delivery model in :need:`ADR_0109`; full address-claim scope in
 
 .. req:: ETP over the slice channel, bounded
    :id: REQ_0894
-   :status: draft
+   :status: implemented
+   :links: BB_0101, TEST_0890
    :satisfies: FEAT_0098
    :github: 125
 
@@ -92,7 +97,8 @@ delivery model in :need:`ADR_0109`; full address-claim scope in
 
 .. req:: TP timers enforced and surfaced as health
    :id: REQ_0895
-   :status: draft
+   :status: implemented
+   :links: BB_0101, TEST_0891
    :satisfies: FEAT_0098
    :github: 123
 
@@ -103,7 +109,8 @@ delivery model in :need:`ADR_0109`; full address-claim scope in
 
 .. req:: Concurrent TP sessions bounded per interface
    :id: REQ_0896
-   :status: draft
+   :status: implemented
+   :links: BB_0101, TEST_0892
    :satisfies: FEAT_0098
    :github: 123
 
@@ -114,7 +121,8 @@ delivery model in :need:`ADR_0109`; full address-claim scope in
 
 .. req:: Full J1939-81 address claiming
    :id: REQ_0897
-   :status: draft
+   :status: implemented
+   :links: BB_0102, TEST_0893
    :satisfies: FEAT_0098
    :github: 126
 
@@ -126,7 +134,8 @@ delivery model in :need:`ADR_0109`; full address-claim scope in
 
 .. req:: Claim state maps onto health; TX gated until claimed
    :id: REQ_0898
-   :status: draft
+   :status: implemented
+   :links: BB_0102, TEST_0894
    :satisfies: FEAT_0098
    :github: 126
 
@@ -139,7 +148,8 @@ delivery model in :need:`ADR_0109`; full address-claim scope in
 
 .. req:: Reuse the CAN driver layer; provide MockJ1939Interface
    :id: REQ_0899
-   :status: draft
+   :status: implemented
+   :links: BB_0103, TEST_0895
    :satisfies: FEAT_0098
    :github: 122
 
