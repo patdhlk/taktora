@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10](https://github.com/patdhlk/taktora/compare/taktora-connector-transport-iox-v0.1.9...taktora-connector-transport-iox-v0.1.10) - 2026-06-27
+
+
+### Added
+
+- *(connector)* J1939 connector + large-payload slice channel (FEAT_0097, FEAT_0098) ([#129](https://github.com/patdhlk/taktora/pull/129))
+
+### Documentation
+
+- *(readme)* Document the J1939 connector and slice channel ([#130](https://github.com/patdhlk/taktora/pull/130))
+
 ## [0.1.8](https://github.com/patdhlk/taktora/compare/taktora-connector-transport-iox-v0.1.7...taktora-connector-transport-iox-v0.1.8) - 2026-06-07
 
 
