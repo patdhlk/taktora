@@ -107,12 +107,12 @@ and the language-neutral contract — is validated in-tree by the
 pure-stdlib ``crates/taktora-connector-ui-contract/py/smoke.py`` proof
 (:need:`TEST_0883`).
 
-The runnable ``ui-demo`` producer example (wiring the connector into the
-``ethercat-stepper`` example) and the minimal **egui** reference View on
-``taktora-connector-ui-client`` land in a follow-up PR once the UI connector
-crates are published to crates.io — the repo's examples build against published
-``version`` dependencies, so they cannot ship in the same PR that introduces
-the crates.
+The runnable ``ui-demo`` producer example (a standalone, hardware-free
+simulated stepper) and the minimal **egui** reference View on
+``taktora-connector-ui-client`` demonstrate the connector end to end. Both
+live under ``examples/`` and build against the published ``version``
+dependencies (with the standard toggled ``[patch.crates-io]`` block for local
+development); ``ui-demo`` is exercised headlessly by CI via ``--ticks``.
 
 Deferred / anti-goals
 ---------------------
