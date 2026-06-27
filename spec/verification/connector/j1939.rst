@@ -14,7 +14,7 @@ Large-payload slice channel (FEAT_0097)
 
 .. test:: Slice channel variable-length round-trip
    :id: TEST_0884
-   :status: draft
+   :status: implemented
    :verifies: REQ_0885, REQ_0886, REQ_0889
 
    Publish several messages of differing lengths through a
@@ -26,7 +26,7 @@ Large-payload slice channel (FEAT_0097)
 
 .. test:: Slice channel grows then enforces the ceiling
    :id: TEST_0885
-   :status: draft
+   :status: implemented
    :verifies: REQ_0887, REQ_0888
 
    Configure a small ``initial_max_slice_len`` and a ``max_payload_bytes``
@@ -40,7 +40,7 @@ J1939 connector (FEAT_0098)
 
 .. test:: J1939 29-bit ID decode and PGN routing
    :id: TEST_0886
-   :status: draft
+   :status: implemented
    :verifies: REQ_0890
 
    Feed crafted 29-bit identifiers (PDU1 destination-specific and PDU2
@@ -50,7 +50,7 @@ J1939 connector (FEAT_0098)
 
 .. test:: J1939Routing transport-class N validation
    :id: TEST_0887
-   :status: draft
+   :status: implemented
    :verifies: REQ_0891
 
    Assert ``create_writer`` / ``create_reader`` accept a channel whose
@@ -60,7 +60,7 @@ J1939 connector (FEAT_0098)
 
 .. test:: BAM round-trip via MockJ1939Interface
    :id: TEST_0888
-   :status: draft
+   :status: implemented
    :verifies: REQ_0892
 
    Layer-1 end-to-end: segment a 9–1785-byte payload outbound into TP.CM
@@ -70,7 +70,7 @@ J1939 connector (FEAT_0098)
 
 .. test:: RTS/CTS connection-mode round-trip
    :id: TEST_0889
-   :status: draft
+   :status: implemented
    :verifies: REQ_0893
 
    Drive a full RTS → CTS → TP.DT → EndOfMsgAck exchange through the mock,
@@ -79,7 +79,7 @@ J1939 connector (FEAT_0098)
 
 .. test:: ETP round-trip over the slice channel, bounded
    :id: TEST_0890
-   :status: draft
+   :status: implemented
    :verifies: REQ_0894, REQ_0903
 
    Transfer an ETP message larger than 1785 bytes; assert it round-trips
@@ -89,7 +89,7 @@ J1939 connector (FEAT_0098)
 
 .. test:: TP timeout surfaces as a health event
    :id: TEST_0891
-   :status: draft
+   :status: implemented
    :verifies: REQ_0895
 
    Open a TP session and withhold the expected next frame past the
@@ -98,7 +98,7 @@ J1939 connector (FEAT_0098)
 
 .. test:: Concurrent inbound TP sessions are bounded
    :id: TEST_0892
-   :status: draft
+   :status: implemented
    :verifies: REQ_0896
 
    Configure a small max-concurrent-sessions limit and open one more
@@ -107,7 +107,7 @@ J1939 connector (FEAT_0098)
 
 .. test:: Address-claim contention and cannot-claim
    :id: TEST_0893
-   :status: draft
+   :status: implemented
    :verifies: REQ_0897
 
    Inject a competing Address Claimed for the same SA with a
@@ -117,7 +117,7 @@ J1939 connector (FEAT_0098)
 
 .. test:: Claim state drives health and gates TX
    :id: TEST_0894
-   :status: draft
+   :status: implemented
    :verifies: REQ_0898
 
    Assert the interface reports ``Connecting`` while Claiming, ``Up`` once
@@ -126,7 +126,7 @@ J1939 connector (FEAT_0098)
 
 .. test:: MockJ1939Interface deterministic harness
    :id: TEST_0895
-   :status: draft
+   :status: implemented
    :verifies: REQ_0899
 
    Confirm ``MockJ1939Interface`` (over ``MockCanInterface``) lets a
