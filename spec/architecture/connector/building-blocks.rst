@@ -494,3 +494,112 @@ two crates that carry the most logic.
    Recovers statelessly on UI restart via history-depth-1 redelivery
    (:need:`REQ_0881`) and re-reads / re-validates the manifest on an
    epoch change (:need:`REQ_0882`).
+
+.. building-block:: Large-payload slice channel (transport-iox)
+   :id: BB_0097
+   :status: draft
+   :implements: REQ_0885, REQ_0886, REQ_0887, REQ_0888, REQ_0889
+
+   An additive transport in ``taktora-connector-transport-iox`` beside
+   :need:`BB_0002`'s ``ConnectorEnvelope<N>``: a ``SliceChannelWriter`` /
+   ``SliceChannelReader`` pair over an iceoryx2 slice (``[u8]``)
+   publish-subscribe service. Loans are sized to the message at send time
+   (``loan_slice_uninit``); the data segment starts at a configurable
+   ``initial_max_slice_len`` and grows by ``AllocationStrategy::PowerOfTwo``
+   up to a configurable ``max_payload_bytes`` ceiling, past which a loan is
+   refused with a bounded-capacity ``ConnectorError`` so growth stays
+   auditable (:need:`REQ_0888`). ``sequence_number`` / ``timestamp_ns``
+   ride an iceoryx2 user-header rather than an inline POD struct
+   (:need:`REQ_0889`). First consumer: J1939 ETP (:need:`BB_0101`).
+
+.. building-block:: taktora-connector-j1939 crate
+   :id: BB_0098
+   :status: draft
+   :implements: REQ_0890, REQ_0899
+
+   J1939 plugin (``J1939Connector<C>`` implementing ``Connector``) and
+   gateway (``J1939Gateway`` exposing executable items), layering SAE
+   J1939 on CAN. Depends on ``taktora-connector-core``,
+   ``taktora-connector-transport-iox`` (envelope **and**
+   :need:`BB_0097` slice channel), ``taktora-connector-codec``,
+   ``taktora-executor``, and — at the crate level — ``taktora-connector-can``
+   for its ``CanInterfaceLike`` driver layer (``MockCanInterface`` /
+   feature-gated ``RealCanInterface``, ``CanData`` / ``CanFrame``,
+   ``CanGateway``). Hosts the tokio sidecar driving the TP state machine
+   (:need:`BB_0101`) and the address-claim state machine
+   (:need:`BB_0102`). Reuses the CAN driver and owns its own
+   PGN-aware dispatcher per :need:`ADR_0108`.
+
+.. building-block:: J1939Connector (sub-block of BB_0098, plugin side)
+   :id: BB_0099
+   :status: draft
+   :implements: REQ_0890, REQ_0891
+
+   Plugin-side ``J1939Connector<C: PayloadCodec>``. Implements
+   ``Connector`` with ``type Routing = J1939Routing``. Owns no I/O —
+   produces ``ChannelWriter`` / ``ChannelReader`` handles whose
+   ``J1939Routing`` declares PGN, optional source/destination-address
+   filters, transport class (``SingleFrame`` | ``Tp { max_len }``), and TX
+   priority. Validates that the channel's ``N`` matches the declared
+   transport class before any iceoryx2 service is created
+   (:need:`REQ_0891`), mirroring :need:`BB_0071`'s frame-kind check.
+   Routes bounded traffic onto ``ConnectorEnvelope<N>`` channels and ETP
+   onto the :need:`BB_0097` slice channel.
+
+.. building-block:: J1939Gateway (sub-block of BB_0098, gateway side)
+   :id: BB_0100
+   :status: draft
+   :implements: REQ_0890, REQ_0895, REQ_0896, REQ_0898
+
+   Gateway-side executable item that owns one ``CanInterfaceLike`` per
+   configured interface (reused from :need:`BB_0072`'s driver layer) and
+   runs a PGN-aware dispatcher: decode the 29-bit ID into priority / PDU
+   format / PGN / SA / DA, demux single-frame PGNs straight to matching
+   channels, and feed multi-packet frames into the TP state machine
+   (:need:`BB_0101`). Maintains a per-interface routing registry keyed by
+   PGN with optional SA/DA filters. Aggregates TP-session and
+   address-claim state into the externally-visible ``ConnectorHealth``;
+   gates outbound transmission until the interface's address is Claimed
+   (:need:`REQ_0898`).
+
+.. building-block:: J1939 transport-protocol state machine (sub-block of BB_0100)
+   :id: BB_0101
+   :status: draft
+   :implements: REQ_0892, REQ_0893, REQ_0894, REQ_0895, REQ_0896
+
+   Userspace TP engine covering BAM (TP.CM + TP.DT), RTS/CTS
+   connection-mode (RTS / CTS / EndOfMsgAck / Abort + TP.DT), and ETP.
+   Reassembles inbound and segments outbound multi-packet messages;
+   enforces the J1939-21 timers (Tr, Th, T1–T4) and surfaces every
+   timeout / abort as a ``HealthEvent`` (:need:`REQ_0895`). Bounds
+   concurrent inbound sessions per interface to a configurable maximum,
+   refusing excess sessions with a connection abort (:need:`REQ_0896`).
+   BAM / RTS-CTS payloads (≤ 1785 B) land on ``ConnectorEnvelope<N>``
+   channels; ETP payloads land on the :need:`BB_0097` slice channel,
+   bounded by ``max_etp_bytes`` (:need:`REQ_0894`, :need:`ADR_0109`).
+
+.. building-block:: J1939 address-claim state machine (sub-block of BB_0100)
+   :id: BB_0102
+   :status: draft
+   :implements: REQ_0897, REQ_0898
+
+   J1939-81 address manager, one instance per owned interface. Claims a
+   configured source address using a 64-bit NAME, arbitrates by NAME
+   priority on contention, falls back to the null address (254) as
+   cannot-claim, responds to Request-for-Address-Claimed (PGN 59904), and
+   honours Address-Commanded (PGN 65240). Drives the interface's
+   ``Claiming → Claimed | CannotClaim`` state, mapped onto
+   ``ConnectorHealth`` (``Connecting`` / ``Up`` / ``Down``) by
+   :need:`BB_0100`, which gates TX until Claimed.
+
+.. building-block:: MockJ1939Interface (sub-block of BB_0098)
+   :id: BB_0103
+   :status: draft
+   :implements: REQ_0899
+
+   In-process implementation harness for the layer-1 test pyramid, built
+   on :need:`BB_0075`'s ``MockCanInterface``. Lets tests inject raw CAN
+   frames (BAM / RTS-CTS / ETP sequences, AC traffic) and observe the
+   reassembled PGN payloads and claim transitions deterministically on any
+   host OS, without a Linux kernel CAN module — mirroring how
+   :need:`BB_0075` exercises the CAN gateway under :need:`REQ_0604`.

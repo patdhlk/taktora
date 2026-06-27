@@ -137,6 +137,50 @@ to keep the umbrella's traceability complete.
    auto-restart configuration remain a host / sysadmin concern;
    ``taktora-connector-can`` only opens the already-up interface.
 
+.. req:: NO replacing ConnectorEnvelope with the slice channel
+   :id: REQ_0900
+   :status: rejected
+   :satisfies: FEAT_0097
+
+   The large / variable-payload slice channel shall **not** replace
+   ``ConnectorEnvelope<N>`` for bounded, fixed-size small-payload
+   channels. It is an additive bulk path; connectors with
+   statically-known payload sizes continue to use the POD envelope so the
+   common hot path keeps its zero-allocation, fixed-size guarantees.
+
+.. req:: NO kernel CAN_J1939 socket family in taktora-connector-j1939
+   :id: REQ_0901
+   :status: rejected
+   :satisfies: FEAT_0098
+
+   The J1939 connector shall **not** use the Linux ``CAN_J1939`` kernel
+   socket family. The transport protocol and address claiming are
+   implemented in userspace so the framework's deterministic layer-1 mock
+   testing (``MockJ1939Interface``) is preserved and the connector stays
+   portable for development on non-Linux hosts (see :need:`ADR_0108`).
+
+.. req:: NO J1939/DBC parsing or typed PGN payloads in taktora-connector-j1939
+   :id: REQ_0902
+   :status: rejected
+   :satisfies: FEAT_0098
+
+   The J1939 connector shall **not** parse J1939/DBC databases or perform
+   bit-/signal-level extraction into typed per-PGN payloads. It is a
+   raw-(re)assembled-bytes transport; typed PGN mapping (a J1939 frontend
+   producing ``WireType`` per PGN) is deferred to the IDL message plane,
+   mirroring how :need:`REQ_0640` kept DBC out of
+   ``taktora-connector-can``.
+
+.. req:: NO unbounded ETP reassembly
+   :id: REQ_0903
+   :status: rejected
+   :satisfies: FEAT_0098
+
+   The J1939 connector shall **not** allow ETP reassembly to grow
+   unbounded toward the protocol maximum (~117 MB). Reassembly is capped
+   by the configurable ``max_etp_bytes`` ceiling; oversize sessions abort
+   (see :need:`REQ_0894`, :need:`ADR_0109`).
+
 Cross-cutting traceability
 --------------------------
 

@@ -17,6 +17,11 @@ description = "ISO 26262 ASIL value: QM | A | B | C | D | B(D) | C(D) | etc."
 nullable = true
 schema = { type = "string" }
 
+[needs.fields.github]
+description = "GitHub issue number(s) tracking this need's implementation; comma-separated for multiple."
+nullable = true
+schema = { type = "string" }
+
 # Need types — directives available in RST. Extend as the spec grows.
 [[needs.types]]
 directive = "feat"
