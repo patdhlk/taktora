@@ -8,10 +8,12 @@ Four layered pieces:
 - **`taktora-executor`** — items triggered by IPC, intervals, and request/response
   activity; sequential chains; parallel DAGs; signal/slot; lifecycle observability.
 - **`taktora-connector-*`** — typed channels with codec-pluggable payloads,
-  uniform connector health, and three reference connectors — EtherCAT (driving a
+  uniform connector health, and four reference connectors — EtherCAT (driving a
   SubDevice's process data), Zenoh (pub/sub + query/reply over a Zenoh session),
-  and CAN/SocketCAN — all exposing the same plugin-facing `ChannelWriter` /
-  `ChannelReader` types every other connector reuses.
+  CAN/SocketCAN, and J1939 (SAE J1939 PGN routing, BAM/RTS-CTS/ETP transport
+  protocol, and J1939-81 address claiming layered on CAN) — all exposing the same
+  plugin-facing `ChannelWriter` / `ChannelReader` types every other connector
+  reuses.
 - **EtherCAT build-time codegen toolchains** — turn vendor descriptions into
   strongly-typed Rust at build time, with zero runtime parsing: a *device-driver*
   toolchain (ESI XML → typed `EsiDevice` drivers) and a *network-config* toolchain
@@ -32,7 +34,7 @@ Four layered pieces:
 
 ## What's here
 
-The workspace has grown to 30 library crates (plus per-crate `*-tests` siblings),
+The workspace has grown to 41 library crates (plus per-crate `*-tests` siblings),
 grouped by layer.
 
 **Execution & runtime support**
@@ -53,12 +55,13 @@ grouped by layer.
 | Crate | Purpose |
 |---|---|
 | [`taktora-connector-core`](crates/taktora-connector-core) | Framework-level traits and types shared by every connector — `Routing`, `ChannelDescriptor`, `PayloadCodec`, `ConnectorHealth` / `HealthEvent`, `ReconnectPolicy`, `ConnectorError`. `BB_0001`. |
-| [`taktora-connector-transport-iox`](crates/taktora-connector-transport-iox) | iceoryx2-backed `ChannelWriter` / `ChannelReader` + `ConnectorEnvelope` POD wire format + `ServiceFactory`. `BB_0002`. |
+| [`taktora-connector-transport-iox`](crates/taktora-connector-transport-iox) | iceoryx2-backed `ChannelWriter` / `ChannelReader` + `ConnectorEnvelope` POD wire format + `ServiceFactory`. `BB_0002`. Also ships the additive variable-length, zero-copy `SliceChannelWriter` / `SliceChannelReader` over an iceoryx2 `[u8]` service (segment grows by `PowerOfTwo` up to a configurable ceiling) for bulk payloads like J1939 ETP. `BB_0097` / `FEAT_0097`. |
 | [`taktora-connector-codec`](crates/taktora-connector-codec) | `PayloadCodec` implementations. Ships `JsonCodec`; codec is compile-time-dispatched, so additional codecs are plug-in. `BB_0003`. |
 | [`taktora-connector-host`](crates/taktora-connector-host) | `Connector` trait + `ConnectorHost` / `ConnectorGateway` builders + `HealthSubscription`. The seam at which protocol-specific connectors plug into an `Executor`. `BB_0005`. |
 | [`taktora-connector-ethercat`](crates/taktora-connector-ethercat) | Reference EtherCAT connector. Pluggable `BusDriver` (mock or `ethercrab`), bit-slice PDI routing, gateway-side dispatcher that hops bytes between iceoryx2 and the SubDevice PDI each cycle. `BB_0030` / `FEAT_0041`. |
 | [`taktora-connector-zenoh`](crates/taktora-connector-zenoh) | Reference Zenoh connector. Pluggable `ZenohSessionLike` back-end (mock or `zenoh::Session`), pub/sub + query/reply with timeout-correct sealed-queries handling, peer-count-driven health. `BB_0040` / `FEAT_0042`. |
 | [`taktora-connector-can`](crates/taktora-connector-can) | Reference CAN / SocketCAN connector. `BB_0070` / `FEAT_0046`. |
+| [`taktora-connector-j1939`](crates/taktora-connector-j1939) | Reference SAE J1939 connector layered on `taktora-connector-can`'s driver. 29-bit PGN routing (SA/DA filters), a userspace transport-protocol engine (BAM / RTS-CTS / ETP) and full J1939-81 address claiming, with ETP riding the slice channel. `BB_0098` / `FEAT_0098`. |
 
 **EtherCAT device-driver codegen** — ESI XML → typed drivers at build time (`FEAT_0050`)
 
@@ -283,6 +286,41 @@ The session back-end is pluggable:
 configurable `min_peers` threshold and emits `HealthEvent`s through the
 same `subscribe_health` surface every connector exposes.
 
+### J1939 reference connector
+
+[`taktora-connector-j1939`](crates/taktora-connector-j1939) layers SAE J1939 on
+top of CAN, reusing `taktora-connector-can`'s `CanInterfaceLike` driver
+(`MockCanInterface` for layer-1 tests, the feature-gated `RealCanInterface` for
+layer-2) and adding its own PGN-aware dispatcher (`ADR_0108`). `J1939Routing`
+addresses a channel by PGN with optional source/destination-address filters and
+a transport class:
+
+1. The dispatcher decodes the 29-bit extended identifier into priority / PDU
+   format / PGN / SA / DA (PDU1 vs PDU2 derived from the PF field) and demuxes
+   single-frame PGNs straight to the matching channels.
+2. Multi-packet messages flow through a clock-stepped userspace
+   transport-protocol engine: **BAM** broadcast, **RTS/CTS** connection-mode
+   flow control across multiple windows, and **ETP** for payloads above
+   1785 bytes. The J1939-21 timers (Tr, Th, T1–T4) are enforced and the
+   inbound-session pool is bounded; every timeout or connection abort surfaces
+   as a `HealthEvent` rather than a silent drop.
+3. Bounded traffic (single-frame, BAM/RTS-CTS ≤ 1785 B) rides the fixed-`N`
+   `ConnectorEnvelope<N>` channels; **ETP** rides the variable-length slice
+   channel (`BB_0097`), zero-copy and bounded by a configurable `max_etp_bytes`
+   so reassembly never grows unbounded toward the ~117 MB protocol maximum
+   (`ADR_0109`).
+
+A full J1939-81 address-claim state machine runs per interface: it claims a
+configured source address using a 64-bit NAME, arbitrates by NAME priority on
+contention, falls back to the null address (254) as cannot-claim, answers
+Request-for-Address-Claimed (PGN 59904), and honours Address-Commanded
+(PGN 65240). Claim state maps onto `ConnectorHealth` (Claiming → `Connecting`,
+Claimed → `Up`, CannotClaim → `Down`) and gates outbound transmission until
+Claimed — `J1939Writer::send` returns `ConnectorError::Down` beforehand
+(`ADR_0110`). A `MockJ1939Interface` over `MockCanInterface` drives the full
+PGN-routing, transport-protocol, and address-claim test pyramid deterministically
+on any host OS, with no kernel CAN module.
+
 ## EtherCAT codegen toolchains (build-time)
 
 Two toolchains turn vendor descriptions into strongly-typed Rust entirely in
@@ -329,6 +367,7 @@ the WaitSet thread.
 | `json`           | `taktora-connector-codec` | **on** | `JsonCodec` via `serde_json`. |
 | `bus-integration`| `taktora-connector-ethercat` | off | Pull `ethercrab` and expose `EthercrabBusDriver`. Off by default so consumers that only want the framework types and pure-logic helpers don't pull ethercrab's transitive dependencies. |
 | `zenoh-integration`| `taktora-connector-zenoh` | off | Pull `zenoh` 1.x (with `transport_tcp` enabled) and expose `RealZenohSession`. Off by default so consumers that only want the framework types and `MockZenohSession` don't pull zenoh's transitive dependencies. |
+| `socketcan-integration`| `taktora-connector-can`, `taktora-connector-j1939` | off | Pull the Linux-only `socketcan` stack and expose `RealCanInterface` for real `PF_CAN` I/O. The `taktora-connector-j1939` flag is a passthrough to `taktora-connector-can`'s. Off by default; `MockCanInterface` / `MockJ1939Interface` ship ungated for layer-1 tests on any host OS. |
 
 iceoryx2 itself handles SIGINT/SIGTERM natively — no `ctrlc` feature is
 needed and the loop exits cleanly on either signal.
