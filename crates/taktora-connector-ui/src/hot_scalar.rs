@@ -16,7 +16,7 @@
 //! the manifest does not carry an explicit `hot` boolean — the observable
 //! contract is simply "this scalar lives on its own service", which is what a UI
 //! needs to subscribe to it independently. Adding a dedicated `hot` flag to
-//! [`ViewModelSchema`](taktora_connector_ui_contract::ViewModelSchema) is
+//! [`ViewModelSchema`] is
 //! deferred to avoid a breaking change to the (already golden-fixtured) contract
 //! crate.
 

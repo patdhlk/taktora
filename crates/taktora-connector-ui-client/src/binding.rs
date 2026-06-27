@@ -1,7 +1,7 @@
 //! Contract-hash validation and the read-only fallback decision (REQ_0876).
 //!
 //! A client is built against an **expected** contract hash — the structural hash
-//! of the [`Manifest`](taktora_connector_ui_contract::Manifest) the client was
+//! of the [`Manifest`] the client was
 //! generated / coded against. On connect (and on every epoch-triggered rebind,
 //! REQ_0882) the client compares that expected hash to the live manifest's
 //! [`contract_hash`](taktora_connector_ui_contract::Manifest::contract_hash):

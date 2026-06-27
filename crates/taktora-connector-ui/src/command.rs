@@ -133,7 +133,7 @@ impl CommandInvocation {
 /// The request/reply transport seam the [`CommandHandler`] drives.
 ///
 /// This is the command-plane analogue of the pump's
-/// [`VmPublisher`](crate::VmPublisher): the handler depends only on this trait,
+/// [`VmPublisher`]: the handler depends only on this trait,
 /// so it never hard-depends on iceoryx2. Production wires
 /// [`IoxCommandTransport`]; unit tests wire [`MockCommandTransport`].
 pub trait CommandTransport {
@@ -376,7 +376,7 @@ impl DedupeCache {
 ///
 /// # Correlation-id uniqueness invariant
 ///
-/// The single [`DedupeCache`] is keyed by the bare [`CorrelationId`] across
+/// The single `DedupeCache` is keyed by the bare [`CorrelationId`] across
 /// **all** commands. Clients MUST mint globally-unique correlation ids across
 /// commands (the client mints them, `REQ_0867`); two distinct invocations
 /// sharing an id — even for different commands — is a client contract
