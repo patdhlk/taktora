@@ -12,8 +12,8 @@
 //! (`REQ_0885`).
 //!
 //! The shared-memory data segment starts at a configurable
-//! `initial_max_slice_len` and grows by
-//! [`AllocationStrategy`]`::PowerOfTwo` (`REQ_0887`), bounded by a
+//! `initial_max_slice_len` and grows by powers of two
+//! ([`AllocationStrategy`]) (`REQ_0887`), bounded by a
 //! configurable `max_payload_bytes` ceiling: a send whose length exceeds
 //! the ceiling is refused with a bounded-capacity
 //! [`ConnectorError::PayloadOverflow`] **before** loaning, so the segment
