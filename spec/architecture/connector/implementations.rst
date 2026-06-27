@@ -649,3 +649,79 @@ spec text that needed amendment during implementation.
    remains ``:status: draft`` until the
    ``socketcan-integration`` CI job and the kernel ``vcan``
    module are wired into CI.
+
+.. impl:: taktora-connector-j1939 crate (planned)
+   :id: IMPL_0090
+   :status: draft
+   :implements: BB_0098
+   :refines: REQ_0890, REQ_0891, REQ_0892, REQ_0893, REQ_0894, REQ_0895, REQ_0896, REQ_0897, REQ_0898, REQ_0899
+
+   **Crate.** ``crates/taktora-connector-j1939`` (planned; not yet
+   scaffolded). Default deps: ``taktora-connector-core``,
+   ``taktora-connector-transport-iox`` (envelope **and** the
+   :need:`BB_0097` slice channel), ``taktora-connector-host``,
+   ``taktora-connector-codec``, ``taktora-executor``, ``tokio``, and
+   ``taktora-connector-can`` for its ``CanInterfaceLike`` driver layer.
+   Real CAN I/O is reached through ``taktora-connector-can``'s existing
+   ``socketcan-integration`` feature; ``MockJ1939Interface`` ships
+   unfeature-gated for layer-1 tests (:need:`REQ_0899`). Paired with a
+   ``publish = false`` ``taktora-connector-j1939-tests`` crate per the
+   connector guide's two-crate split.
+
+   **Status.** Planned surface only — the crate has not been scaffolded.
+   This directive locks the public API the forthcoming implementation is
+   measured against; status flips ``draft`` → ``open`` once the crate
+   lands and its surface matches the bulleted list below. The boundary,
+   delivery, and address-claim decisions are :need:`ADR_0108`,
+   :need:`ADR_0109`, and :need:`ADR_0110`.
+
+   **Surface.**
+
+   * ``J1939Routing`` — typed routing carrying ``pgn``, optional
+     ``source_addr`` / ``dest_addr`` filters, transport class
+     (``SingleFrame`` | ``Tp { max_len }``), and TX ``priority``.
+     Implements ``Routing``; PDU1/PDU2 derived from the PGN's PF.
+     Channel ``N`` validated against the transport class at
+     ``create_writer`` / ``create_reader`` (``REQ_0891``).
+   * ``J1939Connector<C: PayloadCodec>`` implementing ``Connector``
+     with ``type Routing = J1939Routing`` (:need:`BB_0099`).
+   * ``J1939ConnectorOptions`` typed builder — per-interface source
+     address + 64-bit ``Name``, ``max_etp_bytes``, max-concurrent-TP-
+     sessions, TP timer overrides, and bounded bridge capacities;
+     multi-interface like ``CanConnectorOptions``.
+   * ``MockJ1939Interface`` over ``MockCanInterface`` (:need:`BB_0103`).
+
+   **Tests.** TEST_0886 (ID decode + PGN routing), TEST_0887 (N
+   validation), TEST_0888 (BAM), TEST_0889 (RTS/CTS), TEST_0890 (ETP +
+   bounded abort), TEST_0891 (TP timeout → health), TEST_0892 (session
+   bound), TEST_0893 (claim contention), TEST_0894 (claim → health + TX
+   gate), TEST_0895 (mock harness).
+
+.. impl:: taktora-connector-transport-iox slice channel (planned)
+   :id: IMPL_0091
+   :status: draft
+   :implements: BB_0097
+   :refines: REQ_0885, REQ_0886, REQ_0887, REQ_0888, REQ_0889
+
+   **Crate.** ``crates/taktora-connector-transport-iox`` (additive
+   surface; the crate already ships ``ConnectorEnvelope<N>`` per
+   :need:`IMPL_0020`). Adds ``SliceChannelWriter`` / ``SliceChannelReader``
+   over an iceoryx2 slice (``[u8]``) publish-subscribe service with an
+   iceoryx2 user-header carrying ``sequence_number`` / ``timestamp_ns``.
+
+   **Status.** Planned surface only. Status flips ``draft`` → ``open``
+   once the slice channel lands and the ETP path (:need:`BB_0101`)
+   consumes it.
+
+   **Surface.**
+
+   * ``SliceChannelWriter`` — ``send(&[u8])`` loaning a runtime-sized
+     sample via ``loan_slice_uninit`` (``REQ_0885``, ``REQ_0886``);
+     ``initial_max_slice_len`` + ``AllocationStrategy::PowerOfTwo``
+     growth bounded by ``max_payload_bytes`` (``REQ_0887``,
+     ``REQ_0888``).
+   * ``SliceChannelReader`` — yields one variable-length message per
+     sample, exposing the user-header metadata (``REQ_0889``).
+
+   **Tests.** TEST_0884 (variable-length round-trip), TEST_0885 (growth
+   + ceiling enforcement).

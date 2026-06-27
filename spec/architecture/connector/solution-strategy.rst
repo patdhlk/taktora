@@ -661,3 +661,90 @@ that ``:refines:`` the requirement or feature it answers.
    ``Event`` primitive is deferred to v2 with a reserved ``kind`` slot
    (:need:`REQ_0857`). ❌ Trust is OS/iceoryx2-mediated only in v1
    (:need:`REQ_0884`).
+
+.. arch-decision:: Reuse the CAN driver layer; own a userspace J1939 dispatcher
+   :id: ADR_0108
+   :status: draft
+   :refines: FEAT_0098
+
+   **Context.** J1939 sits on top of CAN. Three ways to realise it: (A)
+   depend on ``taktora-connector-can`` and reuse its ``CanInterfaceLike``
+   driver layer while adding a new PGN-aware dispatcher; (B) a standalone
+   connector owning its own raw SocketCAN socket, duplicating the driver
+   and mock; (C) a standalone connector over the Linux ``CAN_J1939``
+   kernel socket family, letting the kernel do transport protocol,
+   addressing, and address claiming.
+
+   **Decision.** Take (A). ``taktora-connector-j1939`` depends on
+   ``taktora-connector-can`` at the crate level — reusing
+   ``CanInterfaceLike``, ``MockCanInterface`` / ``RealCanInterface``,
+   ``CanData`` / ``CanFrame``, and ``CanGateway`` — and adds its own
+   dispatcher with a userspace transport-protocol state machine
+   (:need:`BB_0101`) and address-claim state machine (:need:`BB_0102`).
+   The kernel ``CAN_J1939`` family is explicitly rejected
+   (:need:`REQ_0901`).
+
+   **Consequences.** ✅ The framework's deterministic layer-1 mock story
+   survives — ``MockJ1939Interface`` (:need:`BB_0103`) wraps
+   ``MockCanInterface``, so TP reassembly and address claiming are tested
+   without a kernel CAN module, on any host OS. ✅ No duplication of the
+   CAN driver / FD handling / error classification. ❌ The connector
+   carries its own TP and AC implementations rather than delegating to the
+   kernel — more code to verify, justified by testability and portability.
+   ❌ A hard dependency on ``taktora-connector-can``'s public driver
+   surface couples the two crates.
+
+.. arch-decision:: Two-tier delivery; ETP over a bounded growable slice channel
+   :id: ADR_0109
+   :status: draft
+   :refines: FEAT_0098
+
+   **Context.** Every payload normally crosses iceoryx2 as a fixed-``N``
+   ``ConnectorEnvelope<N>`` POD, and the project leans on bounded
+   allocation (:need:`FEAT_0040`). BAM and RTS/CTS top out at 1785 bytes
+   and fit a fixed ``N``; ETP can reach ~117 MB, which cannot live in a
+   single fixed-``N`` inline buffer. iceoryx2 0.8.1, however, supports
+   slice (``[u8]``) payloads with runtime-sized ``loan_slice`` and a
+   growable data segment (``AllocationStrategy``).
+
+   **Decision.** Deliver J1939 in two tiers. Tier 1 — single-frame PGNs
+   and BAM/RTS-CTS (≤ 1785 B) — rides the existing ``ConnectorEnvelope<N>``
+   typed channels, with ``N`` derived from the declared transport class
+   (:need:`REQ_0891`). Tier 2 — ETP — rides the new large-payload slice
+   channel (:need:`FEAT_0097` / :need:`BB_0097`), zero-copy, the segment
+   sized to the reassembled message and grown by
+   ``AllocationStrategy::PowerOfTwo``, **bounded** by a configurable
+   ``max_etp_bytes``; a session exceeding the cap is TP-aborted with a
+   ``HealthEvent`` (:need:`REQ_0894`, :need:`REQ_0903`).
+
+   **Consequences.** ✅ ETP is genuinely supported without inlining a
+   worst-case buffer into every sample, and the common hot path keeps its
+   fixed-size POD envelope. ✅ The bounded-allocation invariant stays
+   auditable — growth is capped and explicit, not open-ended. ❌ The
+   connector has two delivery paths and the slice channel is new framework
+   surface in ``taktora-connector-transport-iox`` (:need:`BB_0097`),
+   carrying its own requirements cluster (:need:`FEAT_0097`). ❌ ETP
+   payloads are raw blobs on the slice path — no per-message typed codec.
+
+.. arch-decision:: Full J1939-81 address claiming in the first cut
+   :id: ADR_0110
+   :status: draft
+   :refines: FEAT_0098
+
+   **Context.** A node on a shared J1939 bus needs a valid source
+   address. The minimum is a configured static SA; J1939-81 defines the
+   full claim/cannot-claim protocol (NAME-priority contention, null
+   address 254, Request-for-AC, Address-Commanded).
+
+   **Decision.** Implement the full J1939-81 claim state machine
+   (:need:`BB_0102` / :need:`REQ_0897`), not just a static SA. Claim
+   state maps onto ``ConnectorHealth`` and gates transmission until
+   Claimed (:need:`REQ_0898`).
+
+   **Consequences.** ✅ The connector is well-behaved on a real shared bus
+   — it arbitrates, cedes to higher-priority NAMEs, and honours commanded
+   addresses. ✅ Claim state reuses the existing ``ConnectorHealth``
+   machinery rather than a parallel API. ❌ Larger first cut: a 64-bit
+   NAME configuration, an arbitration state machine, and a TX interlock,
+   each needing mock-backed tests — accepted over deferring claim to a
+   follow-on.

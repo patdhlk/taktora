@@ -1,0 +1,135 @@
+J1939 connector + large-payload slice channel
+==============================================
+
+Verification artefacts for the J1939 connector (:need:`FEAT_0098`) and the
+large / variable-payload slice channel (:need:`FEAT_0097`) that backs J1939
+ETP. Layer-1 (pure-logic) cases use ``MockJ1939Interface`` (built on
+``MockCanInterface``) and exercise the full transport-protocol and
+address-claim state machines deterministically on any host OS; layer-2 cases
+gated on ``socketcan-integration`` require a Linux host with the ``vcan``
+kernel module loaded.
+
+Large-payload slice channel (FEAT_0097)
+---------------------------------------
+
+.. test:: Slice channel variable-length round-trip
+   :id: TEST_0884
+   :status: draft
+   :verifies: REQ_0885, REQ_0886, REQ_0889
+
+   Publish several messages of differing lengths through a
+   ``SliceChannelWriter`` and read them back via ``SliceChannelReader``;
+   assert each sample's bytes round-trip exactly, that the loaned sample
+   length equals the message length (not a fixed ``N``), and that
+   ``sequence_number`` increments monotonically while ``timestamp_ns`` is
+   non-decreasing on the user-header.
+
+.. test:: Slice channel grows then enforces the ceiling
+   :id: TEST_0885
+   :status: draft
+   :verifies: REQ_0887, REQ_0888
+
+   Configure a small ``initial_max_slice_len`` and a ``max_payload_bytes``
+   ceiling. Loan an increasing sequence of sizes; assert the segment grows
+   (``AllocationStrategy::PowerOfTwo``) and delivery still succeeds up to
+   the ceiling, and that a loan exceeding ``max_payload_bytes`` returns a
+   bounded-capacity ``ConnectorError`` rather than growing further.
+
+J1939 connector (FEAT_0098)
+---------------------------
+
+.. test:: J1939 29-bit ID decode and PGN routing
+   :id: TEST_0886
+   :status: draft
+   :verifies: REQ_0890
+
+   Feed crafted 29-bit identifiers (PDU1 destination-specific and PDU2
+   broadcast) through ``MockJ1939Interface``; assert priority / PDU format
+   / PGN / SA / DA decode correctly and that frames demux only to channels
+   whose PGN — and optional SA/DA filters — match.
+
+.. test:: J1939Routing transport-class N validation
+   :id: TEST_0887
+   :status: draft
+   :verifies: REQ_0891
+
+   Assert ``create_writer`` / ``create_reader`` accept a channel whose
+   ``N`` matches the routing's transport class (``SingleFrame`` → 8,
+   ``Tp { max_len }`` → ``max_len``) and reject a mismatch with
+   ``ConnectorError::Configuration``.
+
+.. test:: BAM round-trip via MockJ1939Interface
+   :id: TEST_0888
+   :status: draft
+   :verifies: REQ_0892
+
+   Layer-1 end-to-end: segment a 9–1785-byte payload outbound into TP.CM
+   (BAM) + TP.DT frames and reassemble an injected BAM sequence inbound;
+   assert the reassembled payload matches and is delivered on the matching
+   PGN channel.
+
+.. test:: RTS/CTS connection-mode round-trip
+   :id: TEST_0889
+   :status: draft
+   :verifies: REQ_0893
+
+   Drive a full RTS → CTS → TP.DT → EndOfMsgAck exchange through the mock,
+   including the receiver's CTS flow control across multiple windows;
+   assert correct reassembly and that an Abort surfaces as a health event.
+
+.. test:: ETP round-trip over the slice channel, bounded
+   :id: TEST_0890
+   :status: draft
+   :verifies: REQ_0894, REQ_0903
+
+   Transfer an ETP message larger than 1785 bytes; assert it round-trips
+   over the slice channel (:need:`FEAT_0097`) and that a session announcing
+   a size above ``max_etp_bytes`` is aborted with the J1939 connection-abort
+   reason plus a ``HealthEvent``, never growing unbounded.
+
+.. test:: TP timeout surfaces as a health event
+   :id: TEST_0891
+   :status: draft
+   :verifies: REQ_0895
+
+   Open a TP session and withhold the expected next frame past the
+   relevant J1939-21 timer (e.g. T1); assert the session aborts on the
+   timer and emits a ``HealthEvent`` rather than silently dropping.
+
+.. test:: Concurrent inbound TP sessions are bounded
+   :id: TEST_0892
+   :status: draft
+   :verifies: REQ_0896
+
+   Configure a small max-concurrent-sessions limit and open one more
+   inbound session than allowed; assert the excess session is refused with
+   a connection abort and no unbounded allocation occurs.
+
+.. test:: Address-claim contention and cannot-claim
+   :id: TEST_0893
+   :status: draft
+   :verifies: REQ_0897
+
+   Inject a competing Address Claimed for the same SA with a
+   higher-priority NAME; assert the connector cedes (cannot-claim → null
+   address 254), responds to Request-for-Address-Claimed, and honours an
+   Address-Commanded message.
+
+.. test:: Claim state drives health and gates TX
+   :id: TEST_0894
+   :status: draft
+   :verifies: REQ_0898
+
+   Assert the interface reports ``Connecting`` while Claiming, ``Up`` once
+   Claimed, and ``Down`` on CannotClaim, and that ``ChannelWriter::send``
+   returns ``ConnectorError::Down`` until the address is Claimed.
+
+.. test:: MockJ1939Interface deterministic harness
+   :id: TEST_0895
+   :status: draft
+   :verifies: REQ_0899
+
+   Confirm ``MockJ1939Interface`` (over ``MockCanInterface``) lets a
+   layer-1 test inject raw CAN frames and observe reassembled PGN payloads
+   and claim transitions deterministically, with no Linux kernel CAN
+   module and no ``socketcan`` dependency.

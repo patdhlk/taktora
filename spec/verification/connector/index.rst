@@ -22,5 +22,6 @@ body cites the Rust test path that runs it.
    ethercat
    zenoh
    can
+   j1939
    ui
    cross-cutting

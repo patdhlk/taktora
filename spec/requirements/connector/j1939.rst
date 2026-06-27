@@ -1,0 +1,151 @@
+J1939 connector (PGN routing + transport protocol)
+==================================================
+
+A fifth concrete connector instantiating the framework's contracts, layering
+SAE J1939 on top of CAN. It reuses ``taktora-connector-can``'s
+``CanInterfaceLike`` driver layer (:need:`REQ_0899`) and adds a userspace
+transport-protocol state machine, PGN-based routing, and J1939-81 address
+claiming. This parent feature ``:satisfies:`` :need:`FEAT_0030`; the
+connector-wide requirements below ``:satisfies:`` it directly. The boundary
+decision — reuse the CAN driver and own the dispatcher, rather than the kernel
+``CAN_J1939`` socket family — is recorded in :need:`ADR_0108`; the two-tier
+delivery model in :need:`ADR_0109`; full address-claim scope in
+:need:`ADR_0110`.
+
+.. feat:: J1939 connector (PGN routing + transport protocol over CAN)
+   :id: FEAT_0098
+   :status: draft
+   :satisfies: FEAT_0030
+
+   A J1939 plugin and gateway that bridge SAE J1939 traffic — single-frame
+   PGNs, BAM and RTS/CTS transport-protocol messages, and ETP — between a
+   taktora-executor application and a CAN bus. The gateway reuses
+   ``taktora-connector-can``'s driver layer (``MockCanInterface`` for
+   layer-1, the feature-gated ``RealCanInterface`` for layer-2) and runs a
+   userspace TP state machine plus a J1939-81 address-claim state machine on
+   a tokio sidecar contained inside ``taktora-connector-j1939``. Bounded,
+   fixed-size traffic (single-frame PGNs, BAM/RTS-CTS ≤ 1785 B) rides the
+   ``ConnectorEnvelope<N>`` typed channels; ETP rides the variable-length
+   slice channel (:need:`FEAT_0097`). The connector is a raw-(re)assembled-
+   bytes transport; typed per-PGN signal mapping is deferred to the IDL
+   message plane.
+
+.. req:: 29-bit ID decode and PGN routing
+   :id: REQ_0890
+   :status: draft
+   :satisfies: FEAT_0098
+   :github: 122
+
+   The connector shall decode the 29-bit extended CAN identifier into
+   priority, PDU format (PDU1 destination-specific vs PDU2 broadcast),
+   PGN, source address, and destination address, and shall route
+   iceoryx2 channels by PGN with optional source-address and
+   destination-address filters (``None`` = wildcard). PDU1 vs PDU2 is
+   derived from the PGN's PF field, not declared by the caller.
+
+.. req:: J1939Routing declares transport class; N validated
+   :id: REQ_0891
+   :status: draft
+   :satisfies: FEAT_0098
+   :github: 122
+
+   ``J1939Routing`` shall declare each PGN's transport class as
+   ``SingleFrame`` (≤ 8 bytes) or ``Tp { max_len }`` (≤ 1785 bytes), and
+   ``J1939Connector`` shall validate the channel's ``N`` const generic
+   against that class at ``create_writer`` / ``create_reader`` time,
+   rejecting a mismatch with ``ConnectorError::Configuration`` (mirrors
+   :need:`REQ_0612`).
+
+.. req:: BAM reassembly and segmentation
+   :id: REQ_0892
+   :status: draft
+   :satisfies: FEAT_0098
+   :github: 123
+
+   The connector shall reassemble inbound and segment outbound BAM
+   (Broadcast Announce Message) multi-packet messages — TP.CM (BAM) plus
+   TP.DT — for payloads of 9–1785 bytes.
+
+.. req:: RTS/CTS connection-mode reassembly and segmentation
+   :id: REQ_0893
+   :status: draft
+   :satisfies: FEAT_0098
+   :github: 124
+
+   The connector shall reassemble inbound and segment outbound RTS/CTS
+   connection-mode multi-packet messages — TP.CM (RTS / CTS /
+   EndOfMsgAck / Abort) plus TP.DT — for payloads of 9–1785 bytes,
+   honouring the receiver's CTS flow control.
+
+.. req:: ETP over the slice channel, bounded
+   :id: REQ_0894
+   :status: draft
+   :satisfies: FEAT_0098
+   :github: 125
+
+   The connector shall transport ETP (Extended Transport Protocol)
+   messages over the large-payload slice channel (:need:`FEAT_0097`),
+   bounded by a configurable ``max_etp_bytes``. A session whose announced
+   total size exceeds the cap shall be aborted with the J1939
+   connection-abort reason and surfaced as a ``HealthEvent`` (see
+   :need:`REQ_0903`, :need:`ADR_0109`).
+
+.. req:: TP timers enforced and surfaced as health
+   :id: REQ_0895
+   :status: draft
+   :satisfies: FEAT_0098
+   :github: 123
+
+   The connector shall enforce the J1939-21 transport-protocol timers
+   (Tr, Th, T1–T4) with their standard default values, configurable, and
+   shall surface every TP timeout or connection abort as a
+   ``HealthEvent`` rather than a silent drop.
+
+.. req:: Concurrent TP sessions bounded per interface
+   :id: REQ_0896
+   :status: draft
+   :satisfies: FEAT_0098
+   :github: 123
+
+   The connector shall bound the number of concurrent inbound TP sessions
+   per interface to a configurable maximum; an inbound session opened
+   beyond that maximum shall be refused with a connection abort rather
+   than unbounded session allocation (upholds :need:`FEAT_0040`).
+
+.. req:: Full J1939-81 address claiming
+   :id: REQ_0897
+   :status: draft
+   :satisfies: FEAT_0098
+   :github: 126
+
+   The connector shall participate in J1939-81 address management for each
+   owned interface: claim a configured source address using a 64-bit
+   NAME, arbitrate by NAME priority on contention, fall back to the null
+   address (254) as cannot-claim, respond to Request-for-Address-Claimed
+   (PGN 59904), and honour Address-Commanded (PGN 65240).
+
+.. req:: Claim state maps onto health; TX gated until claimed
+   :id: REQ_0898
+   :status: draft
+   :satisfies: FEAT_0098
+   :github: 126
+
+   The connector shall map address-claim state onto ``ConnectorHealth`` —
+   Claiming → ``Connecting``, Claimed → ``Up``, CannotClaim → ``Down`` —
+   and shall gate outbound transmission until the address is Claimed,
+   returning ``ConnectorError::Down`` from ``ChannelWriter::send``
+   beforehand (consistent with the no-durable-buffering anti-goal
+   :need:`REQ_0292`).
+
+.. req:: Reuse the CAN driver layer; provide MockJ1939Interface
+   :id: REQ_0899
+   :status: draft
+   :satisfies: FEAT_0098
+   :github: 122
+
+   The connector shall consume ``taktora-connector-can``'s
+   ``CanInterfaceLike`` driver layer (``MockCanInterface`` for layer-1,
+   the feature-gated ``RealCanInterface`` for layer-2) and shall provide a
+   ``MockJ1939Interface`` so the layer-1 test pyramid exercises PGN
+   routing and the full TP and address-claim state machines
+   deterministically, on any host OS, without a Linux kernel CAN module.

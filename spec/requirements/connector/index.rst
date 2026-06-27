@@ -27,7 +27,9 @@ connector trait and routing (:need:`FEAT_0033`), connection lifecycle
 connector cycle telemetry (:need:`FEAT_0038`), host wiring and builder
 (:need:`FEAT_0037`), and the reference connectors — MQTT (:need:`FEAT_0036`),
 EtherCAT (:need:`FEAT_0041`), Zenoh (:need:`FEAT_0042`), CAN
-(:need:`FEAT_0046`), and the MVVM UI connector (:need:`FEAT_0092`). The
+(:need:`FEAT_0046`), the J1939 connector (:need:`FEAT_0098`), and the
+MVVM UI connector (:need:`FEAT_0092`) — plus the large / variable-payload
+slice channel (:need:`FEAT_0097`) that backs J1939 ETP. The
 deliberately rejected anti-goals, the umbrella-level
 traceability tables, and the safety refinements live on :doc:`cross-cutting`.
 
@@ -76,6 +78,8 @@ Requirements at a glance
    host-wiring
    zenoh
    can
+   large-payload-channel
+   j1939
    ui
    telemetry
    cross-cutting
