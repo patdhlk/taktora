@@ -27,7 +27,10 @@ taktora-connector-ui-client = "0.1"
 
 # GUI deps, scoped to this example only. `glow` (OpenGL) keeps the build lighter
 # than the default wgpu backend; `default_fonts` so text renders out of the box.
-eframe     = { version = "0.31", default-features = false, features = ["glow", "default_fonts"] }
+# `x11` + `wayland` enable winit's Linux windowing backends; without them winit
+# compiles to its "platform not supported" guard on Linux. They are no-ops on
+# macOS/Windows (eframe gates them per-target), so enabling both is portable.
+eframe     = { version = "0.31", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
 egui       = "0.31"
 serde_json = "1"
 
