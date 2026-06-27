@@ -1,0 +1,27 @@
+[package]
+name         = "taktora-idl-wire"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Serde-free, no_std, no-heap runtime support for generated message (de)serializers: the WireType trait and CAN signal bit-packing primitives."
+
+# Intentionally dependency-free: the safety-relevant (de)serialization path must
+# never reach for serde or an allocator (REQ_0861), keeping it Kani/Miri-clean.
+
+[lints.rust]
+unsafe_code  = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"
