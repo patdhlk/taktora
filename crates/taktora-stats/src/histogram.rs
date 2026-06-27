@@ -1,64 +1,92 @@
 //! Octave-bucket sliding-window percentile histogram.
 
-/// Number of histogram buckets — one per power-of-two octave.
+/// Sub-buckets per octave (the mantissa subdivision factor `M`).
 ///
-/// Covers `2^0 .. 2^63` nanoseconds (≈ 3.32 buckets per decade),
-/// satisfying the "≥ 3 buckets per decade" requirement of
-/// `REQ_0100` / `ADR_0060`.
-pub const BUCKETS: usize = 64;
+/// Each octave `[2^k, 2^(k+1))` is split into `M` equal-width (linear in
+/// the mantissa) sub-buckets. The widest adjacent-edge ratio within an
+/// octave is `(M + 1) / M = 1 + 1/M` (at the octave's low edge), so the
+/// geometric-centroid relative error is at most `√(1 + 1/M) − 1`. With
+/// `M = 64` that is ≈ 0.78 %, comfortably inside the ≤ 1 % bound of
+/// `REQ_0852`.
+const M: usize = 64;
 
-/// Map a nanosecond value to its octave bucket index.
+/// Number of histogram buckets — `M` sub-buckets per power-of-two octave,
+/// across octaves `0 ..= 35`.
 ///
-/// The index is `value.ilog2()` clamped to `0 ..= BUCKETS - 1`; `0` and `1`
-/// both map to bucket `0`. Pure, allocation-free, O(1).
+/// The required range is 100 ns (≈ `2^6`) … 10 s (`10^10` ns ≈ `2^33`); the
+/// span carries two octaves of margin above `2^33` and the `bucket_index`
+/// clamp folds anything larger into the top bucket. At `M` sub-buckets per
+/// octave this yields ≥ 115 buckets per decade across the range — the
+/// resolution `REQ_0852` needs for a ≤ 1 % centroid error. Per-segment
+/// memory is `BUCKETS * 4` bytes.
+pub const BUCKETS: usize = 36 * M;
+
+/// Map a nanosecond value to its sub-octave bucket index.
+///
+/// `octave = value.ilog2()` selects the power-of-two octave and
+/// `sub = ((value − 2^octave) · M) >> octave` the mantissa sub-bucket
+/// (`0 ..= M − 1`); the index is `(octave · M + sub)` clamped to
+/// `0 ..= BUCKETS − 1`. `0` and `1` both map to bucket `0`. The arithmetic
+/// is exact integer-only (a `u128` intermediate prevents overflow for large
+/// octaves) — no floating point, no loops, no table search. Pure,
+/// allocation-free, O(1), and monotonic non-decreasing in `value`.
 #[must_use]
-#[allow(clippy::cast_possible_truncation)] // ilog2 ∈ 0..=63, always fits usize
+#[allow(clippy::cast_possible_truncation)] // octave ∈ 0..=63; sub ∈ 0..M — both fit usize
 pub fn bucket_index(value_ns: u64) -> usize {
-    let octave = value_ns.max(1).ilog2() as usize;
-    octave.min(BUCKETS - 1)
+    let value = value_ns.max(1);
+    let octave = value.ilog2() as usize;
+    // sub ∈ 0..M; the u128 intermediate avoids overflow when octave is large.
+    let sub = (((u128::from(value) - (1u128 << octave)) * M as u128) >> octave) as usize;
+    (octave * M + sub).min(BUCKETS - 1)
 }
 
-/// Lower edge (inclusive) of bucket `i`, in nanoseconds: `2^i`.
+/// Lower edge (inclusive) of bucket `i`, in nanoseconds.
 ///
-/// Bucket `0` covers `[0, 2)` and is reported as `1`. Used for range
-/// queries on the bucket boundary.
+/// With `octave = i / M` and `sub = i % M` the edge is
+/// `2^octave + (2^octave · sub) / M` — the low edge of the `sub`-th equal
+/// slice of octave `octave`. Bucket `0` covers `[0, …)` and is reported as
+/// `1`. A `u128` intermediate keeps the multiply exact.
 ///
 /// # Panics
 ///
-/// Panics in debug builds if `i >= 64` (the `1u64 << i` shift overflows).
-/// Callers pass a [`bucket_index`] result, which is clamped to
-/// `0 ..= BUCKETS - 1`, so the bound always holds in practice.
+/// Panics in debug builds if `i / M >= 64` (the `1u128 << octave` shift
+/// overflows). Callers pass a [`bucket_index`] result (or `i + 1` for the
+/// top edge), which stays within `0 ..= BUCKETS`, so the bound always holds.
 #[must_use]
+#[allow(clippy::cast_possible_truncation)] // octave ≤ BUCKETS/M; result ≤ 2^37 fits u64
 pub const fn bucket_lower(i: usize) -> u64 {
-    1u64 << i
+    let octave = (i / M) as u32;
+    let sub = (i % M) as u128;
+    let base = 1u128 << octave;
+    (base + (base * sub) / M as u128) as u64
 }
 
 /// Representative value of bucket `i` for percentile estimates: the
-/// **geometric** midpoint of the octave `[2^i, 2^(i+1))`, i.e. `2^i · √2`.
+/// **geometric** centroid `√(lower(i) · lower(i+1))` of its `[lower(i),
+/// lower(i+1))` interval.
 ///
-/// Geometric (not arithmetic) centring is what minimises the *relative*
-/// error across a logarithmic bucket. The estimate is within a factor of
-/// `√2` of any value the bucket can hold — at most `+41%` / `−29%`, i.e.
-/// [`PERCENTILE_MAX_REL_ERR_PCT`](crate::PERCENTILE_MAX_REL_ERR_PCT). The
-/// old lower-edge estimate (`2^i`) was instead biased *systematically low*
-/// by up to a full octave (a value just under `2^(i+1)` read back as
-/// `2^i`, `−50%`), which silently understated every reported percentile.
+/// Geometric (not arithmetic) centring minimises the *relative* error
+/// across the bucket. Because each octave is subdivided into `M` sub-buckets
+/// (see [`BUCKETS`]), the centroid is within
+/// [`PERCENTILE_MAX_REL_ERR_PCT`](crate::PERCENTILE_MAX_REL_ERR_PCT) — ≤ 1 %
+/// — of any value the bucket can hold, across 100 ns … 10 s. This is the
+/// cold percentile path only, so the exact `u128` square root is fine.
 ///
 /// Exact extremes (`min`/`max`) are unaffected — they come from
 /// [`MinMaxDeque`](crate::MinMaxDeque), not the histogram, and remain the
 /// values to trust for any threshold/SLA decision.
 #[must_use]
-#[allow(clippy::cast_possible_truncation)] // explicit saturating guard below
+#[allow(clippy::cast_possible_truncation)] // centroid ≤ lower(i+1) ≤ 2^37 fits u64
 pub const fn bucket_midpoint(i: usize) -> u64 {
-    // 2^i · √2 ≈ (2^i · 92682) >> 16, since 92682 / 65536 = 1.41421…
-    // A u128 intermediate avoids overflow for large `i`; the `> u64::MAX`
-    // guard makes the `as u64` cast lossless (mid ≤ u64::MAX in that arm).
-    let mid = ((1u128 << i) * 92_682) >> 16;
-    if mid > u64::MAX as u128 {
-        u64::MAX
-    } else {
-        mid as u64
-    }
+    let lo = bucket_lower(i) as u128;
+    let hi = bucket_lower(i + 1) as u128;
+    let prod = lo * hi;
+    // Round the integer square root to the nearest integer: at the low end of
+    // the range (~100 ns) truncation alone would nearly double the relative
+    // error, so round half-up to keep the centroid within ≤ 1 % of both edges.
+    let root = prod.isqrt();
+    let rounded = if prod - root * root > root { root + 1 } else { root };
+    rounded as u64
 }
 
 /// Sliding-window percentile histogram over octave buckets.
@@ -169,30 +197,106 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bucket_index_maps_values_to_octaves() {
+    fn bucket_index_maps_small_values_and_clamps() {
+        // 0 and 1 share bucket 0; powers of two land on octave boundaries.
         assert_eq!(bucket_index(0), 0);
         assert_eq!(bucket_index(1), 0);
-        assert_eq!(bucket_index(2), 1);
-        assert_eq!(bucket_index(3), 1);
-        assert_eq!(bucket_index(4), 2);
-        assert_eq!(bucket_index(1023), 9);
-        assert_eq!(bucket_index(1024), 10);
+        assert_eq!(bucket_index(2), M); // 2^1, low edge of octave 1
+        assert_eq!(bucket_index(4), 2 * M); // 2^2, low edge of octave 2
+        assert_eq!(bucket_index(1024), 10 * M); // 2^10, low edge of octave 10
+        // Within an octave the mantissa selects an interior sub-bucket.
+        assert!(bucket_index(3) > bucket_index(2));
+        assert!(bucket_index(3) < bucket_index(4));
+        // Anything beyond the covered span saturates at the top bucket.
         assert_eq!(bucket_index(u64::MAX), BUCKETS - 1);
     }
 
     #[test]
-    fn bucket_lower_is_the_octave_edge() {
-        assert_eq!(bucket_lower(0), 1);
-        assert_eq!(bucket_lower(1), 2);
-        assert_eq!(bucket_lower(10), 1024);
+    fn bucket_lower_is_the_sub_octave_edge() {
+        assert_eq!(bucket_lower(0), 1); // 2^0, reported as 1
+        assert_eq!(bucket_lower(M), 2); // 2^1
+        assert_eq!(bucket_lower(10 * M), 1024); // 2^10
+        // The first sub-bucket above an octave edge sits just above it.
+        assert_eq!(bucket_lower(10 * M + 1), 1024 + 1024 / M as u64);
     }
 
     #[test]
-    fn at_least_three_buckets_per_decade() {
-        // A decade is ~3.32 octaves, so two values a decade apart must land
-        // at least 3 buckets apart (REQ_0100 / ADR_0060).
-        assert!(bucket_index(10_000) - bucket_index(1_000) >= 3);
-        assert!(bucket_index(1_000_000) - bucket_index(100_000) >= 3);
+    fn bucket_index_is_monotonic_non_decreasing() {
+        // Sub-octave mapping must never go backwards as the value grows.
+        let mut prev = bucket_index(1);
+        let mut v = 100u64; // 100 ns, low edge of the required range
+        while v <= 10_000_000_000 {
+            // … up to 10 s
+            let cur = bucket_index(v);
+            assert!(cur >= prev, "bucket_index({v}) = {cur} < prev {prev}");
+            prev = cur;
+            v += v / 97 + 1; // geometric-ish sweep, dense enough to catch dips
+        }
+    }
+
+    #[test]
+    fn each_octave_is_subdivided_into_m_sub_buckets() {
+        // Within an octave [2^oct, 2^(oct+1)) there are exactly M buckets,
+        // and the octave's low edge is the first of them.
+        for oct in 7..33u32 {
+            let lo = 1u64 << oct;
+            let hi = 1u64 << (oct + 1);
+            assert_eq!(bucket_index(hi) - bucket_index(lo), M);
+            // The mapping spends the whole octave on M distinct buckets.
+            let mut seen = bucket_index(lo);
+            let mut distinct = 1usize;
+            let mut v = lo + 1;
+            while v < hi {
+                let b = bucket_index(v);
+                if b != seen {
+                    distinct += 1;
+                    seen = b;
+                }
+                v += (lo / M as u64).max(1);
+            }
+            assert_eq!(distinct, M, "octave {oct} should expose M sub-buckets");
+        }
+    }
+
+    #[test]
+    fn at_least_115_buckets_per_decade() {
+        // REQ_0852: a ≤1% centroid bound needs ~115 buckets per decade
+        // across 100 ns … 10 s. Check several decades inside that range.
+        for &(lo, hi) in &[
+            (1_000u64, 10_000u64),
+            (100_000, 1_000_000),
+            (10_000_000, 100_000_000),
+            (1_000_000_000, 10_000_000_000),
+        ] {
+            let span = bucket_index(hi) - bucket_index(lo);
+            assert!(span >= 115, "decade {lo}..{hi}: only {span} buckets");
+        }
+    }
+
+    // Edges/midpoints are bounded by ~2e10 ns here, so the f64 casts in the
+    // relative-error check are lossless in practice.
+    #[allow(clippy::cast_precision_loss)]
+    #[test]
+    fn lower_and_midpoint_are_consistent_and_within_one_percent() {
+        // For every bucket whose lower edge is inside the required range,
+        // lower(i) ≤ midpoint(i) < lower(i+1), and the midpoint is within
+        // 1% of both edges (the geometric-centroid intra-bucket bound).
+        for i in 0..BUCKETS - 1 {
+            let lo = bucket_lower(i);
+            let hi = bucket_lower(i + 1);
+            // Only the required range matters; the sub-100 ns octaves have no
+            // mantissa room (2^octave < M) and collapse harmlessly.
+            if lo < 100 || hi > 20_000_000_000 {
+                continue;
+            }
+            let mid = bucket_midpoint(i);
+            assert!(lo <= mid, "bucket {i}: midpoint {mid} < lower {lo}");
+            assert!(mid < hi, "bucket {i}: midpoint {mid} >= upper {hi}");
+            let rel_lo = (mid - lo) as f64 / lo as f64;
+            let rel_hi = (hi - mid) as f64 / hi as f64;
+            assert!(rel_lo <= 0.01, "bucket {i}: {rel_lo:.4} above lower edge");
+            assert!(rel_hi <= 0.01, "bucket {i}: {rel_hi:.4} below upper edge");
+        }
     }
 
     #[test]
@@ -204,8 +308,9 @@ mod tests {
             h.record(1024);
         }
         assert_eq!(h.count(), 1000);
-        assert_eq!(h.percentile(500), bucket_midpoint(10)); // p50
-        assert_eq!(h.percentile(990), bucket_midpoint(10)); // p99
+        let b = bucket_index(1024);
+        assert_eq!(h.percentile(500), bucket_midpoint(b)); // p50
+        assert_eq!(h.percentile(990), bucket_midpoint(b)); // p99
     }
 
     #[test]
@@ -219,8 +324,10 @@ mod tests {
             h.record(1_000_000);
         }
         // p50 lands in the fast population, p99 in the slow population.
-        assert!(h.percentile(500) < bucket_lower(15));
-        assert!(h.percentile(990) >= bucket_lower(15));
+        // Threshold is layout-agnostic: a value between the two populations.
+        let mid = bucket_lower(bucket_index(100_000));
+        assert!(h.percentile(500) < mid);
+        assert!(h.percentile(990) >= mid);
     }
 
     #[test]
@@ -236,7 +343,7 @@ mod tests {
             h.record(1_000); // fast, bucket ~9
         }
         // Window now holds only fast samples; even p99 is fast.
-        assert!(h.percentile(990) < bucket_lower(15));
+        assert!(h.percentile(990) < bucket_lower(bucket_index(100_000)));
         assert!(h.count() <= 1000);
     }
 
