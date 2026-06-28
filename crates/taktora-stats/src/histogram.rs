@@ -90,7 +90,11 @@ pub const fn bucket_midpoint(i: usize) -> u64 {
     // the range (~100 ns) truncation alone would nearly double the relative
     // error, so round half-up to keep the centroid within ≤ 1 % of both edges.
     let root = prod.isqrt();
-    let rounded = if prod - root * root > root { root + 1 } else { root };
+    let rounded = if prod - root * root > root {
+        root + 1
+    } else {
+        root
+    };
     rounded as u64
 }
 
