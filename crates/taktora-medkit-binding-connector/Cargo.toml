@@ -1,0 +1,29 @@
+[package]
+name         = "taktora-medkit-binding-connector"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "taktora binding for taktora-medkit: maps connector-framework ConnectorHealth transitions into SOVD Components and DTCs (worst-wins rollup, last-sample freeze-frames), feeding the medkit provider seam off the control path. One of the two crates where taktora coupling is quarantined."
+
+[dependencies]
+taktora-medkit-model    = { workspace = true }
+taktora-medkit-provider = { workspace = true }
+taktora-connector-core  = { workspace = true }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"

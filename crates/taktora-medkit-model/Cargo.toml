@@ -1,0 +1,30 @@
+[package]
+name         = "taktora-medkit-model"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Wire DTOs for the SOVD-aligned taktora-medkit runtime-diagnostics surface (entity tree, DTC/fault model, freeze-frames, collection envelope). Clean-room model of the ros2_medkit REST contract; zero taktora dependencies."
+
+[dependencies]
+serde = { workspace = true, features = ["std", "derive"] }
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["std"] }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"

@@ -37,6 +37,11 @@ top-level features:
   allocation-free trajectory generation (profiles, electronic gearing,
   camming, flying saw) feeding CiA 402 drives in CSP mode, layered on
   the taktora runtime. See :doc:`motion/index`.
+* :need:`FEAT_0100` "Runtime diagnostics (SOVD-aligned)" — a clean-room
+  Rust take on the ros2_medkit diagnostic contract: a SOVD entity tree +
+  DTC/fault model served over a drop-in-compatible REST surface, sourced
+  from taktora's runtime through off-control-path hooks. See
+  :doc:`medkit/index`.
 
 Each ``req`` directive ``:satisfies:`` one ``feat`` parent; each
 capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
@@ -52,6 +57,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    logging/index
    ethercat-netcfg/index
    motion/index
+   medkit/index
 
 Requirements at a glance
 ------------------------
