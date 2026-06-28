@@ -284,8 +284,23 @@ pub fn router(view: AppState, config: &GatewayConfig) -> Router {
 
 /// Build the application from a [`Gateway`], folding its provider snapshot into
 /// the merged read-model once at construction.
+///
+/// When `config` carries a [`Manifest`](taktora_medkit_gateway::Manifest), the
+/// snapshot is folded through it — declared Areas/Components become entities and
+/// the raw provider entities are re-parented under them (`REQ_0921`); otherwise
+/// the gateway's own grouping (flat, or a manifest attached to the gateway) is
+/// used.
 pub fn router_from_gateway<P: Provider>(gateway: &Gateway<P>, config: &GatewayConfig) -> Router {
-    router(Arc::new(gateway.view()), config)
+    let view = config.manifest.as_ref().map_or_else(
+        || gateway.view(),
+        |manifest| {
+            MergedView::from_snapshot_with_manifest(
+                gateway.provider().snapshot(),
+                Some(manifest.clone()),
+            )
+        },
+    );
+    router(Arc::new(view), config)
 }
 
 /// Serve the read-core over HTTP per `config`, backed by `view`, until the

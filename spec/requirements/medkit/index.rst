@@ -203,6 +203,45 @@ Requirements
    the machine, holding the freedom-from-interference contract of
    :need:`ADR_0111` (see :need:`ADR_0114`).
 
+.. req:: Mandatory Area/Component grouping manifest
+   :id: REQ_0920
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0110, TEST_0909
+
+   Because v1 does no service discovery, the Area/Component grouping shall come
+   from a manifest, supplied over two surfaces that build one identical value: a
+   type-safe builder core (``Manifest::builder().area(..).component(..)
+   .map_task(..).map_subdevice(..).build()``) for tests and programmatic wiring,
+   and a TOML loader (``Manifest::from_toml``) deserialising the same shape from a
+   committed example ``medkit.toml`` so ops can edit topology without
+   recompiling. The manifest crate shall carry zero ``taktora-*`` dependencies.
+
+.. req:: Merge pipeline applies the manifest
+   :id: REQ_0921
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0110, TEST_0910
+
+   Folding the read-model through a non-empty manifest shall materialise the
+   declared Areas and Components as entities and re-parent the binding-emitted
+   raw entities (``app:<task>``, ``component:<subdevice>``) under them per the
+   mapping rules, so that ``GET /api/v1/areas/{id}/components`` and the
+   component-nesting sub-resources (``…/hosts``, ``…/subcomponents``) return the
+   declared structure. The re-parenting shall live in the merge pipeline, not in
+   the provider seam.
+
+.. req:: Empty or absent manifest falls back to flat grouping
+   :id: REQ_0922
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0110, TEST_0911
+
+   A missing or empty manifest shall not be an error: the pipeline shall fall
+   back to the flat provider grouping (the pre-manifest behaviour) without
+   panicking, so a deployment that has not yet authored a ``medkit.toml`` still
+   serves the read-core.
+
 Requirements at a glance
 ------------------------
 

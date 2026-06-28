@@ -125,3 +125,33 @@ they verify to ``implemented`` and link these tests.
    zero allocations per hook cycle, with a deliberate-allocation negative case
    proving the counter still observes this thread — mirroring the executor's own
    cycle-stats allocation test and holding :need:`ADR_0111`.
+
+.. test:: Builder and TOML manifests agree
+   :id: TEST_0909
+   :status: implemented
+   :verifies: REQ_0920
+
+   The same skeleton built via ``Manifest::builder`` and parsed via
+   ``Manifest::from_toml_str`` compares equal, and the committed example
+   ``medkit.toml`` parses into a non-empty manifest whose ``parent_of`` resolves
+   the ``app:<task>`` / ``component:<subdevice>`` id conventions.
+
+.. test:: Manifest re-parents raw entities over a live server
+   :id: TEST_0910
+   :status: implemented
+   :verifies: REQ_0920, REQ_0921
+
+   A live axum server whose ``GatewayConfig`` carries a manifest, backed by a
+   provider emitting only flat raw entities, returns the declared component under
+   ``GET /api/v1/areas/{id}/components`` and the re-parented apps / subdevices
+   under the component ``…/hosts`` and ``…/subcomponents`` sub-resources.
+
+.. test:: Empty manifest yields flat grouping
+   :id: TEST_0911
+   :status: implemented
+   :verifies: REQ_0922
+
+   Folding with an empty (default) manifest injects no skeleton and leaves the
+   raw entities parentless — the same view a no-manifest fold produces — and a
+   live server with no manifest serves empty Areas and empty component nesting
+   sub-resources without panicking.
