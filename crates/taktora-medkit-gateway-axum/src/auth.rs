@@ -21,10 +21,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::Json;
+use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Router;
 use axum::routing::post;
 use serde::{Deserialize, Serialize};
 use taktora_medkit_model::GenericError;
@@ -142,8 +142,10 @@ pub trait Authenticator: Send + Sync {
     ///
     /// Returns an [`AuthRejection`] when the impl declines the credentials. The
     /// permissive default never declines.
-    fn issue_token(&self, credentials: &AuthCredentials)
-    -> Result<AuthTokenResponse, AuthRejection>;
+    fn issue_token(
+        &self,
+        credentials: &AuthCredentials,
+    ) -> Result<AuthTokenResponse, AuthRejection>;
 
     /// Verify a presented `Bearer` token (without the `Bearer ` prefix), if any.
     ///
@@ -228,8 +230,7 @@ fn json_string(value: &str) -> String {
 /// Base64url (RFC 4648 §5) without padding — enough to make a JWT-shaped token
 /// without a base64 dependency.
 fn base64url(input: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let b0 = u32::from(chunk[0]);
@@ -317,7 +318,11 @@ mod tests {
     #[test]
     fn permissive_accepts_any_or_no_bearer() {
         assert!(PermissiveAuthenticator.verify_bearer(None).is_ok());
-        assert!(PermissiveAuthenticator.verify_bearer(Some("anything")).is_ok());
+        assert!(
+            PermissiveAuthenticator
+                .verify_bearer(Some("anything"))
+                .is_ok()
+        );
     }
 
     #[test]

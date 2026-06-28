@@ -74,8 +74,9 @@ async fn request(
             )
         },
     );
-    let req =
-        format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n{auth_header}Connection: close\r\n{body_part}");
+    let req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\n{auth_header}Connection: close\r\n{body_part}"
+    );
     stream.write_all(req.as_bytes()).await.expect("write");
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).await.expect("read");
@@ -112,13 +113,20 @@ async fn token_endpoint_issues_contract_shaped_jwt() {
         Some(CLIENT_CREDENTIALS),
     )
     .await;
-    assert_eq!(resp.status, 200, "token endpoint should be 200: {}", resp.body);
+    assert_eq!(
+        resp.status, 200,
+        "token endpoint should be 200: {}",
+        resp.body
+    );
     let value = json(&resp.body);
 
     // Contract `AuthTokenResponse` required fields.
     let access_token = value["access_token"].as_str().expect("access_token string");
     assert_eq!(value["token_type"], "Bearer");
-    assert!(value["expires_in"].is_number(), "expires_in must be an integer");
+    assert!(
+        value["expires_in"].is_number(),
+        "expires_in must be an integer"
+    );
     assert!(value["scope"].is_string(), "scope must be a string");
 
     // JWT *shape* (not cryptographically real, deferred to #87): three
@@ -160,7 +168,10 @@ async fn authorize_and_revoke_endpoints_exist() {
 
     // GET on a token route is not a contract method: 405, never a 200 or a body.
     let get = request(addr, "GET", "/api/v1/auth/token", None, None).await;
-    assert_eq!(get.status, 405, "GET on /auth/token must be 405 Method Not Allowed");
+    assert_eq!(
+        get.status, 405,
+        "GET on /auth/token must be 405 Method Not Allowed"
+    );
 }
 
 /// `TEST_0923` — resource endpoints pass with or without a Bearer token
@@ -200,7 +211,10 @@ async fn full_client_login_then_read_with_token() {
         .to_owned();
 
     let read = request(addr, "GET", "/api/v1/components", Some(&token), None).await;
-    assert_eq!(read.status, 200, "read-core call with the issued token must be 200");
+    assert_eq!(
+        read.status, 200,
+        "read-core call with the issued token must be 200"
+    );
     assert!(json(&read.body).is_object() || json(&read.body).is_array());
 }
 
@@ -210,12 +224,19 @@ async fn full_client_login_then_read_with_token() {
 struct RejectingAuthenticator;
 
 impl Authenticator for RejectingAuthenticator {
-    fn issue_token(&self, _credentials: &AuthCredentials) -> Result<AuthTokenResponse, AuthRejection> {
-        Err(AuthRejection::invalid_client("rejected by test authenticator"))
+    fn issue_token(
+        &self,
+        _credentials: &AuthCredentials,
+    ) -> Result<AuthTokenResponse, AuthRejection> {
+        Err(AuthRejection::invalid_client(
+            "rejected by test authenticator",
+        ))
     }
 
     fn verify_bearer(&self, _bearer: Option<&str>) -> Result<(), AuthRejection> {
-        Err(AuthRejection::invalid_client("rejected by test authenticator"))
+        Err(AuthRejection::invalid_client(
+            "rejected by test authenticator",
+        ))
     }
 }
 
@@ -234,7 +255,11 @@ async fn strict_authenticator_is_substitutable() {
         Some(CLIENT_CREDENTIALS),
     )
     .await;
-    assert_eq!(login.status, 401, "strict authenticator must reject: {}", login.body);
+    assert_eq!(
+        login.status, 401,
+        "strict authenticator must reject: {}",
+        login.body
+    );
 
     // Read-core is enforcement=none: still served, handlers unchanged.
     let read = request(addr, "GET", "/api/v1/", None, None).await;
