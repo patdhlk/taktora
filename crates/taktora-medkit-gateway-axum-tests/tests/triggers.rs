@@ -35,7 +35,10 @@ struct Response {
 async fn request(addr: SocketAddr, method: &str, path: &str, body: Option<&str>) -> Response {
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     let payload = body.map_or_else(String::new, |b| {
-        format!("Content-Type: application/json\r\nContent-Length: {}\r\n", b.len())
+        format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            b.len()
+        )
     });
     let req = format!(
         "{method} {path} HTTP/1.1\r\nHost: localhost\r\n{payload}Connection: close\r\n\r\n{}",
@@ -86,9 +89,15 @@ async fn triggers_crud_round_trip() {
         Some(r#"{"entity_id":"ros2_medkit_gateway","severity":2}"#),
     )
     .await;
-    assert_eq!(created.status, 201, "POST /triggers should create: {}", created.body);
+    assert_eq!(
+        created.status, 201,
+        "POST /triggers should create: {}",
+        created.body
+    );
     let created = json(&created.body);
-    let id = created["id"].as_str().expect("created trigger carries an id");
+    let id = created["id"]
+        .as_str()
+        .expect("created trigger carries an id");
     assert_eq!(created["entity_id"], "ros2_medkit_gateway");
     assert_eq!(created["severity"], 2);
 
@@ -97,7 +106,10 @@ async fn triggers_crud_round_trip() {
     assert_eq!(listed.status, 200);
     let listed = json(&listed.body);
     let items = listed["items"].as_array().expect("items array");
-    assert!(items.iter().any(|t| t["id"] == id), "list should contain {id}");
+    assert!(
+        items.iter().any(|t| t["id"] == id),
+        "list should contain {id}"
+    );
 
     // GET {id} fetches it.
     let fetched = request(addr, "GET", &format!("/api/v1/triggers/{id}"), None).await;

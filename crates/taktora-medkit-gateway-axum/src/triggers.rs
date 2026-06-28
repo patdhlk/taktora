@@ -43,8 +43,8 @@ use std::time::Duration;
 use axum::Json;
 use axum::extract::{FromRef, Path, State};
 use axum::http::StatusCode;
-use axum::response::sse::{Event, Sse};
 use axum::response::IntoResponse;
+use axum::response::sse::{Event, Sse};
 use serde::{Deserialize, Serialize};
 use taktora_medkit_gateway::view::collection_segment;
 use taktora_medkit_gateway::{FaultStatusFilter, Manifest, MergedView};
@@ -315,7 +315,9 @@ pub async fn refresh_loop<P: Provider>(
 
 /// A per-entity index `entity_id -> (kind, fault_code -> summary)` over the view's
 /// public resolvers (entities carrying no fault are omitted).
-fn fault_index(view: &MergedView) -> BTreeMap<String, (EntityKind, BTreeMap<String, FaultSummary>)> {
+fn fault_index(
+    view: &MergedView,
+) -> BTreeMap<String, (EntityKind, BTreeMap<String, FaultSummary>)> {
     let mut index = BTreeMap::new();
     for kind in [
         EntityKind::Area,
@@ -387,11 +389,7 @@ fn make_event(
 /// `fault_raised` for a newly-present `(entity, fault_code)`, `fault_cleared` for
 /// one that vanished, and `health_changed` when an entity's worst-wins health
 /// level moves (`REQ_0931`, `REQ_0932`).
-pub fn diff_events(
-    prev: &MergedView,
-    next: &MergedView,
-    seq: &AtomicU64,
-) -> Vec<StreamEvent> {
+pub fn diff_events(prev: &MergedView, next: &MergedView, seq: &AtomicU64) -> Vec<StreamEvent> {
     let prev_index = fault_index(prev);
     let next_index = fault_index(next);
     let mut events = Vec::new();
@@ -511,7 +509,8 @@ mod tests {
         assert!(
             cleared
                 .iter()
-                .any(|e| e.event.event_type == "fault_cleared" && e.event.fault.fault_code == "BRAKE")
+                .any(|e| e.event.event_type == "fault_cleared"
+                    && e.event.fault.fault_code == "BRAKE")
         );
     }
 

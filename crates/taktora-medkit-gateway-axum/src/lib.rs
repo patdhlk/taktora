@@ -278,8 +278,7 @@ fn cors_layer(config: &CorsConfig) -> Option<CorsLayer> {
     if !config.enabled {
         return None;
     }
-    let mut layer =
-        CorsLayer::new().allow_methods([Method::GET, Method::POST, Method::DELETE]);
+    let mut layer = CorsLayer::new().allow_methods([Method::GET, Method::POST, Method::DELETE]);
     if config.allow_any_origin {
         layer = layer.allow_origin(Any);
     }
