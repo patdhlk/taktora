@@ -421,4 +421,70 @@ mod tests {
             }
         }
     }
+
+    // TEST_0868 (verifies REQ_0852): the sub-octave layout brings the
+    // percentile estimate within a *literal 1 %* relative error on the same
+    // reference distributions as TEST_0190. This is the acceptance gate for
+    // the sub-octave precision requirement; on the old octave layout the
+    // estimate carries ≈ 40 % error here, so this test discriminates the two.
+    // Sample values are bounded by 100 ms (1e8 ns) and ranks by 10 000, so
+    // every cast below is lossless in practice.
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    #[test]
+    fn sub_octave_percentile_accuracy_within_one_percent() {
+        // Deterministic LCG — no clock, no `rand`, fully reproducible.
+        let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+        let mut next_u01 = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((state >> 11) as f64) / ((1u64 << 53) as f64)
+        };
+
+        let bound = 0.01; // a literal 1 %
+        let mut worst = 0.0f64;
+
+        // dist 0: uniform on [100 ns, 100 ms]; dist 1: exponential, mean 1 ms.
+        for dist in 0..2 {
+            let mut samples: Vec<u64> = Vec::with_capacity(10_000);
+            for _ in 0..10_000 {
+                let u = next_u01().max(1e-12);
+                let v = if dist == 0 {
+                    100.0 + u * (100_000_000.0 - 100.0)
+                } else {
+                    -(u.ln()) * 1_000_000.0
+                };
+                samples.push((v.max(1.0)) as u64);
+            }
+
+            let mut hist = RollingHistogram::<BUCKETS, 1>::new(10_000);
+            for &s in &samples {
+                hist.record(s);
+            }
+            assert_eq!(hist.count(), 10_000);
+
+            let mut sorted = samples.clone();
+            sorted.sort_unstable();
+
+            for &permille in &[500u16, 950, 990] {
+                // Mirror RollingHistogram::percentile's rank target so the
+                // exact reference picks the same rank the histogram does.
+                let target = (10_000u64 * u64::from(permille)).div_ceil(1000) as usize;
+                let exact = sorted[target - 1] as f64;
+                let est = hist.percentile(permille) as f64;
+                let rel = (est - exact).abs() / exact;
+                worst = worst.max(rel);
+                assert!(
+                    rel <= bound,
+                    "dist {dist} p{permille}: est={est} exact={exact} rel={rel:.4} > bound={bound:.4}"
+                );
+            }
+        }
+        // Surfaced with `--nocapture` for the REQ_0852 acceptance record.
+        std::eprintln!("TEST_0868 worst-case relative error: {worst:.4}");
+    }
 }
