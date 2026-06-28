@@ -93,3 +93,35 @@ they verify to ``implemented`` and link these tests.
    The default server advertises a CORS allow-origin header, and a server
    configured with a one-token bucket throttles the second request to ``429``,
    demonstrating CORS and the rate limit are wired and configurable.
+
+.. test:: Executor binding satisfies the provider seam
+   :id: TEST_0912
+   :status: implemented
+   :verifies: REQ_0924
+
+   A freshly constructed binding exposes the synthetic executor entity plus one
+   App entity per registered task through the ``Provider`` seam, all reading
+   healthy with no faults, so the gateway can read live executor state through
+   the same seam it reads the mock through.
+
+.. test:: A running executor drives binding liveness and timing
+   :id: TEST_0913
+   :status: implemented
+   :verifies: REQ_0923, REQ_0924
+
+   A real ``taktora-executor`` with the binding registered as observer and
+   monitor runs cyclic App items: the App entity health reflects the lifecycle
+   hooks (a running App reads healthy, an erroring App degrades to ``Error``),
+   and the readable ``data`` timing (execution count, EWMA, period / rate)
+   updates from ``post_execute`` and ``on_cycle_stats``.
+
+.. test:: Hook write path performs zero heap allocation
+   :id: TEST_0914
+   :status: implemented
+   :verifies: REQ_0925
+
+   The binding's hooks are driven in a steady-state loop under a counting global
+   allocator; a differential measurement (``count(big) − count(small)``) shows
+   zero allocations per hook cycle, with a deliberate-allocation negative case
+   proving the counter still observes this thread — mirroring the executor's own
+   cycle-stats allocation test and holding :need:`ADR_0111`.
