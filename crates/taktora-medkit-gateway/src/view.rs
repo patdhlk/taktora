@@ -171,6 +171,8 @@ impl MergePipeline {
         let mut by_id: HashMap<String, usize> = HashMap::new();
         let mut relationships: Vec<RelationshipEdge> = Vec::new();
         let mut faults: BTreeMap<String, Vec<FaultSummary>> = BTreeMap::new();
+        let mut fault_environments: BTreeMap<String, BTreeMap<String, EnvironmentData<Value>>> =
+            BTreeMap::new();
         let mut data: BTreeMap<String, Value> = BTreeMap::new();
 
         for snapshot in self.snapshots {
@@ -184,6 +186,12 @@ impl MergePipeline {
             }
             relationships.extend(snapshot.relationships);
             faults.extend(snapshot.faults);
+            for (entity_id, envs) in snapshot.fault_environments {
+                fault_environments
+                    .entry(entity_id)
+                    .or_default()
+                    .extend(envs);
+            }
             data.extend(snapshot.data);
         }
 
@@ -196,6 +204,7 @@ impl MergePipeline {
             by_id,
             relationships,
             faults,
+            fault_environments,
             data,
         }
     }
@@ -290,6 +299,7 @@ pub struct MergedView {
     by_id: HashMap<String, usize>,
     relationships: Vec<RelationshipEdge>,
     faults: BTreeMap<String, Vec<FaultSummary>>,
+    fault_environments: BTreeMap<String, BTreeMap<String, EnvironmentData<Value>>>,
     data: BTreeMap<String, Value>,
 }
 
@@ -467,10 +477,14 @@ impl MergedView {
 
     /// The single fault detail (`…/{id}/faults/{fault_code}`).
     ///
-    /// Derived best-effort from the fault summary: the DTC `item` with its
-    /// camelCase status sub-object and the `x-medkit` extension are exact; the
-    /// freeze-frame `snapshots` array is empty here, since rich freeze-frame
-    /// capture arrives with the live binding slice (a documented gap).
+    /// The DTC `item` with its camelCase status sub-object and the `x-medkit`
+    /// extension are derived from the fault summary. When the merged snapshot
+    /// carried freeze-frame environment data for `(id, fault_code)` (a capturing
+    /// binding populated [`ProviderSnapshot::fault_environments`], `ADR_0116`,
+    /// `REQ_0929`), the real `snapshots` / `extended_data_records` are surfaced;
+    /// otherwise the occurrence-only environment shape is emitted (back-compat).
+    ///
+    /// [`ProviderSnapshot::fault_environments`]: taktora_medkit_provider::ProviderSnapshot::fault_environments
     ///
     /// # Errors
     ///
@@ -489,7 +503,15 @@ impl MergedView {
             .flatten()
             .find(|f| f.fault_code == fault_code)
             .ok_or_else(|| ResolveError::fault_not_found(fault_code))?;
-        Ok(detail_from_summary(summary))
+        let mut detail = detail_from_summary(summary);
+        if let Some(env) = self
+            .fault_environments
+            .get(id)
+            .and_then(|m| m.get(fault_code))
+        {
+            detail.environment_data = env.clone();
+        }
+        Ok(detail)
     }
 
     /// Acknowledge a fault deletion (`DELETE …/{id}/faults/{fault_code}`).
@@ -874,6 +896,66 @@ mod tests {
         assert_eq!(detail.item.status.confirmed_dtc, "1");
         assert_eq!(detail.item.status.aggregated_status, "active");
         assert!(view().fault_detail(EntityKind::App, "gw", "NOPE").is_err());
+    }
+
+    /// `TEST_0918` — a fault carrying environment data in the snapshot surfaces a
+    /// non-empty freeze-frame under `fault_detail`; one without falls back to the
+    /// occurrence-only shape (back-compat) — `REQ_0929`.
+    #[test]
+    fn fault_detail_surfaces_freeze_frame_environment() {
+        use taktora_medkit_model::{FreezeFrame, FreezeFrameMeta};
+
+        let payload = json!({ "wkc": 2, "expected_wkc": 3 });
+        let env = EnvironmentData {
+            extended_data_records: ExtendedDataRecords {
+                first_occurrence: "2026-06-27T22:40:00.250Z".to_owned(),
+                last_occurrence: "2026-06-28T15:45:00.750Z".to_owned(),
+            },
+            snapshots: vec![FreezeFrame {
+                data: payload.clone(),
+                name: "freeze_frame_at_confirmation".to_owned(),
+                kind: "freeze_frame".to_owned(),
+                x_medkit: FreezeFrameMeta {
+                    captured_at: "2026-06-28T15:45:00.750Z".to_owned(),
+                    full_data: payload,
+                    message_type: "diagnostic_msgs/msg/DiagnosticStatus".to_owned(),
+                    topic: "/diagnostics/brake_state".to_owned(),
+                },
+            }],
+        };
+
+        let provider = MockProvider::new()
+            .with_entity(component("spark"))
+            .with_fault("spark", fault("BRAKE", Severity::Error, "CONFIRMED"))
+            .with_fault("spark", fault("MOTOR", Severity::Warn, "PREFAILED"))
+            .with_fault_environment("spark", "BRAKE", env);
+        let view = MergedView::from_snapshot(provider.snapshot());
+
+        // The fault WITH environment data surfaces the real freeze-frame.
+        let detail = view
+            .fault_detail(EntityKind::Component, "spark", "BRAKE")
+            .unwrap();
+        assert_eq!(detail.environment_data.snapshots.len(), 1);
+        assert_eq!(detail.environment_data.snapshots[0].kind, "freeze_frame");
+        assert_eq!(
+            detail.environment_data.snapshots[0].x_medkit.full_data["wkc"],
+            json!(2)
+        );
+        assert_eq!(
+            detail
+                .environment_data
+                .extended_data_records
+                .first_occurrence,
+            "2026-06-27T22:40:00.250Z"
+        );
+        // The DTC `item` still derives from the summary (faults_list contract).
+        assert_eq!(detail.item.code, "BRAKE");
+
+        // The fault WITHOUT environment data falls back to the empty shape.
+        let plain = view
+            .fault_detail(EntityKind::Component, "spark", "MOTOR")
+            .unwrap();
+        assert!(plain.environment_data.snapshots.is_empty());
     }
 
     /// `TEST_0906` — data navigates the topic path and 404s past the leaf.

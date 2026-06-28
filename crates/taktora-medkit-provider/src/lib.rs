@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use serde_json::Value;
-use taktora_medkit_model::{Entity, FaultSummary, Health, Severity};
+use taktora_medkit_model::{Entity, EnvironmentData, FaultSummary, Health, Severity};
 
 /// A typed relationship between two SOVD entities, as the contract exposes them
 /// under relationship sub-resources (`…/hosts`, `…/depends-on`, …).
@@ -103,6 +103,13 @@ pub struct ProviderSnapshot {
     pub relationships: Vec<RelationshipEdge>,
     /// Faults keyed by the entity id they are scoped to.
     pub faults: BTreeMap<String, Vec<FaultSummary>>,
+    /// Per-fault freeze-frame environment data, keyed `entity_id → fault_code`.
+    ///
+    /// Additive seam (`ADR_0116`, `REQ_0929`): a binding that captures
+    /// freeze-frames populates this so the gateway's `…/faults/{code}` detail can
+    /// carry the real `snapshots` / `extended_data_records`. The `FaultSummary`
+    /// list path is unchanged; the map is empty for providers that capture none.
+    pub fault_environments: BTreeMap<String, BTreeMap<String, EnvironmentData<Value>>>,
     /// Readable data trees keyed by entity id (served under `…/data`).
     pub data: BTreeMap<String, Value>,
 }
@@ -119,6 +126,22 @@ pub trait Provider: Send + Sync {
 
     /// The active faults reported against the entity `entity_id`.
     fn faults(&self, entity_id: &str) -> Vec<FaultSummary>;
+
+    /// The freeze-frame environment data captured for fault `fault_code` on
+    /// `entity_id`, if the provider captured any (`REQ_0929`).
+    ///
+    /// Defaults to `None`: a provider that carries no freeze-frames need not
+    /// implement this, and the gateway falls back to the occurrence-only detail
+    /// shape. A capturing binding either overrides this or populates
+    /// [`ProviderSnapshot::fault_environments`] directly.
+    fn fault_environment(
+        &self,
+        entity_id: &str,
+        fault_code: &str,
+    ) -> Option<EnvironmentData<Value>> {
+        let _ = (entity_id, fault_code);
+        None
+    }
 
     /// The directly-observed (non-rolled-up) health of `entity_id`.
     ///
@@ -145,6 +168,7 @@ pub trait Provider: Send + Sync {
             entities,
             relationships: Vec::new(),
             faults,
+            fault_environments: BTreeMap::new(),
             data: BTreeMap::new(),
         }
     }
@@ -155,6 +179,7 @@ pub trait Provider: Send + Sync {
 pub struct MockProvider {
     entities: Vec<Entity>,
     faults: HashMap<String, Vec<FaultSummary>>,
+    fault_environments: BTreeMap<String, BTreeMap<String, EnvironmentData<Value>>>,
     health: HashMap<String, Health>,
     relationships: Vec<RelationshipEdge>,
     data: BTreeMap<String, Value>,
@@ -208,6 +233,22 @@ impl MockProvider {
         self.data.insert(entity_id.into(), data);
         self
     }
+
+    /// Attach freeze-frame environment data for a fault on an entity, surfaced by
+    /// the gateway under `…/faults/{fault_code}` (`REQ_0929`).
+    #[must_use]
+    pub fn with_fault_environment(
+        mut self,
+        entity_id: impl Into<String>,
+        fault_code: impl Into<String>,
+        env: EnvironmentData<Value>,
+    ) -> Self {
+        self.fault_environments
+            .entry(entity_id.into())
+            .or_default()
+            .insert(fault_code.into(), env);
+        self
+    }
 }
 
 impl Provider for MockProvider {
@@ -217,6 +258,17 @@ impl Provider for MockProvider {
 
     fn faults(&self, entity_id: &str) -> Vec<FaultSummary> {
         self.faults.get(entity_id).cloned().unwrap_or_default()
+    }
+
+    fn fault_environment(
+        &self,
+        entity_id: &str,
+        fault_code: &str,
+    ) -> Option<EnvironmentData<Value>> {
+        self.fault_environments
+            .get(entity_id)
+            .and_then(|m| m.get(fault_code))
+            .cloned()
     }
 
     fn health(&self, entity_id: &str) -> Health {
@@ -232,6 +284,7 @@ impl Provider for MockProvider {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
+            fault_environments: self.fault_environments.clone(),
             data: self.data.clone(),
         }
     }

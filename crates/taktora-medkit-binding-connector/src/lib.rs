@@ -496,15 +496,27 @@ impl Provider for MedkitProvider {
     fn snapshot(&self) -> ProviderSnapshot {
         // Read the store once under a single lock for a consistent snapshot,
         // then release it before assembling the wire model.
-        let (summaries, data_tree) = {
+        let (summaries, environments, data_tree) = {
             let state = self.lock();
             let summaries: Vec<FaultSummary> =
                 state.dtcs.values().map(DtcRecord::summary).collect();
-            (summaries, data_tree(&state))
+            // Per-DTC freeze-frame environment data, carried through the snapshot
+            // seam so the gateway's `…/faults/{code}` detail surfaces the real
+            // `snapshots` / `extended_data_records` (`ADR_0116`, `REQ_0929`).
+            let environments: BTreeMap<String, EnvironmentData<Value>> = state
+                .dtcs
+                .values()
+                .map(|d| (d.code.to_owned(), d.detail().environment_data))
+                .collect();
+            (summaries, environments, data_tree(&state))
         };
         let mut faults = BTreeMap::new();
         if !summaries.is_empty() {
             faults.insert(self.inner.component_id.clone(), summaries);
+        }
+        let mut fault_environments = BTreeMap::new();
+        if !environments.is_empty() {
+            fault_environments.insert(self.inner.component_id.clone(), environments);
         }
         let mut data = BTreeMap::new();
         data.insert(self.inner.component_id.clone(), data_tree);
@@ -512,6 +524,7 @@ impl Provider for MedkitProvider {
             entities: vec![self.component()],
             relationships: Vec::new(),
             faults,
+            fault_environments,
             data,
         }
     }

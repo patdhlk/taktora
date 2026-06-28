@@ -109,6 +109,37 @@ async fn component_and_dtcs_surface_through_running_gateway() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn confirmed_dtc_freeze_frame_reachable_under_fault_detail() {
+    // `TEST_0918` — the confirmed DTC's freeze-frame is reachable through the
+    // proper SOVD fault-detail endpoint (`…/faults/{code}`), carried under the
+    // contract's `snapshots` / `extended_data_records` (`REQ_0929`), not only the
+    // `…/data` workaround.
+    let addr = spawn().await;
+
+    let detail = get_json(
+        addr,
+        &format!("/api/v1/components/{COMPONENT}/faults/{DTC_NOT_OPERATIONAL}"),
+    )
+    .await;
+
+    let env = &detail["environment_data"];
+    let records = &env["extended_data_records"];
+    assert!(records["first_occurrence"].is_string());
+    assert!(records["last_occurrence"].is_string());
+
+    let frame = &env["snapshots"][0];
+    assert_eq!(frame["type"], Value::from("freeze_frame"));
+    // The captured last-sample is the connector hook sample observed before
+    // confirmation.
+    assert_eq!(frame["x-medkit"]["full_data"]["wkc"], Value::from(2));
+    assert_eq!(
+        frame["x-medkit"]["full_data"]["expected_wkc"],
+        Value::from(3)
+    );
+    assert!(frame["x-medkit"]["captured_at"].is_string());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn confirmed_dtc_freeze_frame_reachable_under_data() {
     let addr = spawn().await;
 
