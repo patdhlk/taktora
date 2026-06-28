@@ -242,3 +242,41 @@ they verify to ``implemented`` and link these tests.
    is registered yields a ``health_changed`` SSE frame on the event stream; a
    unit test confirms the diff emits ``health_changed`` carrying the fault that
    drove the transition when an entity's worst-wins health level moves.
+
+.. test:: Token endpoint issues a contract-shaped JWT
+   :id: TEST_0922
+   :status: implemented
+   :verifies: REQ_0935, REQ_0936
+
+   A live axum server over the mock provider answers ``POST /api/v1/auth/token``
+   with a ``client_credentials`` body with HTTP ``200`` and a contract-shaped
+   ``AuthTokenResponse``: ``token_type`` is ``"Bearer"``, ``expires_in`` is an
+   integer, ``scope`` is a string, and ``access_token`` is a JWT-shaped string of
+   three non-empty dot-separated ``base64url`` segments. ``POST`` to
+   ``/auth/authorize`` likewise issues a token and ``/auth/revoke`` returns a
+   ``status``; a ``GET`` on ``/auth/token`` is ``405`` (POST-only). A unit test
+   asserts the permissive authenticator issues the JWT-shaped token, echoes the
+   requested scope, and the ``base64url`` encoder matches the RFC 4648 vectors.
+
+.. test:: Enforcement = none accepts requests with or without a token
+   :id: TEST_0923
+   :status: implemented
+   :verifies: REQ_0938
+
+   Over a live server, a read-core ``GET`` succeeds with HTTP ``200`` both with no
+   ``Authorization`` header and with an unverifiable ``Bearer`` token, proving the
+   gateway never rejects a resource request on authentication grounds in v1.
+
+.. test:: Full client login-to-read flow and the Authenticator seam
+   :id: TEST_0924
+   :status: implemented
+   :verifies: REQ_0939, REQ_0937
+
+   An end-to-end test ``POST``\s ``client_credentials`` to ``/api/v1/auth/token``
+   over real TCP, extracts the ``access_token``, and calls a read-core endpoint
+   presenting it as a ``Bearer`` credential, asserting HTTP ``200``. A second test
+   substitutes a strict, externally-defined ``Authenticator`` that rejects all
+   credentials via ``router_with_authenticator`` — without touching any handler —
+   and shows token issuance now returns ``401`` while the enforcement = none
+   read-core still answers ``200``; a unit test confirms the trait is object-safe
+   and a rejecting impl drops in behind ``dyn Authenticator``.

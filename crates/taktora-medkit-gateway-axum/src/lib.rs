@@ -22,6 +22,7 @@
 //! handle; #82 applies a manifest inside the pipeline; #83/#84 contribute extra
 //! `ProviderSnapshot`s to merge. None of that changes the HTTP surface.
 
+mod auth;
 mod config;
 pub mod demo;
 mod error;
@@ -47,6 +48,10 @@ use tower_http::cors::{Any, CorsLayer};
 
 use triggers::ServerState;
 
+pub use auth::{
+    AuthCredentials, AuthRejection, AuthRevokeRequest, AuthRevokeResponse, AuthTokenResponse,
+    Authenticator, PermissiveAuthenticator,
+};
 pub use config::{CorsConfig, DEFAULT_BIND, GatewayConfig, RateLimit, TlsConfig};
 pub use error::ApiError;
 pub use ratelimit::TokenBucket;
@@ -285,9 +290,21 @@ fn cors_layer(config: &CorsConfig) -> Option<CorsLayer> {
     Some(layer)
 }
 
-/// Apply the configured transport-hardening layers over a state-bound router.
-fn router_with_state(state: ServerState, config: &GatewayConfig) -> Router {
-    let mut app = api_router().with_state(state);
+/// Apply the configured transport-hardening layers over a state-bound router,
+/// mounting the `/api/v1/auth/*` token endpoints behind `authenticator`.
+///
+/// The read-core handlers are identical regardless of which authenticator is
+/// supplied — auth lives in the `/api/v1/auth/*` sub-router's own state — so a
+/// strict JWT/RBAC impl (deferred to #87) substitutes for the permissive
+/// default without touching any handler (`REQ_0937`, `BB_0112`).
+fn router_with_state(
+    state: ServerState,
+    config: &GatewayConfig,
+    authenticator: Arc<dyn Authenticator>,
+) -> Router {
+    let mut app = api_router()
+        .with_state(state)
+        .merge(auth::auth_router(API_BASE, authenticator));
 
     if let Some(layer) = cors_layer(&config.cors) {
         app = app.layer(layer);
@@ -308,8 +325,29 @@ fn router_with_state(state: ServerState, config: &GatewayConfig) -> Router {
 /// This is the static surface: the trigger CRUD and SSE endpoints are mounted,
 /// but no refresh-and-diff loop drives the stream (the served `view` is fixed).
 /// Use [`serve_listener_with_provider`] for the live, event-emitting surface.
+/// The `/api/v1/auth/*` token endpoints are mounted behind the **permissive**
+/// (dev-mode) [`Authenticator`] (`REQ_0936`).
 pub fn router(view: AppState, config: &GatewayConfig) -> Router {
-    router_with_state(ServerState::detached(view), config)
+    router_with_state(
+        ServerState::detached(view),
+        config,
+        Arc::new(PermissiveAuthenticator),
+    )
+}
+
+/// Build the axum application with a caller-supplied [`Authenticator`] behind
+/// the seam (`REQ_0937`, `BB_0112`).
+///
+/// Like [`router`] but substitutes `authenticator` for the permissive default,
+/// without touching any handler. Resource routes run enforcement = none
+/// (`REQ_0938`): a `Bearer` token is accepted and never verified, and requests
+/// with or without one always pass.
+pub fn router_with_authenticator(
+    view: AppState,
+    config: &GatewayConfig,
+    authenticator: Arc<dyn Authenticator>,
+) -> Router {
+    router_with_state(ServerState::detached(view), config, authenticator)
 }
 
 /// Build the application from a [`Gateway`], folding its provider snapshot into
@@ -414,7 +452,11 @@ pub async fn serve_listener_with_provider<P: Provider + Send + 'static>(
     tokio::spawn(triggers::refresh_loop(
         provider, manifest, initial, view_tx, events, cadence,
     ));
-    axum::serve(listener, router_with_state(state, config)).await
+    axum::serve(
+        listener,
+        router_with_state(state, config, Arc::new(PermissiveAuthenticator)),
+    )
+    .await
 }
 
 /// Bind an ephemeral port and return the listener plus the assigned address.

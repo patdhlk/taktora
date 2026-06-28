@@ -304,6 +304,51 @@ arc42 §4.
    documented as the intended reconciliation, not a regression. See
    :need:`REQ_0931`, :need:`REQ_0934`.
 
+.. arch-decision:: Auth-light seam before real JWT/RBAC enforcement
+   :id: ADR_0118
+   :status: accepted
+   :refines: FEAT_0100
+
+   **Context.** A drop-in SOVD client authenticates via ``OAuth2``
+   ``client_credentials`` → JWT ``Bearer`` *before* it reads any diagnostics; if
+   ``/api/v1/auth/*`` does not exist its login fails and it never reaches the
+   read surface it is compatible with. But full JWT validation + RBAC
+   (``viewer`` / ``operator`` / ``configurator`` / ``admin``) and the enforcement
+   modes (``none`` / ``write`` / ``all``) are out of scope for v1: the deployment
+   posture is network-layer auth (NetBird / mTLS), with the gateway auth-light.
+   The token-endpoint path was contested in the upstream docs; it is pinned from
+   the running binary's OpenAPI to ``POST /api/v1/auth/token`` (singular),
+   ``/auth/authorize``, ``/auth/revoke`` (POST-only). There is no captured golden
+   token body — the demo image ran with auth disabled — so the response *shape*
+   is derived from the OpenAPI ``getToken`` / ``AuthTokenResponse`` schema plus
+   the acceptance fields.
+
+   **Decision.** Ship an auth-light v1 that preserves the client login flow
+   behind a seam. Introduce an ``Authenticator`` trait (:need:`BB_0112`) as the
+   substitution point; the default ``PermissiveAuthenticator`` is dev-mode (any
+   credentials succeed, any/no ``Bearer`` token accepted) and issues a
+   **shape-valid, unsigned** JWT — hand-rolled
+   ``base64url(header).base64url(payload).signature`` with an ``alg: "none"``
+   header — rather than pulling in a JWT/crypto dependency for a token v1 only
+   needs to *shape*-validate. Resource routes run enforcement = none: a ``Bearer``
+   token is accepted and never verified, so requests with or without one always
+   pass. The authenticator is injected at router assembly
+   (``router_with_authenticator``), not referenced by any handler, so a strict
+   impl substitutes without reworking handlers. Real signing/validation, RBAC,
+   and the enforcement modes are deferred to tracking issue #87 behind this seam.
+   See :need:`REQ_0935`, :need:`REQ_0936`, :need:`REQ_0937`, :need:`REQ_0938`,
+   :need:`REQ_0939`.
+
+   **Consequences.** ✅ A ``client_credentials`` client completes login and reads
+   the surface today, with no crypto dependency added. ✅ The trait seam and
+   router-level injection mean the #87 strict path lands without touching read
+   handlers. ✅ The enforcement = none posture matches the network-layer-auth
+   deployment without prematurely committing to an RBAC model. ❌ The issued token
+   is not cryptographically real and must not be trusted as an authorization
+   decision until #87; ❌ a second seam (verification) is carried but advisory in
+   v1, so a rejecting authenticator changes token issuance but not resource
+   access while enforcement is none.
+
 Building block view
 -------------------
 
@@ -451,6 +496,27 @@ provider seam.
    ``extended_data_records`` shape and also surfaced under the Component's
    ``data`` resource so it is reachable through the running gateway. See
    :need:`ADR_0115`.
+
+.. building-block:: Authenticator seam (auth-light)
+   :id: BB_0112
+   :status: implemented
+   :implements: REQ_0935, REQ_0936, REQ_0937, REQ_0938, REQ_0939
+   :links: ADR_0118, TEST_0922, TEST_0923, TEST_0924
+
+   The gateway's authentication seam, inside ``taktora-medkit-gateway-axum``
+   (:need:`BB_0107`). An ``Authenticator`` trait carries token issuance
+   (``issue_token``) and bearer verification (``verify_bearer``) behind one
+   substitution point; the default ``PermissiveAuthenticator`` is dev-mode and
+   issues a shape-valid, unsigned JWT (hand-rolled
+   ``base64url(header).base64url(payload).signature``, no crypto dependency). A
+   small ``auth`` sub-router mounts the POST-only ``/api/v1/auth/token`` /
+   ``authorize`` / ``revoke`` endpoints over the trait, carved out from under the
+   deferred-family ``501`` fallback, and is merged into the main router; the
+   authenticator is injected at assembly (``router_with_authenticator``) so it is
+   absent from every read-core handler. Resource routes run enforcement = none.
+   The seam is the drop-in point for the deferred strict path — real JWT
+   validation, RBAC, and enforcement modes (tracking issue #87) — which lands
+   without reworking handlers (:need:`ADR_0118`).
 
 .. architecture:: medkit crate decomposition
    :id: ARCH_0080
