@@ -6,7 +6,7 @@
 
 use crate::{BUCKETS, MinMaxDeque, RollingHistogram};
 
-/// Sliding-window stats for one nanosecond quantity: octave-bucket
+/// Sliding-window stats for one nanosecond quantity: sub-octave-bucket
 /// percentiles (`p50`/`p95`/`p99`) plus exact windowed min/max.
 ///
 /// `S` is the histogram segment count (see [`RollingHistogram`]); `W` is

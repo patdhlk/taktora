@@ -1,4 +1,9 @@
-//! Octave-bucket sliding-window percentile histogram.
+//! Sub-octave-bucket sliding-window percentile histogram.
+//!
+//! Each power-of-two octave is subdivided into `M` equal-width mantissa
+//! sub-buckets, giving ≥ 115 buckets per decade across 100 ns … 10 s and a
+//! geometric-centroid relative error of ≤ 1 % (`REQ_0852`). The hot
+//! `bucket_index` path is integer-only and O(1).
 
 /// Sub-buckets per octave (the mantissa subdivision factor `M`).
 ///
@@ -89,7 +94,7 @@ pub const fn bucket_midpoint(i: usize) -> u64 {
     rounded as u64
 }
 
-/// Sliding-window percentile histogram over octave buckets.
+/// Sliding-window percentile histogram over sub-octave buckets.
 ///
 /// Implemented as a ring of `S` per-segment bucket-count arrays. Each
 /// segment holds up to `window / S` samples; when the current segment
@@ -170,8 +175,8 @@ impl<const B: usize, const S: usize> RollingHistogram<B, S> {
     ///
     /// The estimate carries up to
     /// [`PERCENTILE_MAX_REL_ERR_PCT`](crate::PERCENTILE_MAX_REL_ERR_PCT)
-    /// relative error (octave bucketing); use exact `min`/`max` for any
-    /// threshold decision.
+    /// (≤ 1 %) relative error across 100 ns … 10 s (sub-octave bucketing);
+    /// use exact `min`/`max` for any threshold decision.
     #[must_use]
     pub fn percentile(&self, permille: u16) -> u64 {
         let total = self.count();
@@ -354,11 +359,11 @@ mod tests {
         assert_eq!(h.percentile(500), 0);
     }
 
-    // TEST_0190 (verifies REQ_0100): the geometric-midpoint percentile
+    // TEST_0190 (verifies REQ_0100): the geometric-centroid percentile
     // estimate stays within the *documented* relative-error bound
-    // (`PERCENTILE_MAX_REL_ERR_PCT`) on a known reference distribution. This
-    // is the achievable bound for the octave layout — not the ≤ 1 % goal of
-    // REQ_0852/TEST_0868, which needs a sub-octave layout.
+    // (`PERCENTILE_MAX_REL_ERR_PCT`) on a known reference distribution. Since
+    // REQ_0852 tightened the layout to sub-octave buckets, that documented
+    // bound is now ≤ 1 %, so this test and TEST_0868 share the same target.
     // Sample values are bounded by 100 ms (1e8 ns) and ranks by 10 000, so
     // every cast below is lossless in practice; the casts are inherent to a
     // floating-point relative-error check.
