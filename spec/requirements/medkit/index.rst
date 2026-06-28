@@ -242,6 +242,50 @@ Requirements
    panicking, so a deployment that has not yet authored a ``medkit.toml`` still
    serves the read-core.
 
+.. req:: Connector health maps to a SOVD Component and DTCs
+   :id: REQ_0926
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0109, TEST_0915
+
+   The connector binding shall present each connector as a SOVD Component (the
+   bridge / ``SubDevice`` standing in for it) and map its ``ConnectorHealth``
+   transitions to DTCs: a ``Down`` connector shall raise a Critical
+   ``FIELDBUS_NOT_OPERATIONAL`` DTC, and a ``Degraded`` connector shall enter a
+   Warning health state and raise a ``FIELDBUS_DEGRADED`` DTC carrying the
+   reason string. The reason shall be read as a string off the health variant;
+   the binding shall not depend on a typed fault enum. The Component shall be
+   emitted raw (no placement), so the manifest can place it when present and it
+   works flat without one. The Component's reported health shall be the worst of
+   the bare health state and any active DTC.
+
+.. req:: DTC lifecycle and occurrence bookkeeping
+   :id: REQ_0927
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0109, TEST_0916
+
+   Across repeated health transitions the binding shall maintain per-DTC
+   lifecycle state: the SOVD/UDS status bits (``testFailed`` while the condition
+   is present, ``confirmedDTC`` latched once confirmed), an occurrence count
+   incremented each time a cleared DTC is re-raised, and first/last occurrence
+   timestamps. A return to ``Up`` shall heal active DTCs — clearing
+   ``testFailed`` and rolling the Component back to healthy — while keeping the
+   DTC in memory (confirmed) as maintenance history rather than erasing it.
+
+.. req:: Last-sample freeze-frame at confirmation
+   :id: REQ_0928
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0109, TEST_0917
+
+   Each confirmed DTC shall carry a freeze-frame captured at confirmation time
+   under the contract's ``snapshots`` / ``extended_data_records`` shape. In v1
+   (callback-hooks-only, no iceoryx2 PDI slice — :need:`REQ_0913`) the
+   freeze-frame shall be the last connector hook sample observed before
+   confirmation, or, absent any sample, a synthesized snapshot of the health
+   condition (state and reason).
+
 Requirements at a glance
 ------------------------
 

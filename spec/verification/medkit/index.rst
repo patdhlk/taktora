@@ -155,3 +155,38 @@ they verify to ``implemented`` and link these tests.
    raw entities parentless — the same view a no-manifest fold produces — and a
    live server with no manifest serves empty Areas and empty component nesting
    sub-resources without panicking.
+
+.. test:: Connector health surfaces a Component and DTCs
+   :id: TEST_0915
+   :status: implemented
+   :verifies: REQ_0926
+
+   A simulated ``Up → Degraded → Down → Up`` health sequence fed into the
+   connector binding, read back through the running gateway, presents one raw
+   SOVD Component whose worst-wins health tracks the connector state (Ok →
+   Warning → Critical → Ok) and whose fault list carries the Warning
+   ``FIELDBUS_DEGRADED`` and Critical ``FIELDBUS_NOT_OPERATIONAL`` DTCs with the
+   degraded reason string. A live axum server over the binding serves the same
+   Component, fault list, and camelCase DTC status sub-object over real TCP.
+
+.. test:: DTC lifecycle and occurrence bookkeeping
+   :id: TEST_0916
+   :status: implemented
+   :verifies: REQ_0927
+
+   Repeated degraded episodes, each cleared by a return to ``Up``, increment the
+   DTC occurrence count and widen the first/last occurrence window; a healed DTC
+   reports ``testFailed`` cleared with ``confirmedDTC`` still latched and remains
+   in memory, and the Component rolls back to healthy only once the last active
+   DTC clears.
+
+.. test:: Confirmed DTC carries a last-sample freeze-frame
+   :id: TEST_0917
+   :status: implemented
+   :verifies: REQ_0928
+
+   A confirmed DTC carries a freeze-frame under the contract's ``snapshots`` /
+   ``extended_data_records`` shape whose payload is the last connector hook
+   sample observed before confirmation (or a synthesized health snapshot when no
+   sample was observed), reachable through the running gateway under the
+   Component's ``data`` resource.
