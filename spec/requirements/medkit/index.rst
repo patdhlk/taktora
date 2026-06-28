@@ -118,6 +118,48 @@ Requirements
    detangled. All coupling to taktora shall live in dedicated ``-binding-*``
    crates that depend on the core through the provider seam only.
 
+.. req:: Read-diagnostic core HTTP surface
+   :id: REQ_0917
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0107, TEST_0906
+
+   The gateway shall serve the SOVD read-diagnostic core over HTTP on the
+   ``/api/v1`` prefix, backed by the ``Provider`` seam: the entity tree
+   (areas / components / apps / functions, each with its single-entity view and
+   the relationship sub-resources ``contains`` / ``components`` /
+   ``subcomponents`` / ``hosts`` / ``depends-on`` / ``is-located-on`` /
+   ``belongs-to``), fault lists (global and entity-scoped, with the ``status``
+   filter) and the single-fault detail, and readable ``data``. Each served body
+   shall carry the contract collection / fault / error envelope shape, so a
+   client written against the ros2_medkit contract reads them unchanged.
+
+.. req:: Deferred families decline with a contract-shaped 501
+   :id: REQ_0918
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0107, TEST_0907
+
+   For the families v1 does not implement — operations, configuration writes,
+   bulk-data, locks, scripts, updates / OTA, triggers, cyclic-subscriptions,
+   logs, status actions, auth, and the ``x-medkit-*`` vendor endpoints — the
+   gateway shall answer ``501 Not Implemented`` with a contract-shaped
+   ``GenericError`` body, never a ``404`` or a parse error. A path-hardcoding
+   client shall therefore receive a clean, documented decline rather than a
+   route miss.
+
+.. req:: Baseline transport hardening, off the control path
+   :id: REQ_0919
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0107, TEST_0908
+
+   The HTTP surface shall offer configurable CORS, a token-bucket rate limit,
+   and optional TLS, each with a documented default (permissive CORS, rate
+   limit disabled, TLS disabled, bind ``127.0.0.1:8080``). These run only on the
+   diagnostics server's own runtime and never on taktora's bounded-time control
+   path, preserving the off-path boundary of :need:`ADR_0111`.
+
 Requirements at a glance
 ------------------------
 

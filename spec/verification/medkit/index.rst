@@ -60,3 +60,36 @@ they verify to ``implemented`` and link these tests.
    Serialising each served shape produces JSON whose keys and casing match the
    captured ros2_medkit contract corpus fixture, making drop-in compatibility a
    snapshot-tested regression guard.
+
+.. test:: Read-core over a live server matches the contract shapes
+   :id: TEST_0906
+   :status: implemented
+   :verifies: REQ_0917
+
+   A live axum server over the mock provider is driven over real TCP; each
+   read-core response (entity lists, single-entity views, relationship
+   sub-resources, global and entity-scoped fault lists, the single-fault detail,
+   data reads, and the not-found error) shape-matches its
+   ``contract/golden/*.json`` fixture — every key, nesting, and value type the
+   contract constrains is present, while values may differ since the live
+   skeleton is one self-consistent snapshot rather than a byte replay of the
+   mutually-inconsistent capture (byte fidelity is pinned separately by
+   :need:`TEST_0905`).
+
+.. test:: Deferred families return a contract-shaped 501
+   :id: TEST_0907
+   :status: implemented
+   :verifies: REQ_0918
+
+   A smoke test hits at least one route per deferred family on the live server
+   and asserts ``501`` (not ``404``) with a ``GenericError`` body whose
+   ``error_code`` is ``not-implemented`` and whose parameters name the family.
+
+.. test:: Transport hardening is present and configurable
+   :id: TEST_0908
+   :status: implemented
+   :verifies: REQ_0919
+
+   The default server advertises a CORS allow-origin header, and a server
+   configured with a one-token bucket throttles the second request to ``429``,
+   demonstrating CORS and the rate limit are wired and configurable.

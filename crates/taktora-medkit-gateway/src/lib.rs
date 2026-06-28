@@ -6,11 +6,22 @@
 //! `taktora-medkit-gateway-axum` is a thin adapter over this core.
 //!
 //! Zero taktora dependencies (`REQ_0916`, `ADR_0111`).
+//!
+//! The HTTP read families are resolved by the pure functions in [`view`]: a
+//! [`MergePipeline`] folds provider snapshots into a [`MergedView`], and the
+//! resolver methods on the view turn a request into a wire DTO (`REQ_0917`).
 
 use std::collections::HashMap;
 
 use taktora_medkit_model::{Collection, Entity, FaultSummary, Health};
 use taktora_medkit_provider::Provider;
+
+pub mod view;
+
+pub use view::{
+    API_BASE, FaultStatusFilter, MergePipeline, MergedView, ResolveError, SOVD_VERSION,
+    collection_segment, type_singular,
+};
 
 /// The transport-neutral read-diagnostic core.
 #[derive(Clone, Debug)]
@@ -27,6 +38,13 @@ impl<P: Provider> Gateway<P> {
     /// Borrow the underlying provider.
     pub const fn provider(&self) -> &P {
         &self.provider
+    }
+
+    /// Build the merged read-model the HTTP resolvers serve from, by folding
+    /// the provider's current snapshot through the [`MergePipeline`].
+    #[must_use]
+    pub fn view(&self) -> MergedView {
+        MergedView::from_snapshot(self.provider.snapshot())
     }
 
     /// The full entity tree, as a collection envelope.
