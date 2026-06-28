@@ -16,6 +16,7 @@ description  = "taktora binding for taktora-medkit: maps connector-framework Con
 taktora-medkit-model    = { workspace = true }
 taktora-medkit-provider = { workspace = true }
 taktora-connector-core  = { workspace = true }
+serde_json              = { workspace = true, features = ["std"] }
 
 [lints.rust]
 unsafe_code  = "deny"

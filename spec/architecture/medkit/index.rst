@@ -181,6 +181,54 @@ arc42 §4.
    ❌ The pipeline must know the ``app:`` / ``component:`` id conventions to pick
    the relation type, coupling it loosely to the bindings' id scheme.
 
+.. arch-decision:: Connector health → DTC mapping and last-sample freeze-frame
+   :id: ADR_0115
+   :status: accepted
+   :refines: FEAT_0100
+
+   **Context.** The connector binding (GitHub #84) must turn a connector's
+   ``ConnectorHealth`` transition stream into SOVD Components and DTCs. Three
+   shapes had to be pinned. (1) ``taktora-connector-core`` exposes health
+   per-connector and has **no** ``subscribe_health()``; its states carry reasons
+   as **strings** (``Degraded{reason}``), not a typed fault enum, and stamp
+   transitions with a monotonic ``Instant`` that cannot express wall-clock
+   occurrence timestamps. (2) The ``Provider`` seam is read with ``&self`` from
+   the gateway's request path, while health events arrive on the connector's
+   off-path drain — writer and reader are concurrent. (3) The captured contract
+   carries a freeze-frame per confirmed DTC, but ``ProviderSnapshot`` models
+   only ``FaultSummary`` (no freeze-frame field) and the gateway's best-effort
+   ``fault_detail`` emits an empty ``snapshots`` array.
+
+   **Decision.** (1) Model the input as a health **event stream** the binding
+   ingests (``on_health_event`` / ``apply``), pairing each event with a
+   wall-clock epoch timestamp the drain supplies. Map ``Down`` → a Critical
+   ``FIELDBUS_NOT_OPERATIONAL`` DTC and ``Degraded`` → a Warning
+   ``FIELDBUS_DEGRADED`` DTC carrying the reason string read off the variant;
+   ``Connecting`` keeps the prior fault active (recovery in flight) and ``Up``
+   heals. Keep confirmed DTCs in memory across heals (UDS-style) so occurrence
+   counts and first/last occurrence accumulate; the Component's reported health
+   is the worst of the bare state and any active DTC. (2) Hold the DTC store
+   behind interior mutability (a ``Mutex``) so the callback writes and the
+   gateway reads through one consistent lock. (3) Confirm on the first callback
+   sample (no multi-cycle pending window in v1) and capture the **last hook
+   sample** as the freeze-frame — or, absent a sample, a synthesized snapshot of
+   the health condition — rendered under the contract's ``snapshots`` /
+   ``extended_data_records`` shape. Because the gateway cannot carry rich
+   freeze-frames through ``ProviderSnapshot.faults``, also surface each DTC's
+   environment data under the Component's ``data`` resource so the freeze-frame
+   is reachable through the running gateway.
+
+   **Consequences.** ✅ The binding is testable with a simulated transition
+   sequence and pluggable onto a real per-connector health surface later.
+   ✅ Reason strings flow through unchanged, so new degraded conditions need no
+   binding change. ✅ DTC memory gives a maintenance history (occurrence counts,
+   heal/raise) rather than a momentary view. ❌ A wall-clock timestamp must be
+   supplied alongside each event, since the connector's ``Instant`` is not
+   convertible to epoch time. ❌ The freeze-frame reaches HTTP clients through
+   the ``data`` resource rather than the fault-detail ``snapshots`` array until
+   the gateway grows a freeze-frame-carrying snapshot field (a documented gap).
+   ❌ Single-sample confirmation means no ``pendingDTC`` window in v1.
+
 Building block view
 -------------------
 
@@ -282,13 +330,31 @@ provider seam.
 
 .. building-block:: taktora-medkit-binding-connector
    :id: BB_0109
-   :status: open
-   :implements: REQ_0910, REQ_0912
+   :status: implemented
+   :implements: REQ_0910, REQ_0912, REQ_0926, REQ_0927, REQ_0928
+   :links: TEST_0915, TEST_0916, TEST_0917
 
    Maps connector-framework ``ConnectorHealth`` transitions into SOVD
    Components and DTCs (worst-wins rollup, last-sample freeze-frames), feeding
    the ``Provider`` off the control path. Depends on taktora-connector-core and
    the provider seam.
+
+   The binding is a stateful ``MedkitProvider``: it ingests a connector's health
+   event stream through ``on_health_event`` / ``apply`` (taktora-connector-core
+   exposes health per-connector with no ``subscribe_health()``, so the input is
+   modelled as an event stream a real per-connector surface drives and tests
+   drive with a simulated sequence), maintains a DTC store behind interior
+   mutability — so a callback can write while the gateway reads the ``Provider``
+   with ``&self`` — and renders it into a ``ProviderSnapshot`` of one raw
+   Component plus its DTCs. ``Down`` raises a Critical
+   ``FIELDBUS_NOT_OPERATIONAL`` DTC; ``Degraded`` a Warning ``FIELDBUS_DEGRADED``
+   carrying the reason string. DTC memory persists confirmed DTCs across heals
+   (UDS-style), tracking occurrence count and first/last occurrence. The
+   confirmed-time freeze-frame — the last hook sample, or a synthesized health
+   snapshot — is rendered under the contract's ``snapshots`` /
+   ``extended_data_records`` shape and also surfaced under the Component's
+   ``data`` resource so it is reachable through the running gateway. See
+   :need:`ADR_0115`.
 
 .. architecture:: medkit crate decomposition
    :id: ARCH_0080
