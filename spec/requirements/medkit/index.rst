@@ -286,6 +286,22 @@ Requirements
    confirmation, or, absent any sample, a synthesized snapshot of the health
    condition (state and reason).
 
+.. req:: Freeze-frame surfaced through the SOVD fault-detail endpoint
+   :id: REQ_0929
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0106, BB_0105, TEST_0918
+
+   A fault's freeze-frame environment data shall be reachable through the proper
+   SOVD fault-detail endpoint (``…/faults/{fault_code}``), carried under the
+   contract's ``snapshots`` / ``extended_data_records`` shape, and not only
+   through a ``…/data`` workaround. The snapshot seam shall carry per-fault
+   environment data additively (:need:`ADR_0116`): a binding that captures
+   freeze-frames shall populate it, while bindings that capture none, and the
+   ``FaultSummary`` fault-list wire shape, shall be unchanged. When no
+   environment data is carried for a fault, the detail shall fall back to the
+   occurrence-only environment shape.
+
 Requirements at a glance
 ------------------------
 

@@ -190,3 +190,17 @@ they verify to ``implemented`` and link these tests.
    sample observed before confirmation (or a synthesized health snapshot when no
    sample was observed), reachable through the running gateway under the
    Component's ``data`` resource.
+
+.. test:: Freeze-frame end-to-end through the fault-detail endpoint
+   :id: TEST_0918
+   :status: implemented
+   :verifies: REQ_0929, REQ_0927, REQ_0915
+
+   A gateway unit test asserts that a fault carrying environment data in the
+   snapshot surfaces a non-empty ``snapshots`` array with populated
+   ``extended_data_records`` under ``fault_detail``, while a fault without falls
+   back to the occurrence-only shape (back-compat). An end-to-end live-server
+   test drives the connector binding ``Up → Degraded → Down`` so a DTC confirms,
+   then ``GET``\s ``…/components/{id}/faults/{fault_code}`` over real TCP and
+   asserts the response carries the freeze-frame under ``snapshots`` /
+   ``extended_data_records``.

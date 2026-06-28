@@ -224,10 +224,49 @@ arc42 §4.
    binding change. ✅ DTC memory gives a maintenance history (occurrence counts,
    heal/raise) rather than a momentary view. ❌ A wall-clock timestamp must be
    supplied alongside each event, since the connector's ``Instant`` is not
-   convertible to epoch time. ❌ The freeze-frame reaches HTTP clients through
-   the ``data`` resource rather than the fault-detail ``snapshots`` array until
-   the gateway grows a freeze-frame-carrying snapshot field (a documented gap).
-   ❌ Single-sample confirmation means no ``pendingDTC`` window in v1.
+   convertible to epoch time. ✅ The freeze-frame now also reaches HTTP clients
+   through the proper fault-detail ``snapshots`` array — :need:`ADR_0116` adds an
+   additive ``ProviderSnapshot.fault_environments`` seam the gateway's
+   ``fault_detail`` sources from, resolving the gap this decision documented (the
+   ``data`` resource is retained as extra exposure). ❌ Single-sample
+   confirmation means no ``pendingDTC`` window in v1.
+
+.. arch-decision:: Additive freeze-frame seam through the snapshot (fault_environments)
+   :id: ADR_0116
+   :status: accepted
+   :refines: FEAT_0100
+
+   **Context.** :need:`ADR_0115` left a documented gap: ``ProviderSnapshot``
+   carried only ``FaultSummary`` per fault (no environment data), so the
+   gateway's ``fault_detail`` (``…/faults/{fault_code}``) hard-coded an empty
+   ``snapshots`` array and empty ``extended_data_records``. The connector binding
+   already computes the full ``EnvironmentData`` freeze-frame at confirmation but
+   could only surface it through a ``…/data`` workaround, not the contract's
+   proper fault-detail endpoint. The fix must not reshape the ``FaultSummary``
+   wire contract or the fault-list path, on which other consumers depend.
+
+   **Decision.** Carry per-fault environment data through the snapshot seam
+   **additively**: add ``ProviderSnapshot.fault_environments`` (``entity_id`` →
+   ``fault_code`` → ``EnvironmentData<Value>``), defaulting empty, plus a
+   ``Provider::fault_environment`` accessor defaulting to ``None``. The default
+   ``snapshot()`` leaves the map empty, so existing providers (the executor
+   binding and mock) are unaffected and the ``FaultSummary`` fault-list output is
+   byte-for-byte unchanged. ``MergedView`` retains the merged map through the
+   fold; ``fault_detail`` looks up ``(entity, fault_code)`` and substitutes the
+   real ``EnvironmentData`` when present, falling back to the occurrence-only
+   shape otherwise. The connector binding populates ``fault_environments`` from
+   the freeze-frame it already computes, so a confirmed DTC's
+   ``…/faults/{fault_code}`` now returns the freeze-frame under the contract's
+   ``snapshots`` / ``extended_data_records``. See :need:`REQ_0929`,
+   :need:`TEST_0918`.
+
+   **Consequences.** ✅ The freeze-frame reaches clients through the proper SOVD
+   fault-detail endpoint, closing the :need:`ADR_0115` gap. ✅ The change is
+   purely additive — the fault-list wire contract and every existing provider
+   compile and behave unchanged. ✅ The ``…/data`` exposure is retained as an
+   extra surface rather than a workaround. ❌ The snapshot seam carries a second
+   per-fault map alongside ``faults``; a binding that captures freeze-frames must
+   populate both, keyed consistently by fault code.
 
 Building block view
 -------------------
@@ -254,7 +293,7 @@ provider seam.
 .. building-block:: taktora-medkit-provider
    :id: BB_0105
    :status: open
-   :implements: REQ_0913, REQ_0916
+   :implements: REQ_0913, REQ_0916, REQ_0929
 
    The data-source seam: a ``Provider`` trait the gateway reads through, plus a
    mock provider for tests and the walking skeleton. Zero taktora dependencies;
@@ -263,7 +302,7 @@ provider seam.
 .. building-block:: taktora-medkit-gateway
    :id: BB_0106
    :status: open
-   :implements: REQ_0912, REQ_0916, REQ_0917
+   :implements: REQ_0912, REQ_0916, REQ_0917, REQ_0929
 
    Transport-neutral read-diagnostic core. A ``MergePipeline`` folds one or more
    ``ProviderSnapshot``\s (and, later, a manifest) into a ``MergedView``; pure

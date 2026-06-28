@@ -81,8 +81,12 @@ done
 
 echo
 echo "Maintainability Index advisory (lowest $MI_ADVISORY_COUNT; VS scale 0-100, higher = better):"
+# `|| true`: `head` closing the pipe early makes `sort` exit on SIGPIPE (141),
+# which under `pipefail` would fail the whole gate. This is the *advisory* print
+# only — the real gate is the `violations`/`exit 1` block below — so a broken
+# pipe here must never fail the script.
 printf '%s' "$mi_report" | sort -t$'\t' -k1 -n | head -n "$MI_ADVISORY_COUNT" \
-  | awk -F'\t' '{printf "  mi=%6.1f  %s\n", $1, $2}'
+  | awk -F'\t' '{printf "  mi=%6.1f  %s\n", $1, $2}' || true
 echo
 
 if [ "$violations" -gt 0 ]; then
