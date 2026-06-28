@@ -21,3 +21,6 @@ publish      = false
 taktora-medkit-binding-executor = { workspace = true }
 taktora-medkit-provider         = { workspace = true }
 taktora-medkit-model            = { workspace = true }
+taktora-executor                = { workspace = true }
+taktora-bounded-alloc           = { workspace = true, features = ["std"] }
+serde_json                      = { workspace = true, features = ["std"] }

@@ -95,6 +95,48 @@ arc42 §4.
    ``/health`` telemetry blocks) are served best-effort and shape-diffed only
    loosely, a documented gap until a richer provider lands.
 
+.. arch-decision:: Per-task atomic sink for the executor hook write path
+   :id: ADR_0114
+   :status: accepted
+   :refines: ADR_0111
+
+   **Context.** The executor binding (GitHub #83) must record App / executor
+   liveness and per-task timing from taktora-executor ``Observer`` /
+   ``ExecutionMonitor`` hooks. Those hooks run on the executor ``WaitSet`` thread
+   inside the bounded-time control path (:need:`REQ_0104`), so the write path
+   must not heap-allocate and must not block or contend a lock that could perturb
+   the machine (:need:`REQ_0925`). The provider read path, by contrast, runs on
+   the gateway's own (tokio) runtime and may allocate freely. The seam between
+   them must be wait-free on the producer side. ``ADR_0111`` names a "bounded
+   forwarding channel" as the generic mechanism; this decision fixes the concrete
+   shape for the executor binding.
+
+   **Decision.** Use a fixed set of **pre-allocated per-task slots**, each a bag
+   of atomics (liveness state, lifecycle counters, last / EWMA / min / max
+   execution duration, scan period), rather than an overwrite ring of
+   observation records. Tasks are registered up front (``with_tasks``) so a hook
+   resolves its ``TaskId`` to a slot through a read-only map and folds the
+   observation with single-producer relaxed atomic stores — no allocation, no
+   lock, no compare-exchange. Because every hook fires from the one ``WaitSet``
+   thread, the structure is single-producer / single-consumer: the gateway reads
+   the same atomics to build the snapshot. A ring of per-cycle records (à la
+   ``taktora-telemetry-export``) was considered but rejected here: the gateway
+   wants the *current* folded liveness and timing, not a per-cycle history, so a
+   slot that the producer overwrites in place and the reader samples is simpler
+   and bounds memory to the task count rather than a backlog depth. The trade is
+   that an unregistered task's observations are dropped (counted as ignored)
+   rather than allocated for.
+
+   **Consequences.** ✅ The hook path is provably allocation-free and lock-free,
+   asserted by a counting-allocator differential test (:need:`TEST_0914`).
+   ✅ Memory is bounded to the registered task count, fixed at construction.
+   ✅ A stalled or slow gateway reader can never back-pressure or perturb the
+   control path. ❌ Tasks must be known up front; an item whose ``task_id`` was
+   not registered is invisible to diagnostics (by design — no control-path
+   allocation to grow the set). ❌ In-place overwrite means the gateway sees only
+   the latest folded values, not a per-cycle trace; a richer history would need
+   the ring pattern and is out of scope for this slice.
+
 Building block view
 -------------------
 
@@ -159,14 +201,27 @@ provider seam.
 
 .. building-block:: taktora-medkit-binding-executor
    :id: BB_0108
-   :status: open
-   :implements: REQ_0910, REQ_0913
+   :status: implemented
+   :implements: REQ_0910, REQ_0913, REQ_0923, REQ_0924, REQ_0925
 
    Sources liveness and timing from taktora-executor ``Observer`` /
    ``ExecutionMonitor`` hooks and feeds them, off the control path, into a
    ``Provider``. Depends on taktora-executor and the provider seam; the only
    place (with its connector sibling) that taktora types enter the diagnostics
    surface.
+
+   The lifecycle hooks (``on_app_start`` / ``on_app_stop`` / ``on_app_error``
+   plus the executor-level up / down / fault hooks) fold App and executor
+   liveness, and ``post_execute`` / ``on_cycle_stats`` fold per-task timing (an
+   EWMA latency and a period / rate analog), into a bounded, pre-allocated,
+   per-task atomic sink. Because the hooks fire only from the single ``WaitSet``
+   thread the sink is single-producer / single-consumer, so the write path
+   neither allocates nor locks (:need:`ADR_0114`, :need:`REQ_0925`). The
+   ``Provider`` read path reads those atomics on the gateway's runtime and emits
+   raw entities (``app:<task>`` plus a synthetic executor entity) with their
+   health and a readable ``data`` tree (:need:`REQ_0923`, :need:`REQ_0924`).
+   Tests live in the ``taktora-medkit-binding-executor-tests`` sibling
+   (``publish = false``) so the published manifest carries no internal dev-deps.
 
 .. building-block:: taktora-medkit-binding-connector
    :id: BB_0109

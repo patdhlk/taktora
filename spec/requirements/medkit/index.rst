@@ -160,6 +160,49 @@ Requirements
    diagnostics server's own runtime and never on taktora's bounded-time control
    path, preserving the off-path boundary of :need:`ADR_0111`.
 
+.. req:: Executor liveness and timing from the hook seam
+   :id: REQ_0923
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0108, TEST_0913
+
+   The executor binding shall implement the taktora-executor ``Observer`` and
+   ``ExecutionMonitor`` traits and register through the executor builder. From
+   the lifecycle hooks (``on_app_start`` / ``on_app_stop`` / ``on_app_error``
+   and the executor-level ``on_executor_up`` / ``on_executor_down`` /
+   ``on_executor_fault``) it shall derive App and executor entity liveness and
+   ``HealthState``; from ``post_execute`` it shall roll per-task execution
+   timing (an EWMA latency analog) and from ``on_cycle_stats`` the scan period
+   (a rate / Hz analog).
+
+.. req:: Executor binding exposed through the provider seam
+   :id: REQ_0924
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0108, TEST_0912, TEST_0913
+
+   The binding shall expose the recorded liveness, health, and timing to the
+   gateway through the ``Provider`` seam: raw entities (``app:<task>`` plus a
+   synthetic executor entity), per-entity health, and a readable ``data`` tree
+   carrying the liveness and timing values. Entities shall be emitted raw so the
+   manifest (when present) can place them and the binding still works flat
+   without it. The read path shall run on the gateway's own runtime, off the
+   control path.
+
+.. req:: Allocation-free, non-blocking hook write path
+   :id: REQ_0925
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0108, TEST_0914
+
+   The hooks run on the executor ``WaitSet`` thread inside the bounded-time
+   control path, so the write path shall perform **no heap allocation** and
+   shall take **no lock** that could contend the control path. It shall write
+   into a bounded, pre-allocated, single-producer / single-consumer structure
+   (per-task atomics) so a stalled or slow diagnostics reader can never perturb
+   the machine, holding the freedom-from-interference contract of
+   :need:`ADR_0111` (see :need:`ADR_0114`).
+
 Requirements at a glance
 ------------------------
 
