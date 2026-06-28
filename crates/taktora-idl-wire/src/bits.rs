@@ -1,5 +1,5 @@
 //! CAN signal bit-packing, addressing both DBC bit-numbering conventions
-//! (`REQ_0862`).
+//! (`REQ_0935`).
 //!
 //! A DBC signal is described by a *start bit*, a *bit length*, and a byte
 //! order. The two byte orders number bits differently within the frame:

@@ -1,11 +1,11 @@
-//! CAN/DBC backend (`REQ_0862`): emits `taktora_idl_wire::WireType` impls.
+//! CAN/DBC backend (`REQ_0940`): emits `taktora_idl_wire::WireType` impls.
 //!
 //! Given the DBC layout sidecar produced by `taktora-idl-dbc`, this backend
 //! emits, per message struct, a `WireType` implementation whose `encode`/
 //! `decode` bit-pack each field at the start bit, length, and byte order the
 //! DBC declared — calling only the primitives in `taktora-idl-wire`, never
-//! serde (`REQ_0861`). Naming and field classification arrive already resolved
-//! from `taktora-idl-codegen` (`REQ_0863`); this crate adds only the wire format.
+//! serde (`REQ_0934`). Naming and field classification arrive already resolved
+//! from `taktora-idl-codegen` (`REQ_0938`); this crate adds only the wire format.
 //!
 //! ## Scope of this slice
 //!

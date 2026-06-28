@@ -6,7 +6,7 @@ rust-version = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 publish      = false
-description   = "Verification crate: generates WireType code from a fixture DBC at build time and round-trips it (TEST_0880+). Not published."
+description   = "Verification crate: generates WireType code from a fixture DBC at build time and round-trips it (TEST_0924+). Not published."
 
 [dependencies]
 taktora-idl-wire = { workspace = true }
