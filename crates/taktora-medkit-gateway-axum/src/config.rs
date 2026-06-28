@@ -5,6 +5,8 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
+use taktora_medkit_manifest::Manifest;
+
 /// The documented default bind: loopback, port 8080.
 ///
 /// `ros2_medkit` binds `0.0.0.0:8080`; the dev default here is loopback so a
@@ -64,7 +66,8 @@ pub struct TlsConfig {
 /// The full server configuration.
 ///
 /// [`GatewayConfig::default`] yields the documented dev defaults: bind
-/// `127.0.0.1:8080`, permissive CORS, no rate limit, no TLS.
+/// `127.0.0.1:8080`, permissive CORS, no rate limit, no TLS, and no manifest
+/// (flat grouping).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GatewayConfig {
     /// The socket address to bind.
@@ -75,6 +78,12 @@ pub struct GatewayConfig {
     pub rate_limit: Option<RateLimit>,
     /// Optional TLS (plaintext when `None`).
     pub tls: Option<TlsConfig>,
+    /// The grouping [`Manifest`] applied when building the read-model: declared
+    /// Areas/Components become entities and the binding-emitted raw entities are
+    /// re-parented under them (`REQ_0921`). `None` or empty leaves grouping flat
+    /// (`REQ_0922`). Load one with [`Manifest::from_toml`] so ops can edit the
+    /// topology in a `medkit.toml` without recompiling.
+    pub manifest: Option<Manifest>,
 }
 
 impl Default for GatewayConfig {
@@ -84,6 +93,7 @@ impl Default for GatewayConfig {
             cors: CorsConfig::default(),
             rate_limit: None,
             tls: None,
+            manifest: None,
         }
     }
 }

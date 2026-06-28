@@ -1,0 +1,47 @@
+# Example taktora-medkit grouping manifest.
+#
+# medkit v1 does no service discovery, so this file is the source of the
+# Area/Component skeleton the SOVD entity tree groups under, and of the mapping
+# that re-parents the binding-emitted raw entities (`app:<task>`,
+# `component:<subdevice>`) into it. Ops edit topology here without recompiling.
+#
+# Load it with `Manifest::from_toml("medkit.toml")`; an absent or empty file
+# falls back to flat grouping rather than erroring.
+
+# --- Areas: top-level groupings ------------------------------------------------
+
+[[area]]
+id   = "drive"
+name = "Drive train"
+
+[[area]]
+id   = "sensing"
+name = "Sensing"
+
+# --- Components: grouped under an area -----------------------------------------
+
+[[component]]
+id   = "nav"
+area = "drive"
+name = "Navigation"
+
+[[component]]
+id   = "lidar"
+area = "sensing"
+name = "Lidar"
+
+# --- Task mappings: `app:<id>` is hosted on `parent` ---------------------------
+
+[[task]]
+id     = "planner"
+parent = "nav"
+
+[[task]]
+id     = "controller"
+parent = "nav"
+
+# --- Subdevice mappings: `component:<addr>` nests under `component` ------------
+
+[[subdevice]]
+addr      = "0x01"
+component = "nav"

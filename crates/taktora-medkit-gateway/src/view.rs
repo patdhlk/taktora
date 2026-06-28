@@ -6,9 +6,10 @@
 //! HTTP layer calls. Keeping them pure and transport-neutral lets the same
 //! resolvers run over a mock, a manifest, or live taktora bindings (`REQ_0916`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{Value, json};
+use taktora_medkit_manifest::Manifest;
 use taktora_medkit_model::Entity;
 use taktora_medkit_model::{
     Collection, CollectionMeta, DtcStatus, EntityKind, EnvironmentData, ExtendedDataRecords,
@@ -124,14 +125,16 @@ pub const fn type_singular(kind: EntityKind) -> &'static str {
     }
 }
 
-/// Folds provider snapshots (and, later, a manifest) into one [`MergedView`].
+/// Folds provider snapshots and the grouping manifest into one [`MergedView`].
 ///
 /// The walking skeleton merges a single mock snapshot — an identity fold — but
-/// the seam is shaped for the downstream slices: #82 applies the manifest here,
-/// and #83/#84 contribute additional [`ProviderSnapshot`]s to be merged.
+/// the seam is shaped for the downstream slices: #82 applies the manifest here
+/// (via [`MergePipeline::with_manifest`]), and #83/#84 contribute additional
+/// [`ProviderSnapshot`]s to be merged.
 #[derive(Clone, Debug, Default)]
 pub struct MergePipeline {
     snapshots: Vec<ProviderSnapshot>,
+    manifest: Option<Manifest>,
 }
 
 impl MergePipeline {
@@ -148,7 +151,20 @@ impl MergePipeline {
         self
     }
 
-    /// Fold the accumulated snapshots into the merged read-model.
+    /// Apply a grouping [`Manifest`] when folding: its declared Areas/Components
+    /// become entities and the binding-emitted raw entities (`app:<task>`,
+    /// `component:<subdevice>`) are re-parented under them (`REQ_0921`).
+    ///
+    /// An empty manifest is a no-op, leaving the flat provider grouping intact
+    /// (`REQ_0922`).
+    #[must_use]
+    pub fn with_manifest(mut self, manifest: Manifest) -> Self {
+        self.manifest = Some(manifest);
+        self
+    }
+
+    /// Fold the accumulated snapshots (and the manifest, if any) into the merged
+    /// read-model.
     #[must_use]
     pub fn merge(self) -> MergedView {
         let mut entities: Vec<Entity> = Vec::new();
@@ -171,6 +187,10 @@ impl MergePipeline {
             data.extend(snapshot.data);
         }
 
+        if let Some(manifest) = self.manifest.filter(|m| !m.is_empty()) {
+            apply_manifest(&mut entities, &mut by_id, &mut relationships, &manifest);
+        }
+
         MergedView {
             entities,
             by_id,
@@ -179,6 +199,88 @@ impl MergePipeline {
             data,
         }
     }
+}
+
+/// Apply the grouping manifest to the folded read-model in place: inject the
+/// declared skeleton, re-parent the raw provider entities, and synthesize the
+/// relationship edges that surface the declared structure under the relationship
+/// sub-resources (`/areas/{id}/components`, `/components/{id}/hosts`,
+/// `/components/{id}/subcomponents`) — `REQ_0921`.
+fn apply_manifest(
+    entities: &mut Vec<Entity>,
+    by_id: &mut HashMap<String, usize>,
+    relationships: &mut Vec<RelationshipEdge>,
+    manifest: &Manifest,
+) {
+    // 1. Upsert the declared Area/Component skeleton (declared wins on id).
+    for declared in manifest.declared_entities() {
+        if let Some(&idx) = by_id.get(&declared.id) {
+            entities[idx] = declared;
+        } else {
+            by_id.insert(declared.id.clone(), entities.len());
+            entities.push(declared);
+        }
+    }
+
+    // 2. Re-parent the binding-emitted raw entities under their declared parent.
+    for entity in entities.iter_mut() {
+        if let Some(parent) = manifest.parent_of(&entity.id) {
+            entity.parent_id = Some(parent.to_owned());
+        }
+    }
+
+    // 3. Synthesize relationship edges from the (now re-parented) hierarchy,
+    //    skipping any an upstream snapshot already supplied.
+    let kind_of: HashMap<String, EntityKind> =
+        entities.iter().map(|e| (e.id.clone(), e.kind)).collect();
+    let mut seen: HashSet<(String, Relation, String)> = relationships
+        .iter()
+        .map(|e| (e.from_id.clone(), e.relation, e.item.id.clone()))
+        .collect();
+
+    for child in entities.clone() {
+        let Some(parent_id) = child.parent_id.as_deref() else {
+            continue;
+        };
+        let Some(&parent_kind) = kind_of.get(parent_id) else {
+            continue;
+        };
+        for &relation in synthesized_relations(parent_kind, child.kind) {
+            let key = (parent_id.to_owned(), relation, child.id.clone());
+            if seen.insert(key) {
+                relationships.push(RelationshipEdge {
+                    from_id: parent_id.to_owned(),
+                    relation,
+                    item: rel_item(&child),
+                });
+            }
+        }
+    }
+}
+
+/// The relationship edges a `parent` → `child` hierarchy edge surfaces as, by the
+/// kinds at each end. An Area groups its components (and `contains` them); a
+/// Component hosts its apps and nests its subcomponents.
+const fn synthesized_relations(parent: EntityKind, child: EntityKind) -> &'static [Relation] {
+    match (parent, child) {
+        (EntityKind::Area, EntityKind::Component) => &[Relation::Components, Relation::Contains],
+        (EntityKind::Area, _) => &[Relation::Contains],
+        (EntityKind::Component | EntityKind::Function, EntityKind::App) => &[Relation::Hosts],
+        (EntityKind::Component, EntityKind::Component) => &[Relation::Subcomponents],
+        _ => &[],
+    }
+}
+
+/// Shape an entity as a relationship sub-resource item: a bare reference with no
+/// inline parent and no top-level `component_id` decoration (those belong only on
+/// the top-level `/apps` list item).
+fn rel_item(entity: &Entity) -> Entity {
+    let mut item = entity.clone();
+    item.parent_id = None;
+    if let Some(meta) = item.x_medkit.as_mut() {
+        meta.component_id = None;
+    }
+    item
 }
 
 /// A consistent, indexed read-model the resolvers serve from.
@@ -196,6 +298,21 @@ impl MergedView {
     #[must_use]
     pub fn from_snapshot(snapshot: ProviderSnapshot) -> Self {
         MergePipeline::new().with_snapshot(snapshot).merge()
+    }
+
+    /// Build a view from a single snapshot, applying a grouping `manifest` when
+    /// one is given (`REQ_0921`). A `None` or empty manifest yields the same flat
+    /// grouping as [`MergedView::from_snapshot`] (`REQ_0922`).
+    #[must_use]
+    pub fn from_snapshot_with_manifest(
+        snapshot: ProviderSnapshot,
+        manifest: Option<Manifest>,
+    ) -> Self {
+        let mut pipeline = MergePipeline::new().with_snapshot(snapshot);
+        if let Some(manifest) = manifest {
+            pipeline = pipeline.with_manifest(manifest);
+        }
+        pipeline.merge()
     }
 
     /// Look up an entity by id.
@@ -781,5 +898,113 @@ mod tests {
     fn iso8601_formats_epoch() {
         assert_eq!(iso8601(1_782_661_500.75), "2026-06-28T15:45:00.750Z");
         assert_eq!(iso8601(0.0), "1970-01-01T00:00:00.000Z");
+    }
+
+    fn raw_app(task: &str) -> Entity {
+        Entity {
+            href: format!("{API_BASE}/apps/app:{task}"),
+            id: format!("app:{task}"),
+            name: task.to_owned(),
+            kind: EntityKind::App,
+            parent_id: None,
+            description: None,
+            x_medkit: Some(EntityMeta {
+                component_id: Some("stale".to_owned()),
+                is_online: Some(true),
+                ros2: Some(Ros2Ref {
+                    node: format!("/{task}"),
+                }),
+                source: Some("heuristic".to_owned()),
+            }),
+        }
+    }
+
+    fn raw_subdevice(addr: &str) -> Entity {
+        Entity {
+            href: format!("{API_BASE}/components/component:{addr}"),
+            id: format!("component:{addr}"),
+            name: addr.to_owned(),
+            kind: EntityKind::Component,
+            parent_id: None,
+            description: None,
+            x_medkit: None,
+        }
+    }
+
+    fn manifest() -> taktora_medkit_manifest::Manifest {
+        taktora_medkit_manifest::Manifest::builder()
+            .area("drive", "Drive train")
+            .component("nav", "drive", "Navigation")
+            .map_task("planner", "nav")
+            .map_subdevice("0x01", "nav")
+            .build()
+    }
+
+    /// `TEST_0910` — applying a manifest injects the declared skeleton, re-parents
+    /// the raw entities, and surfaces the declared structure under the
+    /// relationship sub-resources (`REQ_0920`, `REQ_0921`).
+    #[test]
+    fn manifest_reparents_into_declared_structure() {
+        let snapshot = MockProvider::new()
+            .with_entity(raw_app("planner"))
+            .with_entity(raw_subdevice("0x01"))
+            .snapshot();
+        let view = MergePipeline::new()
+            .with_snapshot(snapshot)
+            .with_manifest(manifest())
+            .merge();
+
+        // Declared Area + Component became entities.
+        assert_eq!(view.entity("drive").unwrap().kind, EntityKind::Area);
+        assert_eq!(view.entity("nav").unwrap().kind, EntityKind::Component);
+
+        // Area groups its declared component under /components and /contains.
+        let components = view
+            .relationship(EntityKind::Area, "drive", Relation::Components)
+            .unwrap();
+        assert_eq!(components.items.len(), 1);
+        assert_eq!(components.items[0].id, "nav");
+
+        // Component hosts the re-parented app (component_id stripped on the item).
+        let hosts = view
+            .relationship(EntityKind::Component, "nav", Relation::Hosts)
+            .unwrap();
+        assert_eq!(hosts.items.len(), 1);
+        assert_eq!(hosts.items[0].id, "app:planner");
+        assert!(
+            hosts.items[0]
+                .x_medkit
+                .as_ref()
+                .unwrap()
+                .component_id
+                .is_none()
+        );
+
+        // Component nests the re-parented subdevice as a subcomponent.
+        let subs = view
+            .relationship(EntityKind::Component, "nav", Relation::Subcomponents)
+            .unwrap();
+        assert_eq!(subs.items.len(), 1);
+        assert_eq!(subs.items[0].id, "component:0x01");
+    }
+
+    /// `TEST_0911` — an empty (or absent) manifest leaves the flat provider
+    /// grouping untouched, with no panic (`REQ_0922`).
+    #[test]
+    fn empty_manifest_falls_back_to_flat() {
+        let snapshot = MockProvider::new()
+            .with_entity(raw_app("planner"))
+            .snapshot();
+        let view = MergePipeline::new()
+            .with_snapshot(snapshot)
+            .with_manifest(taktora_medkit_manifest::Manifest::default())
+            .merge();
+
+        // No declared skeleton injected; the raw app keeps no parent.
+        assert!(view.entity("drive").is_none());
+        assert!(view.entity("app:planner").unwrap().parent_id.is_none());
+        // The parentless app surfaces under no synthesized relationship.
+        assert_eq!(view.list(EntityKind::App).items.len(), 1);
+        assert!(view.list(EntityKind::Area).items.is_empty());
     }
 }

@@ -18,6 +18,7 @@ use taktora_medkit_provider::Provider;
 
 pub mod view;
 
+pub use taktora_medkit_manifest::Manifest;
 pub use view::{
     API_BASE, FaultStatusFilter, MergePipeline, MergedView, ResolveError, SOVD_VERSION,
     collection_segment, type_singular,
@@ -27,12 +28,26 @@ pub use view::{
 #[derive(Clone, Debug)]
 pub struct Gateway<P> {
     provider: P,
+    manifest: Option<Manifest>,
 }
 
 impl<P: Provider> Gateway<P> {
-    /// Build a gateway reading through `provider`.
+    /// Build a gateway reading through `provider`, with flat grouping (no
+    /// manifest).
     pub const fn new(provider: P) -> Self {
-        Self { provider }
+        Self {
+            provider,
+            manifest: None,
+        }
+    }
+
+    /// Attach the grouping [`Manifest`] the view is folded through, re-parenting
+    /// the provider's raw entities into the declared Area/Component skeleton
+    /// (`REQ_0921`). An empty manifest leaves grouping flat (`REQ_0922`).
+    #[must_use]
+    pub fn with_manifest(mut self, manifest: Manifest) -> Self {
+        self.manifest = Some(manifest);
+        self
     }
 
     /// Borrow the underlying provider.
@@ -41,10 +56,11 @@ impl<P: Provider> Gateway<P> {
     }
 
     /// Build the merged read-model the HTTP resolvers serve from, by folding
-    /// the provider's current snapshot through the [`MergePipeline`].
+    /// the provider's current snapshot (and the attached manifest, if any)
+    /// through the [`MergePipeline`].
     #[must_use]
     pub fn view(&self) -> MergedView {
-        MergedView::from_snapshot(self.provider.snapshot())
+        MergedView::from_snapshot_with_manifest(self.provider.snapshot(), self.manifest.clone())
     }
 
     /// The full entity tree, as a collection envelope.

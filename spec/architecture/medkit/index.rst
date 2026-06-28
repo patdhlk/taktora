@@ -137,6 +137,50 @@ arc42 §4.
    the latest folded values, not a per-cycle trace; a richer history would need
    the ring pattern and is out of scope for this slice.
 
+.. arch-decision:: Mandatory grouping manifest, applied in the merge pipeline
+   :id: ADR_0113
+   :status: accepted
+   :refines: FEAT_0100
+
+   **Context.** medkit v1 does no service discovery (raw iceoryx2 introspection
+   is out of scope), so nothing enumerates the system to supply the
+   Area/Component grouping the SOVD tree hangs on. The bindings emit only flat,
+   raw entities (``app:<task>``, ``component:<subdevice>``) with no notion of
+   which Area they belong to or how Components nest, so the relationship
+   sub-resources (``/areas/{id}/components``, ``/components/{id}/hosts``) would
+   have nothing to return. The grouping has to come from somewhere declared, and
+   it must be both programmable (tests, in-code wiring) and ops-editable (no
+   recompile to re-topologise). It must also not become a hard precondition that
+   bricks a fresh deployment that has not authored one yet.
+
+   **Decision.** Introduce a sibling core crate ``taktora-medkit-manifest``
+   (:need:`BB_0110`) holding the grouping as plain data over two surfaces that
+   build one identical ``Manifest`` value — a type-safe builder and a TOML loader
+   over a committed ``medkit.toml`` — pinned equal by a test so they never drift.
+   The manifest owns the binding id conventions (``app:`` / ``component:``
+   prefixes) via ``parent_of`` and emits the declared skeleton as model entities;
+   it carries zero ``taktora-*`` deps (``serde`` + ``toml`` over the model DTOs),
+   so it does not contend with the binding crates and stays inside the
+   extractable core. Application of the manifest lives in the ``MergePipeline``
+   (the seam :need:`ADR_0112` reserved for it), **not** in the provider: the
+   pipeline injects the declared entities, re-parents the raw entities, and
+   synthesises the relationship edges (``components`` / ``contains`` / ``hosts``
+   / ``subcomponents``) from the resulting hierarchy. A missing or empty manifest
+   is a no-op fold, falling back to flat grouping rather than erroring. The axum
+   ``GatewayConfig`` surfaces an optional ``manifest`` so ops attach a loaded
+   ``medkit.toml`` without touching the HTTP layer.
+
+   **Consequences.** ✅ The grouping is declarative and lives in one place; ops
+   edit ``medkit.toml`` while tests wire the same shape through the builder.
+   ✅ Re-parenting in the pipeline keeps the provider seam a dumb data source and
+   leaves the bindings (#83/#84) free of grouping concerns. ✅ The flat fallback
+   means the manifest is mandatory *for grouping*, not for serving — a
+   manifest-less deployment still answers the read-core. ❌ The manifest restates
+   topology the running system already half-knows, and a stale ``medkit.toml``
+   silently mis-groups (a declared parent that never appears just hosts nothing).
+   ❌ The pipeline must know the ``app:`` / ``component:`` id conventions to pick
+   the relation type, coupling it loosely to the bindings' id scheme.
+
 Building block view
 -------------------
 
@@ -199,6 +243,19 @@ provider seam.
    crate (``publish = false``) hosts the live-server integration and smoke tests
    so the published manifest stays free of internal-crate dev-deps.
 
+.. building-block:: taktora-medkit-manifest
+   :id: BB_0110
+   :status: implemented
+   :implements: REQ_0920, REQ_0921, REQ_0922, REQ_0916
+
+   The mandatory Area/Component grouping manifest: a type-safe builder core and a
+   TOML loader (over a committed ``medkit.toml``) that build one identical
+   ``Manifest`` value, plus the declared-skeleton entities and the
+   ``parent_of`` re-parent lookup the merge pipeline consumes. ``serde`` + ``toml``
+   over the model DTOs; zero taktora dependencies. The ``MergePipeline``
+   (:need:`BB_0106`) applies it and the axum ``GatewayConfig`` (:need:`BB_0107`)
+   surfaces it; an empty/absent manifest falls back to flat grouping.
+
 .. building-block:: taktora-medkit-binding-executor
    :id: BB_0108
    :status: implemented
@@ -236,7 +293,7 @@ provider seam.
 .. architecture:: medkit crate decomposition
    :id: ARCH_0080
    :status: open
-   :refines: BB_0104, BB_0105, BB_0106, BB_0107, BB_0108, BB_0109
+   :refines: BB_0104, BB_0105, BB_0106, BB_0107, BB_0108, BB_0109, BB_0110
 
    Crate-level building blocks and their dependency edges (depender → dependee).
    The graph is acyclic and the cut between core and binding crates is the
@@ -247,8 +304,11 @@ provider seam.
 
       graph TD
         axum[taktora-medkit-gateway-axum] --> gw[taktora-medkit-gateway]
+        axum --> manifest[taktora-medkit-manifest]
         gw --> prov[taktora-medkit-provider]
         gw --> model[taktora-medkit-model]
+        gw --> manifest
+        manifest --> model
         prov --> model
         be[taktora-medkit-binding-executor] --> prov
         be --> exec[taktora-executor]
