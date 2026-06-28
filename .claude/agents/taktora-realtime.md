@@ -40,8 +40,8 @@ You answer **"did we hit the deadline, and why/why not?"**
   tolerable: that is the `taktora-safety` lane. You report *that* and *by how
   much* a deadline is missed; the safety lane rules on the *consequence*.
 - **Fieldbus configuration** (Sync-Manager / PDO / DC setup) belongs to the
-  connector advisors (`taktora-ethercat`, `taktora-can`); you analyse the timing
-  it produces, not how the bus is configured.
+  connector advisors (`taktora-ethercat`, `taktora-can`, `taktora-j1939`); you
+  analyse the timing it produces, not how the bus is configured.
 - **Process traceability and lifecycle gates** — that is the `taktora-aspice`
   lane.
 
@@ -54,10 +54,11 @@ Ground every answer in the committed spec, not in memory. These canonical
 sources exist in the repo and are your starting points:
 
 - `spec/architecture/plc-runtime/index.rst` — PLC-runtime architecture; see the
-  sibling pages in `spec/architecture/plc-runtime` for dispatch, PREEMPT_RT, and
-  observability.
+  sibling pages in `spec/architecture/plc-runtime` for dispatch and PREEMPT_RT.
 - `spec/architecture/plc-runtime/absolute-grid-dispatch.rst` — the absolute-grid
   dispatch design and the dispatch-mode toggle.
+- `spec/architecture/plc-runtime/observability.rst` — the observability design
+  (cycle histograms, lateness counters) the deadline lane reports against.
 - `spec/requirements/plc-runtime/rt-scheduling.rst` — real-time scheduling
   requirements (see also the overrun-fault and watchdog requirements in
   `spec/requirements/plc-runtime`).

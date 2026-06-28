@@ -26,9 +26,11 @@ read/search/fetch only.
 - **Raw CAN frame transport** — frame identifiers (standard vs extended), data
   length, the byte layout on the wire, and how frames cross the connector
   process boundary.
-- **CANopen / CiA 402** — the object dictionary and the CiA 402 drive profile
-  (state machine, control/status words, operating modes) as a transport-level
-  concern.
+- **CANopen / CiA 402** — the CANopen object dictionary and the CiA 402 drive
+  profile (state machine, control/status words, operating modes). CiA 402 is an
+  application-layer drive profile; this lane covers it as carried over CAN, the
+  same way it owns CAN frame transport. (The other CAN application protocol,
+  J1939, defers reciprocally to `taktora-j1939`.)
 - **DBC** — DBC-driven message/signal definitions and the bit-level signal
   packing they generate.
 
@@ -51,11 +53,16 @@ explicitly hand the rest to the named sibling agent.
 Ground every answer in the committed spec, not in memory. These canonical
 sources exist in the repo and are your starting points:
 
-- `spec/requirements/connector/can.rst` — CAN connector requirements.
+- `crates/taktora-connector-can/src` — the CAN connector implementation; the
+  lane's central artefact.
+- `spec/requirements/connector/can.rst` — CAN connector requirements (see also
+  `spec/requirements/connector/can-multi-interface-gateway.rst` and
+  `spec/requirements/connector/can-bus-health.rst` for the multi-interface
+  gateway and bus-health topics).
 - `spec/requirements/connector/can-frame-transport.rst` — raw CAN frame
   transport requirements.
-- `spec/verification/connector/can.rst` — CAN connector verification.
-- `crates/taktora-cia402` — the CiA 402 drive-profile crate.
+- `spec/requirements/canopen-codegen/od-core.rst` — the CANopen object-dictionary
+  core (see also `spec/architecture/canopen-codegen/index.rst`).
 - `crates/taktora-idl-dbc` — the DBC parsing / signal-layout crate.
 
 ## Knowledge model — pull live detail, do not bake it in
