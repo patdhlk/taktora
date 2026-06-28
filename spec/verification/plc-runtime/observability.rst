@@ -17,8 +17,8 @@ re-anchoring (:need:`REQ_0840`), the EINTR-immune run loop
    p99 estimates within the *documented* relative-error bound
    (``taktora_stats::PERCENTILE_MAX_REL_ERR_PCT``) when fed a known
    reference distribution — i.e. that the geometric-midpoint estimate is
-   bounded as specified, not that it is exact. The ≤ 1 % accuracy target
-   is a separate, deferred concern verified by :need:`TEST_0868`.
+   bounded as specified, not that it is exact. The ≤ 1 % accuracy target is
+   verified separately by :need:`TEST_0868`.
 
    **Fixture.** A standalone unit test in
    ``crates/taktora-stats/src/histogram.rs`` that drives
@@ -46,7 +46,7 @@ re-anchoring (:need:`REQ_0840`), the EINTR-immune run loop
 
 .. test:: Sub-octave percentile accuracy (≤ 1 %)
    :id: TEST_0868
-   :status: open
+   :status: implemented
    :verifies: REQ_0852
 
    **Goal.** Confirm the refined sub-octave histogram returns p50, p95,
@@ -54,11 +54,10 @@ re-anchoring (:need:`REQ_0840`), the EINTR-immune run loop
    reference distribution.
 
    **Fixture / steps.** As :need:`TEST_0190`, but assert relative error
-   ≤ 1 % rather than ``PERCENTILE_MAX_REL_ERR_PCT``.
-
-   **Status note.** Remains ``open`` — not achievable with the shipped
-   octave buckets; awaits the sub-octave bucket layout of
-   :need:`REQ_0852`.
+   ≤ 1 % (a literal bound) rather than ``PERCENTILE_MAX_REL_ERR_PCT``.
+   Realised as ``sub_octave_percentile_accuracy_within_one_percent`` in
+   ``crates/taktora-stats/src/histogram.rs``; measured worst-case error is
+   0.41 % across the six assertions.
 
 .. test:: Per-task max jitter under synthetic period violation
    :id: TEST_0191
