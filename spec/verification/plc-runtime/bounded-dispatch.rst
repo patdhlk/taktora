@@ -86,6 +86,25 @@ Zero-allocation dispatch
    ``per_iter == 0``. Test passes under ``cargo test
    -p taktora-executor-tests --test no_alloc_dispatch --release``.
 
+   .. note::
+
+      **Platform scope of the worker-thread fixtures (issue #132).** The
+      two ``worker_threads(2)`` fixtures (threaded-pool chain and diamond
+      graph) assert ``per_iter == 0`` strictly on **Linux only**. The
+      process-wide ``CountingAllocator`` counts allocations on the pool
+      worker threads too, and on macOS the workers' ``crossbeam_channel`` /
+      ``Condvar`` park-notify path occasionally allocates inside
+      ``libsystem_malloc``; that single allocation is charged
+      non-deterministically to one of the two differential windows but not
+      the other, producing a spurious ``diff == 1`` off-by-one. This is
+      allocator/scheduler noise, not a product regression — the dispatch
+      hot path is provably zero-alloc (a 10-iter and a 100-iter window
+      record identical counts). The three single-threaded
+      (``worker_threads(0)``) fixtures have no pool threads, are
+      deterministic on every platform, and keep the strict assertion
+      everywhere — so :need:`REQ_0060` remains enforced on macOS for the
+      single-threaded dispatch path and on Linux for **all** paths.
+
    **Negative case.** ``harness_catches_deliberate_allocation``
    registers a task whose ``execute`` body does
    ``vec![1, 2, 3]`` per iteration and asserts that the
