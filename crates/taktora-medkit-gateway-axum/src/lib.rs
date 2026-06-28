@@ -26,9 +26,11 @@ mod config;
 pub mod demo;
 mod error;
 mod ratelimit;
+mod triggers;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
@@ -43,13 +45,16 @@ use taktora_medkit_model::EntityKind;
 use taktora_medkit_provider::{Provider, Relation};
 use tower_http::cors::{Any, CorsLayer};
 
+use triggers::ServerState;
+
 pub use config::{CorsConfig, DEFAULT_BIND, GatewayConfig, RateLimit, TlsConfig};
 pub use error::ApiError;
 pub use ratelimit::TokenBucket;
 
 type ApiResult = Result<Json<Value>, ApiError>;
 
-/// Shared handler state: the merged read-model.
+/// The read-model handle the read-core handlers extract (via [`ServerState`]'s
+/// [`FromRef`](axum::extract::FromRef) impl, so a hot-swap stays transparent).
 type AppState = Arc<MergedView>;
 
 fn ok<T: Serialize>(value: &T) -> Json<Value> {
@@ -128,7 +133,7 @@ fn infer_family(path: &str) -> String {
 
 // ---- Router assembly -------------------------------------------------------
 
-fn kind_routes(kind: EntityKind, relations: &'static [Relation]) -> Router<AppState> {
+fn kind_routes(kind: EntityKind, relations: &'static [Relation]) -> Router<ServerState> {
     let base = format!("{API_BASE}/{}", collection_segment(kind));
     let mut router = Router::new()
         .route(
@@ -207,7 +212,7 @@ fn kind_routes(kind: EntityKind, relations: &'static [Relation]) -> Router<AppSt
     router
 }
 
-fn api_router() -> Router<AppState> {
+fn api_router() -> Router<ServerState> {
     let root = get(|| async { Json(root_document()) });
     Router::new()
         // The contract's canonical root is `/api/v1/` (trailing slash); accept
@@ -250,6 +255,22 @@ fn api_router() -> Router<AppState> {
             ],
         ))
         .merge(kind_routes(EntityKind::Function, &[Relation::Hosts]))
+        // Triggers + the SSE event stream (`REQ_0930`–`REQ_0934`), carved out
+        // from under the `deferred` fallback that still `501`s the entity-scoped
+        // `…/{id}/triggers` path. The static `/triggers/events` route binds ahead
+        // of the `/triggers/{id}` capture.
+        .route(
+            &format!("{API_BASE}/triggers"),
+            get(triggers::list_triggers).post(triggers::create_trigger),
+        )
+        .route(
+            &format!("{API_BASE}/triggers/events"),
+            get(triggers::events_stream),
+        )
+        .route(
+            &format!("{API_BASE}/triggers/{{id}}"),
+            get(triggers::get_trigger).delete(triggers::delete_trigger),
+        )
         .fallback(deferred)
 }
 
@@ -257,17 +278,17 @@ fn cors_layer(config: &CorsConfig) -> Option<CorsLayer> {
     if !config.enabled {
         return None;
     }
-    let mut layer = CorsLayer::new().allow_methods([Method::GET, Method::DELETE]);
+    let mut layer =
+        CorsLayer::new().allow_methods([Method::GET, Method::POST, Method::DELETE]);
     if config.allow_any_origin {
         layer = layer.allow_origin(Any);
     }
     Some(layer)
 }
 
-/// Build the axum application serving `view` under `/api/v1`, with the
-/// configured transport-hardening layers applied.
-pub fn router(view: AppState, config: &GatewayConfig) -> Router {
-    let mut app = api_router().with_state(view);
+/// Apply the configured transport-hardening layers over a state-bound router.
+fn router_with_state(state: ServerState, config: &GatewayConfig) -> Router {
+    let mut app = api_router().with_state(state);
 
     if let Some(layer) = cors_layer(&config.cors) {
         app = app.layer(layer);
@@ -280,6 +301,16 @@ pub fn router(view: AppState, config: &GatewayConfig) -> Router {
         }));
     }
     app
+}
+
+/// Build the axum application serving `view` under `/api/v1`, with the
+/// configured transport-hardening layers applied.
+///
+/// This is the static surface: the trigger CRUD and SSE endpoints are mounted,
+/// but no refresh-and-diff loop drives the stream (the served `view` is fixed).
+/// Use [`serve_listener_with_provider`] for the live, event-emitting surface.
+pub fn router(view: AppState, config: &GatewayConfig) -> Router {
+    router_with_state(ServerState::detached(view), config)
 }
 
 /// Build the application from a [`Gateway`], folding its provider snapshot into
@@ -354,6 +385,37 @@ pub async fn serve_listener(
     config: &GatewayConfig,
 ) -> std::io::Result<()> {
     axum::serve(listener, router(view, config)).await
+}
+
+/// Serve the read-core plus the **live** triggers + SSE surface on an
+/// already-bound `listener`, polling `provider` every `cadence`.
+///
+/// Spawns the refresh-and-diff loop ([`refresh_loop`](triggers::refresh_loop)) on
+/// the tokio side: it re-polls and re-merges the provider snapshot, hot-swaps the
+/// served read-model, and broadcasts the diff to `/api/v1/triggers/events` as
+/// `fault_raised` / `fault_cleared` / `health_changed` events (`REQ_0930`–
+/// `REQ_0934`). The loop runs off the control path; the served `MergedView` is
+/// rebuilt under `config.manifest` when one is set (`REQ_0921`).
+///
+/// # Errors
+///
+/// Returns the underlying I/O error if the server loop fails.
+pub async fn serve_listener_with_provider<P: Provider + Send + 'static>(
+    listener: tokio::net::TcpListener,
+    provider: P,
+    config: &GatewayConfig,
+    cadence: Duration,
+) -> std::io::Result<()> {
+    let manifest = config.manifest.clone();
+    let initial = Arc::new(MergedView::from_snapshot_with_manifest(
+        provider.snapshot(),
+        manifest.clone(),
+    ));
+    let (state, view_tx, events) = triggers::live_state(Arc::clone(&initial));
+    tokio::spawn(triggers::refresh_loop(
+        provider, manifest, initial, view_tx, events, cadence,
+    ));
+    axum::serve(listener, router_with_state(state, config)).await
 }
 
 /// Bind an ephemeral port and return the listener plus the assigned address.

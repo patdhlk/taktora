@@ -302,6 +302,75 @@ Requirements
    environment data is carried for a fault, the detail shall fall back to the
    occurrence-only environment shape.
 
+.. req:: Off-path refresh-and-diff loop
+   :id: REQ_0930
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0111, TEST_0920
+
+   The gateway shall run a refresh-and-diff loop on the off-path tokio runtime
+   that re-polls and re-merges the provider snapshot on a configurable cadence,
+   hot-swapping the served ``MergedView`` so the read-core stays live, and diffs
+   each new view against the previous one to derive change events. The loop shall
+   run off the request/control path so a slow or absent diagnostics reader can
+   never perturb polling, holding the freedom-from-interference contract of
+   :need:`ADR_0111`.
+
+.. req:: Diff-derived fault change events
+   :id: REQ_0931
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0111, TEST_0920
+
+   Diffing two successive merged views shall emit a ``fault_raised`` event for an
+   ``(entity, fault_code)`` newly present in the later view and a
+   ``fault_cleared`` event for one that vanished. Each event shall carry the
+   golden fault-stream payload shape (:need:`REQ_0911`): ``event_type``, the full
+   ``fault`` sub-object, a ``timestamp``, and the ``x-medkit`` scoping
+   (``entity_id``, ``entity_type``). The event vocabulary is taktora's
+   diff-derived set, not the captured ``fault_confirmed`` label (:need:`ADR_0117`).
+
+.. req:: Health-transition change events
+   :id: REQ_0932
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0111, TEST_0921
+
+   When an entity's worst-wins health level changes between two successive merged
+   views, the loop shall emit a ``health_changed`` event scoped to that entity.
+   To preserve the uniform golden frame shape the event shall carry a
+   representative ``fault`` sub-object — the worst current fault, or the
+   just-cleared fault when health returns to ``OK`` (:need:`ADR_0117`).
+
+.. req:: Trigger subscription surface
+   :id: REQ_0933
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0111, TEST_0919
+
+   The gateway shall expose a basic subscription surface under
+   ``/api/v1/triggers``: ``POST`` registers a trigger, ``GET`` lists triggers,
+   ``GET /{id}`` fetches one, and ``DELETE /{id}`` removes one (a contract-shaped
+   ``trigger-not-found`` ``404`` for an unknown id). A trigger shall carry a
+   **minimal** filter — by entity id and/or a severity floor — and nothing more.
+   Rich condition predicates (data-value thresholds, debounce, boolean
+   composition) are explicitly deferred to issue #87 and shall not be implemented
+   in this slice.
+
+.. req:: SSE event stream framed per the captured contract
+   :id: REQ_0934
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0111, TEST_0920
+
+   ``GET /api/v1/triggers/events`` shall stream the change events as
+   Server-Sent Events, delivering only events matching at least one registered
+   trigger. Each frame shall match the captured golden
+   (``contract/golden/faults_stream_sse_sample.txt``) shape — ``id: <n>`` /
+   ``event: <event_type>`` / ``data: <json>`` followed by a blank line — and the
+   ``data`` object shall be the golden fault-stream payload so a drop-in
+   ``ros2_medkit`` client parses the stream unchanged (:need:`ADR_0117`).
+
 Requirements at a glance
 ------------------------
 
