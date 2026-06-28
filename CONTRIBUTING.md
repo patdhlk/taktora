@@ -136,6 +136,54 @@ than a paragraph to explain — goes through this loop:
 5. Open the implementation PR; link the RFC issue and the need
    IDs it satisfies via `:satisfies:` on `impl::` directives.
 
+## Agent tooling
+
+The repo carries a small set of project-local [Claude Code](https://docs.claude.com/en/docs/claude-code)
+skills and subagents under `.claude/`, committed alongside the code to
+assist taktora development. They are **optional dev aids** — nothing in the
+build, test, or release path depends on them.
+
+**Hard invariant — keep additions bare-clone-safe.** A committed skill or
+agent may depend only on (a) the contents of this repository and (b) the
+stock Claude Code tool set (`Read`, `Grep`, `Glob`, `Bash`, `WebFetch`,
+etc.). Never assume a globally-installed plugin or skill (Pharaoh,
+Superpowers, or any other) is present — everything here must work on a bare
+clone with nothing else installed. `scripts/check-tooling-pointers.sh`
+(wired into pre-commit and CI) guards this from the file-pointer side: it
+verifies that every repo path these `.claude/` files reference still
+exists, so a moved guide or renamed script trips the check instead of
+silently rotting.
+
+### Agents
+
+Read-only domain advisors: they explain, locate, and review diffs against
+the spec, but never edit files (their tool grant is read/search/fetch only).
+
+| Agent | Invoke when… |
+|-------|--------------|
+| `taktora-ethercat` | you have an EtherCAT question — the connector, ESI device descriptions and the ESI→driver codegen, netcfg / Sync-Manager / PDO assignment, distributed clocks, or bus bring-up topology. |
+| `taktora-can` | you have a CAN transport-layer question — the CAN connector, raw frame transport (the bytes on the wire), the CANopen / CiA 402 drive profile, or DBC-driven signal layout. |
+| `taktora-j1939` | you have a J1939 application-protocol question — PGN/SPN decoding, address claim, or the multi-frame transport protocol (BAM, ETP, RTS-CTS) layered over CAN. |
+| `taktora-realtime` | you have a timing question — cycle jitter, lateness, dispatch drift, executor dispatch modes, hot-path allocation discipline, or SCHED_FIFO / PREEMPT_RT scheduling. |
+| `taktora-safety` | you have a functional-safety question — hazards and the HARA, safety goals, the safety concept (FSR/TSR), Freedom From Interference, fail-safe behaviour, or SM-watchdog / FTTI rationale. |
+| `taktora-security` | you have a security question — supply-chain / publish integrity, the connector process boundary and fault isolation, or the security impact of a diff. |
+| `taktora-aspice` | you have a process-assurance question — requirement-to-implementation-to-verification traceability, V-model coverage, orphan/gap detection, or lifecycle/status gates in the sphinx-needs spec. |
+
+### Skills
+
+| Skill | Use when… |
+|-------|-----------|
+| `add-connector` | adding a new protocol connector to the `taktora-connector` framework; the action companion to [Adding a new connector](docs/guides/adding-a-connector.md), carrying the mechanical steps and gotchas. |
+| `release-safety` | touching anything that affects crate publishing — adding a crate, adding a sibling dev-dependency, splitting tests out, or when CI's `check-publish-deps` guard trips. |
+| `pi-bringup` | bringing up a real EtherCAT bus on a Raspberry Pi (or any Linux host), or debugging a Pi bring-up that hangs, runs out of memory, or is denied raw-socket access. |
+
+### Adding a new one
+
+Copy an existing agent or skill as the mold, match its frontmatter and tone,
+and keep it bare-clone-safe (repo contents + stock tools only). When it
+references a repo path, expect `scripts/check-tooling-pointers.sh` to verify
+that path on every commit.
+
 ## Labels
 
 The issue templates auto-apply these labels. They are not
