@@ -268,6 +268,42 @@ arc42 §4.
    per-fault map alongside ``faults``; a binding that captures freeze-frames must
    populate both, keyed consistently by fault code.
 
+.. arch-decision:: Diff-derived event vocabulary over the golden frame shape
+   :id: ADR_0117
+   :status: accepted
+   :refines: FEAT_0100
+
+   **Context.** The captured fault-stream golden
+   (``contract/golden/faults_stream_sse_sample.txt`` /
+   ``faults_stream_event.json``) frames each Server-Sent Event as
+   ``id: <n>`` / ``event: <event_type>`` / ``data: <json>`` and the ``data``
+   object carries ``event_type``, a full ``fault`` sub-object, a ``timestamp``,
+   and an ``x-medkit`` (``entity_id``, ``entity_type``); the captured
+   ``event_type`` value is ``fault_confirmed``. taktora, however, has no
+   confirmation signal to replay — its events come from **diffing successive
+   merged views** (:need:`REQ_0930`), which yields a different, richer
+   vocabulary (``fault_raised``, ``fault_cleared``, ``health_changed``). The two
+   cannot both be authoritative.
+
+   **Decision.** Split authority by layer. The **frame envelope and the
+   data-object shape** are authoritative from the golden and are reproduced
+   byte-for-byte (the ``FaultEvent`` DTO serializes to exactly those keys; the
+   SSE frame writes ``id`` then ``event`` then a single-line ``data`` in the
+   golden's field order). The **``event_type`` vocabulary** is taktora's
+   diff-derived set; we deliberately do not emit ``fault_confirmed``. A
+   ``health_changed`` event — which has no single originating fault — carries a
+   representative ``fault`` (the worst current fault, or the just-cleared fault
+   when health returns to ``OK``) so the uniform golden shape always holds. The
+   ``contract/`` corpus is captured upstream data and stays read-only.
+
+   **Consequences.** ✅ A drop-in ``ros2_medkit`` SSE client parses the stream
+   unchanged — it reads ``event``/``data`` fields it already understands. ✅ The
+   richer taktora vocabulary is available to taktora-aware clients via the
+   ``event_type`` field without a second wire shape. ❌ A client that hard-codes
+   the literal string ``fault_confirmed`` sees taktora's labels instead; this is
+   documented as the intended reconciliation, not a regression. See
+   :need:`REQ_0931`, :need:`REQ_0934`.
+
 Building block view
 -------------------
 
@@ -329,6 +365,27 @@ provider seam.
    part of the extractable core. A sibling ``taktora-medkit-gateway-axum-tests``
    crate (``publish = false``) hosts the live-server integration and smoke tests
    so the published manifest stays free of internal-crate dev-deps.
+
+.. building-block:: triggers + SSE event stream
+   :id: BB_0111
+   :status: implemented
+   :implements: REQ_0930, REQ_0931, REQ_0932, REQ_0933, REQ_0934
+   :links: TEST_0919, TEST_0920, TEST_0921
+
+   The live-push slice inside ``taktora-medkit-gateway-axum`` (:need:`BB_0107`),
+   off the request path on the tokio side. A **refresh-and-diff loop** re-polls
+   and re-merges the provider snapshot on a cadence, hot-swaps the served
+   ``MergedView`` through a ``watch`` channel (so the read-core handlers see the
+   live view via a ``FromRef`` extraction and are oblivious to the swap), diffs
+   successive views, and broadcasts the change events
+   (``fault_raised`` / ``fault_cleared`` / ``health_changed``) over a
+   ``tokio::sync::broadcast``. A **trigger registry** behind the
+   ``/api/v1/triggers`` CRUD routes holds basic entity/severity subscriptions;
+   ``GET /api/v1/triggers/events`` subscribes to the broadcast, filters by the
+   registered triggers, and renders each event as an SSE frame in the captured
+   golden shape (:need:`ADR_0117`). Rich condition predicates are deferred to
+   issue #87. No taktora-runtime edge is added — the loop reads only through the
+   ``Provider`` seam, so the crate stays part of the extractable core.
 
 .. building-block:: taktora-medkit-manifest
    :id: BB_0110

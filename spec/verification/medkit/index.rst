@@ -204,3 +204,41 @@ they verify to ``implemented`` and link these tests.
    then ``GET``\s ``…/components/{id}/faults/{fault_code}`` over real TCP and
    asserts the response carries the freeze-frame under ``snapshots`` /
    ``extended_data_records``.
+
+.. test:: Trigger subscription CRUD round-trip
+   :id: TEST_0919
+   :status: implemented
+   :verifies: REQ_0933
+
+   Over a live axum server, ``POST /api/v1/triggers`` with an entity/severity body
+   returns ``201`` carrying a generated id; ``GET /api/v1/triggers`` lists the new
+   trigger; ``GET /api/v1/triggers/{id}`` fetches it; ``DELETE
+   /api/v1/triggers/{id}`` returns ``204`` and a subsequent ``GET`` of that id
+   returns ``404``. A unit test additionally pins the minimal filter semantics:
+   a trigger matches by entity id and by a severity floor, and a no-filter
+   trigger matches every event.
+
+.. test:: Refresh-diff loop streams fault events as SSE
+   :id: TEST_0920
+   :status: implemented
+   :verifies: REQ_0930, REQ_0931, REQ_0934
+
+   A provider whose snapshot changes between polls (healthy → faulted → healthy)
+   feeds a live server running the refresh-and-diff loop. A client registers a
+   trigger, connects to ``GET /api/v1/triggers/events``, and observes a
+   ``fault_raised`` frame followed by a ``fault_cleared`` frame whose data object
+   carries ``event_type``, the ``fault`` sub-object (``fault_code``, numeric
+   ``severity``), ``timestamp``, and ``x-medkit`` (``entity_id``,
+   ``entity_type``) — the captured golden shape. A unit test pins the diff:
+   identical views emit nothing; a newly-present fault raises and a vanished
+   fault clears.
+
+.. test:: Health transition streams health_changed
+   :id: TEST_0921
+   :status: implemented
+   :verifies: REQ_0932
+
+   Driving the provider from healthy to error-faulted while a no-filter trigger
+   is registered yields a ``health_changed`` SSE frame on the event stream; a
+   unit test confirms the diff emits ``health_changed`` carrying the fault that
+   drove the transition when an entity's worst-wins health level moves.
