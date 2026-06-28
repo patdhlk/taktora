@@ -29,7 +29,7 @@ executable steps and the gotchas that bite if you skip them.
 
 Every connector is **two** crates: the published `taktora-connector-<proto>`
 and a `publish = false` `taktora-connector-<proto>-tests`. Create both skeletons
-with the bundled helper (idempotent — refuses to clobber existing crates):
+with the bundled helper (refuses to overwrite existing crates):
 
 ```bash
 .claude/skills/add-connector/scaffold.sh <proto>

@@ -29,6 +29,17 @@
 #
 # No-ops cleanly (exit 0) when there are zero agent/skill files.
 #
+# AUTHORING NOTE: this guard cannot tell prose slashes from paths. Do NOT wrap
+# non-path prose containing a '/' in backticks — tokens like `I/O`, `TX/RX`, or
+# `client/server` will be read as repo-relative paths and fail the check. Write
+# such prose without backticks (I/O, TX/RX), and reserve backticks for actual
+# repo paths you want guarded.
+#
+# SCOPE NOTE: only the agent/skill Markdown files are scanned. Paths *echoed
+# inside bundled skill scripts* (e.g. .claude/skills/add-connector/scaffold.sh,
+# which prints "crates/taktora-connector-can/*" in its next-steps banner) are
+# NOT parsed by this guard and can rot silently — keep an eye on them by hand.
+#
 # Used by .pre-commit-config.yaml and .github/workflows/ci.yml.
 
 set -Eeuo pipefail
@@ -53,6 +64,9 @@ missing=()
 for f in "${files[@]}"; do
     rel_f="${f#"${REPO_ROOT}/"}"
     # Drop fenced code blocks, pull inline-backtick spans, strip the backticks.
+    # The grep pattern's backticks below are literal (they match inline-code
+    # spans); the single quotes around it are intentional, not an oversight.
+    # shellcheck disable=SC2016
     while IFS= read -r token; do
         [[ -n "${token}" ]] || continue
         # (a) path-safe chars only, (b) contains a slash, (c) repo-relative.
@@ -76,6 +90,10 @@ error: agent/skill tooling references repo paths that do not exist on disk.
 A canonical pointer has rotted — fix the path or update the reference:
 
 $(printf '%s\n' "${missing[@]}" | awk '!seen[$0]++')
+
+If a flagged token is prose, not a path (e.g. \`I/O\`, \`TX/RX\`,
+\`client/server\`), remove the backticks — this guard treats any backticked
+token containing '/' as a repo-relative path.
 
 (A "path reference" is a backticked token containing '/'; see the header of
 $(basename "${BASH_SOURCE[0]}") for the exact rule.)

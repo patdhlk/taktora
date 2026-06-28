@@ -7,7 +7,8 @@
 # step 2 and docs/guides/adding-a-connector.md). This only makes the
 # directories; fill the manifests/sources by copying crates/taktora-connector-can.
 #
-# Idempotent: refuses to overwrite an existing connector crate.
+# Refuses to overwrite existing crates (clobber-safe, not idempotent: a partial
+# prior run won't be completed — it bails if either target crate already exists).
 #
 # Usage: .claude/skills/add-connector/scaffold.sh <proto>
 #   e.g. .claude/skills/add-connector/scaffold.sh mqtt
