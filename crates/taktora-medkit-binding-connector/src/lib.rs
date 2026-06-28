@@ -11,7 +11,7 @@
 //! freeze-frames land in a downstream slice.
 
 use taktora_connector_core::health::ConnectorHealthKind;
-use taktora_medkit_model::{Dtc, Entity, Health};
+use taktora_medkit_model::{Entity, FaultSummary, Health};
 use taktora_medkit_provider::Provider;
 
 /// Map a connector health discriminator to the medkit [`Health`] it implies for
@@ -46,7 +46,7 @@ impl Provider for ConnectorBinding {
         Vec::new()
     }
 
-    fn faults(&self, _entity_id: &str) -> Vec<Dtc> {
+    fn faults(&self, _entity_id: &str) -> Vec<FaultSummary> {
         Vec::new()
     }
 

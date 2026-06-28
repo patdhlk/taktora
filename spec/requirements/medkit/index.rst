@@ -54,8 +54,9 @@ Requirements
 
 .. req:: Drop-in client compatibility
    :id: REQ_0911
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0100
+   :links: BB_0104, TEST_0900, TEST_0905
 
    A diagnostic client written against the ros2_medkit REST contract shall
    work unchanged against the taktora-medkit backend: the served JSON shapes
@@ -86,8 +87,9 @@ Requirements
 
 .. req:: SOVD entity-tree model
    :id: REQ_0914
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0100
+   :links: BB_0104, TEST_0900, TEST_0905
 
    The model shall represent the system as a tree of typed entities — Area,
    Component, Function, App — each carrying a stable id, a human-readable
@@ -96,8 +98,9 @@ Requirements
 
 .. req:: DTC / fault model with freeze-frames
    :id: REQ_0915
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0100
+   :links: BB_0104, TEST_0900, TEST_0905
 
    A fault shall be modelled as a DTC carrying a fault code, a SOVD/UDS-style
    status sub-object, severity, occurrence count, the set of reporting

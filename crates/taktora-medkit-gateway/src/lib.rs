@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use taktora_medkit_model::{Collection, Dtc, Entity, Health};
+use taktora_medkit_model::{Collection, Entity, FaultSummary, Health};
 use taktora_medkit_provider::Provider;
 
 /// The transport-neutral read-diagnostic core.
@@ -35,7 +35,7 @@ impl<P: Provider> Gateway<P> {
     }
 
     /// The active faults for `entity_id`, as a collection envelope.
-    pub fn faults(&self, entity_id: &str) -> Collection<Dtc> {
+    pub fn faults(&self, entity_id: &str) -> Collection<FaultSummary> {
         Collection::new(self.provider.faults(entity_id))
     }
 
@@ -76,39 +76,32 @@ fn children_index(entities: &[Entity]) -> HashMap<&str, Vec<&str>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use taktora_medkit_model::{
-        DtcStatus, EntityKind, EnvironmentData, ExtendedDataRecords, Severity,
-    };
+    use taktora_medkit_model::{EntityKind, Severity};
     use taktora_medkit_provider::MockProvider;
 
     fn entity(id: &str, kind: EntityKind, parent: Option<&str>) -> Entity {
         Entity {
+            href: format!("/api/v1/{id}"),
             id: id.to_owned(),
             name: id.to_owned(),
             kind,
             parent_id: parent.map(ToOwned::to_owned),
+            description: None,
+            x_medkit: None,
         }
     }
 
-    fn dtc(code: &str, severity: Severity) -> Dtc {
-        Dtc {
+    fn fault(code: &str, severity: Severity) -> FaultSummary {
+        FaultSummary {
+            description: code.to_owned(),
             fault_code: code.to_owned(),
-            status: DtcStatus {
-                aggregated_status: "CONFIRMED".to_owned(),
-                test_failed: true,
-                confirmed_dtc: true,
-                pending_dtc: false,
-            },
-            severity,
+            first_occurred: 0.0,
+            last_occurred: 0.0,
             occurrence_count: 1,
             reporting_sources: vec![],
-            environment_data: EnvironmentData {
-                extended_data_records: ExtendedDataRecords {
-                    first_occurrence_ns: 0,
-                    last_occurrence_ns: 0,
-                },
-                snapshots: vec![],
-            },
+            severity: severity.wire_value(),
+            severity_label: format!("{severity:?}"),
+            status: "CONFIRMED".to_owned(),
         }
     }
 
@@ -137,10 +130,10 @@ mod tests {
     /// mock provider with no HTTP layer.
     #[test]
     fn resolves_entities_and_faults_over_mock() {
-        let provider = tree().with_fault("app:planner", dtc("STUCK", Severity::Error));
+        let provider = tree().with_fault("app:planner", fault("STUCK", Severity::Error));
         let gateway = Gateway::new(provider);
 
-        assert_eq!(gateway.entities().total_count, 4);
+        assert_eq!(gateway.entities().x_medkit.total_count, 4);
         assert_eq!(gateway.faults("app:planner").items.len(), 1);
         assert_eq!(gateway.faults("app:controller").items.len(), 0);
     }
@@ -149,8 +142,8 @@ mod tests {
     #[test]
     fn health_rolls_up_worst_wins() {
         let provider = tree()
-            .with_fault("app:planner", dtc("WARMISH", Severity::Warn))
-            .with_fault("app:controller", dtc("STUCK", Severity::Error));
+            .with_fault("app:planner", fault("WARMISH", Severity::Warn))
+            .with_fault("app:controller", fault("STUCK", Severity::Error));
         let gateway = Gateway::new(provider);
 
         // Leaf reflects its own fault.

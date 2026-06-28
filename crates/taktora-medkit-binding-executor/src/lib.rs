@@ -14,7 +14,7 @@
 //! `Observer`/`ExecutionMonitor` wiring land in a downstream slice.
 
 use taktora_executor::CycleObservation;
-use taktora_medkit_model::{Dtc, Entity, Health};
+use taktora_medkit_model::{Entity, FaultSummary, Health};
 use taktora_medkit_provider::Provider;
 
 /// Binds taktora-executor observations into the medkit provider seam.
@@ -42,7 +42,7 @@ impl Provider for ExecutorBinding {
         Vec::new()
     }
 
-    fn faults(&self, _entity_id: &str) -> Vec<Dtc> {
+    fn faults(&self, _entity_id: &str) -> Vec<FaultSummary> {
         Vec::new()
     }
 
