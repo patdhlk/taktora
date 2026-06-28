@@ -125,6 +125,20 @@ jobs:
       - name: Check internal dev-dependency publish ordering
         run: ./scripts/check-publish-deps.sh
 
+  tooling-pointers:
+    # Always run — NOT gated on `changes`. Most guarded pointers live under
+    # spec/, so a spec-only PR (code=false, spec=true) would skip this if gated
+    # on `code`, and the pre-commit `files: ^\.claude/...` filter does not fire
+    # on a spec-only diff either — leaving renamed spec files to rot a pointer
+    # with neither layer catching it. The guard needs no toolchain and runs in
+    # ~1s, so it is cheapest to just always run it.
+    name: Agent/skill pointer rot guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check .claude agent/skill path pointers
+        run: ./scripts/check-tooling-pointers.sh
+
   examples:
     needs: changes
     if: needs.changes.outputs.code == 'true'

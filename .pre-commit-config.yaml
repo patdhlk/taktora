@@ -62,6 +62,19 @@ repos:
         files: \.rs$
         description: Rejects unformatted Rust files. Matches the `fmt` job in CI.
 
+  # ----------------------------------------------------- agent/skill tooling
+  - repo: local
+    hooks:
+      - id: check-tooling-pointers
+        name: check .claude agent/skill path pointers
+        entry: ./scripts/check-tooling-pointers.sh
+        language: system
+        pass_filenames: false
+        files: ^\.claude/(agents|skills)/
+        description: >-
+          Fails on dangling repo-path references in committed agents/skills.
+          Matches the `tooling-pointers` CI job.
+
   # ----------------------------------------------------------------- spec
   # Each of these only runs when files under spec/ change. They protect the
   # GitHub Pages deploy and the `spec` CI job from preventable failures.
