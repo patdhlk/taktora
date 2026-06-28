@@ -17,7 +17,7 @@ both a raw push sample and an aggregated pull snapshot:
        Pre["pre_execute<br/>(task-logic start, telemetry clock)"]
        Post["post_execute<br/>(took / actual_period / jitter / lateness)"]
        subgraph Update["allocation-free per-sample update (REQ_0104)"]
-           Hist["Histogram.record(took_ns)<br/>fixed octave buckets (ADR_0060)"]
+           Hist["Histogram.record(took_ns)<br/>fixed sub-octave buckets (ADR_0060, REQ_0852)"]
            Deque["MinMaxDeque.record(took)<br/>exact windowed min/max (REQ_0105)"]
            Jit["max_jitter_ns (REQ_0101)<br/>max_lateness_ns (REQ_0106)"]
            Ovr["overrun_count (REQ_0102)"]
@@ -81,17 +81,15 @@ both a raw push sample and an aggregated pull snapshot:
    ✅ Per-sample update is O(1) and allocation-free
    (per :need:`REQ_0104`).
    ✅ Per-task memory footprint is bounded and known at build time
-   (~1 kB / task for the histogram + snapshots).
-   ❌ Percentile values are bucket-quantised. With the shipped octave
-   layout the geometric-midpoint estimate is bounded at a factor of ``√2``
-   (≈ +42 % / −29 %, ``taktora_stats::PERCENTILE_MAX_REL_ERR_PCT``) — **not**
-   ≤ 1 %. "≥ 3 buckets per decade" yields ~factor-2 bucket width and is a
-   *different* constraint from a ≤ 1 % centroid bound (which needs ~115
-   buckets per decade); the original wording here conflated them. Acceptable
-   for soft-RT trend telemetry; any threshold/SLA decision uses the
-   exact-extreme gate of :need:`REQ_0851`, and the :need:`REQ_0111` harness
-   exposes raw samples for exact offline percentiles. Tightening the estimate
-   to ≤ 1 % is tracked as :need:`REQ_0852`.
+   (≈ 37 kB / task: the sub-octave histogram is ``BUCKETS · 4 B`` ≈ 9 kB
+   per segment × 4 segments, plus snapshots — see :need:`REQ_0852`).
+   ❌ Percentile values are bucket-quantised. The shipped sub-octave layout
+   (:need:`REQ_0852`) bounds the geometric-midpoint estimate at ≤ 1 %
+   (``taktora_stats::PERCENTILE_MAX_REL_ERR_PCT``) across 100 ns … 10 s —
+   tightened from the original octave layout's ``√2`` (≈ +42 % / −29 %).
+   Even so, the histogram is trend telemetry: any threshold/SLA decision
+   uses the exact-extreme gate of :need:`REQ_0851`, and the :need:`REQ_0111`
+   harness exposes raw samples for exact offline percentiles.
 
    **Amendment (:need:`REQ_0105`, :need:`REQ_0106`).** The histogram is
    retained as the percentile estimator, but two quantities are added

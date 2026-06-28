@@ -4,8 +4,9 @@
 //! Two single-writer data structures:
 //!
 //! * [`RollingHistogram`] — sliding-window percentile estimator over
-//!   octave (`log2`) buckets, aged a whole segment at a time (the
-//!   snapshot-ring of `ADR_0060`). Backs `REQ_0100` / `REQ_0101`.
+//!   sub-octave (mantissa-subdivided `log2`) buckets, aged a whole segment
+//!   at a time (the snapshot-ring of `ADR_0060`). Backs `REQ_0100` /
+//!   `REQ_0101` / `REQ_0852`.
 //! * [`MinMaxDeque`] — exact windowed min/max via a monotonic deque.
 //!   Backs `REQ_0105`.
 //!
@@ -26,14 +27,14 @@
 /// whole-number percent.
 ///
 /// The percentile path ([`RollingHistogram::percentile`]) reports the
-/// geometric midpoint of an octave bucket ([`bucket_midpoint`]), so any
-/// estimate is within a factor of `√2` of the true value — `√2 − 1 ≈ 41%`
-/// high or `1 − 1/√2 ≈ 29%` low, bounded here by the larger figure rounded
-/// up. Consumers that need exact figures (SLA thresholds, regression gates)
-/// must use the exact `min`/`max` extremes, not the percentiles. Closing
-/// this to `≤ 1%` (the `REQ_0100` target) requires sub-octave buckets and
-/// is tracked separately.
-pub const PERCENTILE_MAX_REL_ERR_PCT: u8 = 42;
+/// geometric centroid of a *sub-octave* bucket ([`bucket_midpoint`]). With
+/// `M` mantissa sub-buckets per octave the widest bucket spans a ratio of
+/// `1 + 1/M`, so the centroid is within `√(1 + 1/M) − 1` of any value the
+/// bucket can hold — ≤ 1 % across the required 100 ns … 10 s range
+/// (`REQ_0852`, verified by `TEST_0868`). Consumers that need exact figures
+/// (SLA thresholds, regression gates) must still use the exact `min`/`max`
+/// extremes, not the percentiles.
+pub const PERCENTILE_MAX_REL_ERR_PCT: u8 = 1;
 
 mod connector;
 mod cyclestats;

@@ -26,20 +26,17 @@ build their own.
    Percentile estimation uses a fixed, compile-time bucket histogram so the
    per-sample update path is allocation-free (:need:`REQ_0104`,
    :need:`ADR_0060`). The reported percentile is the **geometric midpoint**
-   of the occupied bucket (``2^i · √2`` for the shipped octave layout),
-   which removes the systematic downward bias of a lower-edge estimate and
-   bounds the estimate's relative error symmetrically at
-   ``taktora_stats::PERCENTILE_MAX_REL_ERR_PCT`` — a factor of ``√2``, i.e.
-   ≈ +42 % / −29 % for the octave layout.
+   of the occupied bucket, which removes the systematic downward bias of a
+   lower-edge estimate and bounds the estimate's relative error at
+   ``taktora_stats::PERCENTILE_MAX_REL_ERR_PCT``. The shipped sub-octave
+   bucket layout (:need:`REQ_0852`) holds this to ≤ 1 % across the
+   100 ns … 10 s range.
 
-   These percentiles are **coarse telemetry for trend and shape, not
-   threshold-grade figures.** Any SLA, acceptance, commissioning, or
-   regression decision shall instead use the exact windowed extremes of the
-   exact-extreme SLO conformance gate (:need:`REQ_0851`); the histogram is
-   deliberately *not* authoritative for pass/fail. Tightening the percentile
-   estimate itself to ≤ 1 % relative error is a separate, deferred concern
-   tracked as :need:`REQ_0852` (sub-octave buckets) — it is not on the
-   production sign-off path.
+   Even at ≤ 1 %, these percentiles remain **telemetry for trend and shape;
+   any SLA, acceptance, commissioning, or regression decision shall instead
+   use the exact windowed extremes of the exact-extreme SLO conformance gate
+   (:need:`REQ_0851`).** The histogram is deliberately *not* authoritative
+   for pass/fail.
 
 .. req:: Exact-extreme SLO conformance gate
    :id: REQ_0851
@@ -68,15 +65,16 @@ build their own.
    All three are already exposed on both the pull snapshot and the push /
    NDJSON paths (:need:`REQ_0103`, :need:`REQ_0111`). A jitter SLO of the
    form "max jitter ≤ X over the window" is therefore decidable **exactly,
-   today**, with no dependency on the deferred histogram-precision work of
+   today**, with no dependency on the histogram-precision work of
    :need:`REQ_0852`. This requirement records the policy that the exact
    path — not the estimate — is the gate.
 
 .. req:: Sub-octave percentile precision
    :id: REQ_0852
-   :status: draft
+   :status: implemented
    :satisfies: FEAT_0021
    :refines: REQ_0100
+   :links: BB_0053, TEST_0868
 
    To make the percentile **estimate** of :need:`REQ_0100` itself
    threshold-grade, the histogram shall bound percentile relative error at
@@ -86,9 +84,17 @@ build their own.
    mantissa-subdivided) bucket layout in place of the shipped octave
    buckets. Verified by :need:`TEST_0868`.
 
-   Until it lands, exact threshold decisions use the exact-extreme gate of
-   :need:`REQ_0851`; this requirement only tightens the estimate and is not
-   on the production sign-off path.
+   **Realisation.** ``taktora-stats`` subdivides each octave linearly into
+   ``M = 64`` sub-buckets (``BUCKETS = 2304`` over octaves 0…35), keeping
+   ``bucket_index`` integer-only and O(1)
+   (``sub = ((v − 2^o)·M) >> o``). Measured worst-case error on the
+   :need:`TEST_0868` reference distributions is 0.41 %. Linear (rather than
+   geometric) subdivision is what keeps the hot path branch- and
+   float-free; it costs more buckets than the ~115/decade geometric floor
+   noted below, raising the histogram footprint to ``BUCKETS · 4 B`` per
+   segment (≈ 9 kB; ≈ 37 kB/task at the default 4 segments). The estimate
+   is now ≤ 1 %, but the authoritative pass/fail path remains the
+   exact-extreme gate of :need:`REQ_0851`.
 
    **Math note.** The ≤ 1 % bound and "≥ 3 buckets per decade" are
    *independent* constraints, not equivalent ones. Three buckets per decade

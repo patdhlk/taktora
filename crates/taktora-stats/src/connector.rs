@@ -194,7 +194,7 @@ impl<const N: usize, const S: usize, const W: usize> ConnectorCycleStats<N, S, W
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bucket_midpoint;
+    use crate::{bucket_index, bucket_midpoint};
 
     // N=2 devices, S=4 segments, W=64 exact window.
     type Stats = ConnectorCycleStats<2, 4, 64>;
@@ -205,7 +205,7 @@ mod tests {
         let idx = s.record_cycle(Some(1000), Some(500), true, true, &[false, false]);
         assert_eq!(idx, 0);
         let snap = s.snapshot();
-        assert_eq!(snap.wire_round_p50, bucket_midpoint(9)); // 1000 ns -> bucket 9
+        assert_eq!(snap.wire_round_p50, bucket_midpoint(bucket_index(1000))); // 1000 ns
         assert_eq!(snap.wire_round_min, 1000); // exact
         assert_eq!(snap.phase_wait_min, 500);
         assert_eq!(snap.phase_wait_mean, 500);

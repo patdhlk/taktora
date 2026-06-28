@@ -6,7 +6,7 @@
 
 use crate::{BUCKETS, MinMaxDeque, RollingHistogram};
 
-/// Sliding-window stats for one nanosecond quantity: octave-bucket
+/// Sliding-window stats for one nanosecond quantity: sub-octave-bucket
 /// percentiles (`p50`/`p95`/`p99`) plus exact windowed min/max.
 ///
 /// `S` is the histogram segment count (see [`RollingHistogram`]); `W` is
@@ -75,7 +75,7 @@ impl<const S: usize, const W: usize> CycleStatsCore<S, W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bucket_midpoint;
+    use crate::{bucket_index, bucket_midpoint};
 
     #[test]
     fn records_into_both_histogram_and_exact_minmax() {
@@ -84,9 +84,8 @@ mod tests {
         for v in [1000u64, 1000, 1000, 4000, 256] {
             c.record(v);
         }
-        // Percentiles are octave-bucket lower edges (quantised).
-        // 1000 -> bucket 9 (lower edge 512); the median sample is 1000.
-        assert_eq!(c.p50(), bucket_midpoint(9));
+        // Percentiles are bucket-quantised; the median sample is 1000 ns.
+        assert_eq!(c.p50(), bucket_midpoint(bucket_index(1000)));
         // Exact min/max retain the actual extreme samples, not bucket edges.
         assert_eq!(c.min(), Some(256));
         assert_eq!(c.max(), Some(4000));
