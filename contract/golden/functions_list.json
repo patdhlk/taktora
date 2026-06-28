@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "href": "/api/v1/functions/root",
+      "id": "root",
+      "name": "root",
+      "type": "function",
+      "x-medkit": {
+        "source": "runtime"
+      }
+    }
+  ],
+  "x-medkit": {
+    "total_count": 1
+  }
+}

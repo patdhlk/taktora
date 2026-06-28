@@ -1,0 +1,43 @@
+{
+  "discovery": {
+    "mode": "runtime_only",
+    "strategy": "runtime"
+  },
+  "status": "healthy",
+  "timestamp": 1782661577764464515,
+  "x-medkit-data-provider": {
+    "cold_wait_cap": 4,
+    "concurrent_cold_waits": 0,
+    "evictions_total": 0,
+    "graph_events_received": 0,
+    "pool_cap": 256,
+    "pool_hits": 0,
+    "pool_misses": 0,
+    "pool_size": 0,
+    "type_change_events": 0,
+    "unsupported_type_count": 0
+  },
+  "x-medkit-entity-cache": {
+    "apps": 4,
+    "areas": 0,
+    "capacity": 256,
+    "components": 1,
+    "functions": 1,
+    "generation": 3,
+    "grew": false
+  },
+  "x-medkit-subscription-executor": {
+    "current_task_age_ms": 0,
+    "degraded": false,
+    "graph_events_received": 0,
+    "last_task_latency_us": 0,
+    "max_task_latency_us": 0,
+    "queue_depth": 0,
+    "queue_dropped": 0,
+    "queue_max_depth_observed": 0,
+    "tasks_completed": 0,
+    "tasks_failed": 0,
+    "watchdog_trips": 0,
+    "worker_alive": true
+  }
+}

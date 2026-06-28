@@ -1,0 +1,10 @@
+{
+  "_links": {
+    "component": "/api/v1/components/spark-6723",
+    "self": "/api/v1/components/spark-6723/depends-on"
+  },
+  "items": [],
+  "x-medkit": {
+    "total_count": 0
+  }
+}

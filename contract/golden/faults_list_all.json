@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "description": "Brake circuit pressure below safe threshold",
+      "fault_code": "BRAKE_PRESSURE_LOW",
+      "first_occurred": 1782600000.25,
+      "last_occurred": 1782661500.75,
+      "occurrence_count": 7,
+      "reporting_sources": [
+        "/ros2_medkit_gateway"
+      ],
+      "severity": 2,
+      "severity_label": "ERROR",
+      "status": "CONFIRMED"
+    },
+    {
+      "description": "Drive motor temperature trending high",
+      "fault_code": "MOTOR_OVERHEAT",
+      "first_occurred": 1782660000.0,
+      "last_occurred": 1782661400.0,
+      "occurrence_count": 2,
+      "reporting_sources": [
+        "/ros2_medkit_gateway_sub"
+      ],
+      "severity": 1,
+      "severity_label": "WARN",
+      "status": "PREFAILED"
+    }
+  ],
+  "x-medkit": {
+    "cluster_count": 0,
+    "count": 2,
+    "muted_count": 0
+  }
+}

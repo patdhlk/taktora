@@ -1,0 +1,10 @@
+{
+  "_links": {
+    "parent": "/api/v1/components/spark-6723",
+    "self": "/api/v1/components/spark-6723/subcomponents"
+  },
+  "items": [],
+  "x-medkit": {
+    "total_count": 0
+  }
+}

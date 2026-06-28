@@ -1,0 +1,44 @@
+{
+  "items": [
+    {
+      "description": "Brake circuit pressure below safe threshold",
+      "fault_code": "BRAKE_PRESSURE_LOW",
+      "first_occurred": 1782600000.25,
+      "last_occurred": 1782661500.75,
+      "occurrence_count": 7,
+      "reporting_sources": [
+        "/ros2_medkit_gateway"
+      ],
+      "severity": 2,
+      "severity_label": "ERROR",
+      "status": "CONFIRMED"
+    },
+    {
+      "description": "Drive motor temperature trending high",
+      "fault_code": "MOTOR_OVERHEAT",
+      "first_occurred": 1782660000.0,
+      "last_occurred": 1782661400.0,
+      "occurrence_count": 2,
+      "reporting_sources": [
+        "/ros2_medkit_gateway_sub"
+      ],
+      "severity": 1,
+      "severity_label": "WARN",
+      "status": "PREFAILED"
+    }
+  ],
+  "x-medkit": {
+    "aggregated": true,
+    "aggregation_level": "component",
+    "aggregation_sources": [
+      "/fault_manager",
+      "/ros2_medkit_gateway",
+      "/ros2_medkit_gateway_fault_clients",
+      "/ros2_medkit_gateway_lifecycle_state_reader",
+      "/ros2_medkit_gateway_sub"
+    ],
+    "app_count": 5,
+    "count": 2,
+    "entity_id": "spark-6723"
+  }
+}

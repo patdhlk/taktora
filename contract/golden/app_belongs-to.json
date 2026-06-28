@@ -1,0 +1,10 @@
+{
+  "_links": {
+    "app": "/api/v1/apps/ros2_medkit_gateway",
+    "self": "/api/v1/apps/ros2_medkit_gateway/belongs-to"
+  },
+  "items": [],
+  "x-medkit": {
+    "total_count": 0
+  }
+}

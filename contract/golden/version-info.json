@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "base_uri": "/api/v1",
+      "vendor_info": {
+        "name": "ros2_medkit",
+        "version": "0.6.0"
+      },
+      "version": "1.0.0"
+    }
+  ]
+}

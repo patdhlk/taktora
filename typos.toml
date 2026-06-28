@@ -17,6 +17,12 @@ extend-exclude = [
     # trybuild compile-fail fixtures: generated compiler output (carries
     # crate-path fragments from serde and friends), not our prose.
     "crates/*/tests/ui/*.stderr",
+    # ros2_medkit REST contract corpus: verbatim captured upstream wire
+    # contract (OpenAPI 3.1.0 + recorded response bodies) from the C++
+    # gateway binary. Mixed snake_case/camelCase field names, fault codes,
+    # and DTO tokens are the contract, not our prose -- exclude wholesale,
+    # mirroring the vendor ESI-XML rationale above. See contract/NOTES.md.
+    "contract/**",
 ]
 
 [default.extend-words]

@@ -1,0 +1,80 @@
+{
+  "_links": {
+    "belongs-to": "/api/v1/apps/ros2_medkit_gateway/belongs-to",
+    "collection": "/api/v1/apps",
+    "is-located-on": "/api/v1/components/spark-6723",
+    "self": "/api/v1/apps/ros2_medkit_gateway"
+  },
+  "belongs-to": "/api/v1/apps/ros2_medkit_gateway/belongs-to",
+  "bulk-data": "/api/v1/apps/ros2_medkit_gateway/bulk-data",
+  "capabilities": [
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/status",
+      "name": "status"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/data",
+      "name": "data"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/operations",
+      "name": "operations"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/configurations",
+      "name": "configurations"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/faults",
+      "name": "faults"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/logs",
+      "name": "logs"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/bulk-data",
+      "name": "bulk-data"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/cyclic-subscriptions",
+      "name": "cyclic-subscriptions"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/triggers",
+      "name": "triggers"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/is-located-on",
+      "name": "is-located-on"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/belongs-to",
+      "name": "belongs-to"
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway/locks",
+      "name": "locks"
+    }
+  ],
+  "configurations": "/api/v1/apps/ros2_medkit_gateway/configurations",
+  "cyclic-subscriptions": "/api/v1/apps/ros2_medkit_gateway/cyclic-subscriptions",
+  "data": "/api/v1/apps/ros2_medkit_gateway/data",
+  "faults": "/api/v1/apps/ros2_medkit_gateway/faults",
+  "id": "ros2_medkit_gateway",
+  "is-located-on": "/api/v1/components/spark-6723",
+  "logs": "/api/v1/apps/ros2_medkit_gateway/logs",
+  "name": "ros2_medkit_gateway",
+  "operations": "/api/v1/apps/ros2_medkit_gateway/operations",
+  "status": "/api/v1/apps/ros2_medkit_gateway/status",
+  "triggers": "/api/v1/apps/ros2_medkit_gateway/triggers",
+  "type": "app",
+  "x-medkit": {
+    "component_id": "spark-6723",
+    "is_online": true,
+    "ros2": {
+      "node": "/ros2_medkit_gateway"
+    },
+    "source": "heuristic"
+  }
+}
