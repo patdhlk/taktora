@@ -22,7 +22,7 @@ use taktora_medkit_provider::Provider;
 /// Liveness handler: reports that the gateway is up and how many entities it
 /// currently sees.
 async fn health<P: Provider + 'static>(State(gateway): State<Arc<Gateway<P>>>) -> String {
-    format!("ok entities={}", gateway.entities().total_count)
+    format!("ok entities={}", gateway.entities().x_medkit.total_count)
 }
 
 /// Build the axum router exposing `gateway` over HTTP.
@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn router_builds_over_gateway() {
         let gateway = Arc::new(Gateway::new(MockProvider::new()));
-        assert_eq!(gateway.entities().total_count, 0);
+        assert_eq!(gateway.entities().x_medkit.total_count, 0);
         let _router = router(gateway);
     }
 }

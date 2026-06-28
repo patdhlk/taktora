@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use taktora_medkit_model::{Dtc, Entity, Health};
+use taktora_medkit_model::{Entity, FaultSummary, Health, Severity};
 
 /// The data-source seam the gateway reads through.
 ///
@@ -24,7 +24,7 @@ pub trait Provider: Send + Sync {
     fn entities(&self) -> Vec<Entity>;
 
     /// The active faults reported against the entity `entity_id`.
-    fn faults(&self, entity_id: &str) -> Vec<Dtc>;
+    fn faults(&self, entity_id: &str) -> Vec<FaultSummary>;
 
     /// The directly-observed (non-rolled-up) health of `entity_id`.
     ///
@@ -37,7 +37,7 @@ pub trait Provider: Send + Sync {
 #[derive(Clone, Debug, Default)]
 pub struct MockProvider {
     entities: Vec<Entity>,
-    faults: HashMap<String, Vec<Dtc>>,
+    faults: HashMap<String, Vec<FaultSummary>>,
     health: HashMap<String, Health>,
 }
 
@@ -57,10 +57,11 @@ impl MockProvider {
 
     /// Attach a fault to an entity and record its directly-observed health.
     #[must_use]
-    pub fn with_fault(mut self, entity_id: impl Into<String>, dtc: Dtc) -> Self {
+    pub fn with_fault(mut self, entity_id: impl Into<String>, fault: FaultSummary) -> Self {
         let id = entity_id.into();
-        let health = severity_to_health(dtc.severity);
-        self.faults.entry(id.clone()).or_default().push(dtc);
+        let health =
+            Severity::from_wire_value(fault.severity).map_or(Health::Ok, severity_to_health);
+        self.faults.entry(id.clone()).or_default().push(fault);
         let slot = self.health.entry(id).or_insert(Health::Ok);
         *slot = (*slot).max(health);
         self
@@ -72,7 +73,7 @@ impl Provider for MockProvider {
         self.entities.clone()
     }
 
-    fn faults(&self, entity_id: &str) -> Vec<Dtc> {
+    fn faults(&self, entity_id: &str) -> Vec<FaultSummary> {
         self.faults.get(entity_id).cloned().unwrap_or_default()
     }
 
@@ -81,11 +82,10 @@ impl Provider for MockProvider {
     }
 }
 
-/// Map a fault [`Severity`](taktora_medkit_model::Severity) to the [`Health`] it
-/// implies for an entity carrying it.
+/// Map a fault [`Severity`] to the [`Health`] it implies for an entity carrying
+/// it.
 #[must_use]
-pub const fn severity_to_health(severity: taktora_medkit_model::Severity) -> Health {
-    use taktora_medkit_model::Severity;
+pub const fn severity_to_health(severity: Severity) -> Health {
     match severity {
         Severity::Info => Health::Ok,
         Severity::Warn => Health::Warning,
@@ -97,29 +97,19 @@ pub const fn severity_to_health(severity: taktora_medkit_model::Severity) -> Hea
 #[cfg(test)]
 mod tests {
     use super::*;
-    use taktora_medkit_model::{
-        DtcStatus, EntityKind, EnvironmentData, ExtendedDataRecords, Severity,
-    };
+    use taktora_medkit_model::EntityKind;
 
-    fn dtc(code: &str, severity: Severity) -> Dtc {
-        Dtc {
+    fn fault(code: &str, severity: Severity) -> FaultSummary {
+        FaultSummary {
+            description: code.to_owned(),
             fault_code: code.to_owned(),
-            status: DtcStatus {
-                aggregated_status: "CONFIRMED".to_owned(),
-                test_failed: true,
-                confirmed_dtc: true,
-                pending_dtc: false,
-            },
-            severity,
+            first_occurred: 0.0,
+            last_occurred: 0.0,
             occurrence_count: 1,
             reporting_sources: vec![],
-            environment_data: EnvironmentData {
-                extended_data_records: ExtendedDataRecords {
-                    first_occurrence_ns: 0,
-                    last_occurrence_ns: 0,
-                },
-                snapshots: vec![],
-            },
+            severity: severity.wire_value(),
+            severity_label: format!("{severity:?}"),
+            status: "CONFIRMED".to_owned(),
         }
     }
 
@@ -127,12 +117,15 @@ mod tests {
     fn mock_returns_entities_and_faults() {
         let provider = MockProvider::new()
             .with_entity(Entity {
+                href: "/api/v1/components/nav".to_owned(),
                 id: "component:nav".to_owned(),
                 name: "nav".to_owned(),
                 kind: EntityKind::Component,
                 parent_id: None,
+                description: None,
+                x_medkit: None,
             })
-            .with_fault("component:nav", dtc("STUCK", Severity::Error));
+            .with_fault("component:nav", fault("STUCK", Severity::Error));
 
         assert_eq!(provider.entities().len(), 1);
         assert_eq!(provider.faults("component:nav").len(), 1);
