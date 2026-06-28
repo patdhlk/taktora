@@ -389,8 +389,8 @@ pub async fn serve_listener(
 /// Serve the read-core plus the **live** triggers + SSE surface on an
 /// already-bound `listener`, polling `provider` every `cadence`.
 ///
-/// Spawns the refresh-and-diff loop ([`refresh_loop`](triggers::refresh_loop)) on
-/// the tokio side: it re-polls and re-merges the provider snapshot, hot-swaps the
+/// Spawns the refresh-and-diff loop on the tokio side: it re-polls and re-merges
+/// the provider snapshot, hot-swaps the
 /// served read-model, and broadcasts the diff to `/api/v1/triggers/events` as
 /// `fault_raised` / `fault_cleared` / `health_changed` events (`REQ_0930`–
 /// `REQ_0934`). The loop runs off the control path; the served `MergedView` is
