@@ -1,0 +1,23 @@
+[package]
+name         = "taktora-medkit-binding-executor-tests"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Integration tests for taktora-medkit-binding-executor. Not published; holds dev-deps on sibling workspace crates so the binding's published manifest stays free of internal-crate dev-deps that would race release-plz's topological sort during publish."
+publish      = false
+
+[lib]
+# Empty stub — the crate exists solely to host integration tests under
+# `tests/`. A `src/lib.rs` is required so Cargo treats this as a package.
+
+[dev-dependencies]
+taktora-medkit-binding-executor = { workspace = true }
+taktora-medkit-provider         = { workspace = true }
+taktora-medkit-model            = { workspace = true }

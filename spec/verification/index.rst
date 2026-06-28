@@ -15,6 +15,7 @@ Test cases verifying requirements. Each ``test`` directive
    canopen-codegen/index
    logging/index
    ethercat-netcfg/index
+   medkit/index
 
 .. needtable::
    :types: test

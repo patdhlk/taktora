@@ -1,0 +1,124 @@
+Runtime diagnostics (SOVD-aligned)
+==================================
+
+``taktora-medkit`` is a runtime-diagnostics surface for taktora: it presents
+the running system as a `SOVD <https://www.asam.net/standards/detail/sovd/>`_
+-aligned entity tree (Area / Component / Function / App) carrying a DTC/fault
+model with freeze-frames, and serves it over a REST surface that is **drop-in
+compatible** with the wire contract of the C++ project ``selfpatch/ros2_medkit``.
+
+It is a clean-room Rust take on that diagnostic *contract* — not a port of its
+ROS 2 internals. Where ros2_medkit reads a ROS 2 graph, taktora-medkit sources
+its model from taktora's own runtime (connector health, executor timing)
+through non-blocking, **off-the-control-path** hooks, so diagnostics can never
+perturb the bounded-time WaitSet path that drives the machine.
+
+This umbrella is a peer of :need:`FEAT_0010` "PLC runtime heart" and
+:need:`FEAT_0030` "Connector framework"; medkit is a general-purpose
+diagnostics mechanism layered on the taktora runtime, not bound to any one
+protocol or to the PLC use case.
+
+.. feat:: Runtime diagnostics (SOVD-aligned)
+   :id: FEAT_0100
+   :status: open
+
+   A runtime-diagnostics surface that models the live taktora system as a
+   SOVD-aligned entity tree (Area / Component / Function / App) with a
+   DTC/fault model (status sub-object, occurrence counts, reporting sources,
+   freeze-frames / snapshots), a worst-wins health rollup across the tree, and
+   a REST surface that is drop-in compatible with the ros2_medkit wire
+   contract. The diagnostics surface attaches to taktora through non-blocking
+   callback hooks only and runs off the control path, on its own runtime and
+   allocator.
+
+   The crates are split so the diagnostic *model*, *provider* seam, and
+   *gateway* carry zero taktora dependencies and can be extracted as a
+   standalone project, with all taktora coupling quarantined in ``-binding-*``
+   crates (see :need:`ADR_0111`).
+
+Requirements
+------------
+
+.. req:: Off-path / freedom from interference
+   :id: REQ_0910
+   :status: open
+   :satisfies: FEAT_0100
+
+   The diagnostics gateway shall never execute inside taktora-executor's
+   bounded-time WaitSet path. It shall attach only through non-blocking
+   ``Observer`` / ``ExecutionMonitor`` / ``ConnectorHealth`` callbacks that
+   hand work to a bounded forwarding channel drained by a separate tokio
+   runtime, so a slow, stalled, or backlogged diagnostics consumer cannot
+   block, delay, or allocate on the control path. Forwarding under a full
+   channel shall drop, not block.
+
+.. req:: Drop-in client compatibility
+   :id: REQ_0911
+   :status: open
+   :satisfies: FEAT_0100
+
+   A diagnostic client written against the ros2_medkit REST contract shall
+   work unchanged against the taktora-medkit backend: the served JSON shapes
+   (field names, casing, collection envelope, DTC status sub-object,
+   freeze-frame structure) shall match the captured contract corpus for every
+   family v1 serves. Divergence from the corpus shall be a failing test, not a
+   field report.
+
+.. req:: Worst-wins health rollup
+   :id: REQ_0912
+   :status: open
+   :satisfies: FEAT_0100
+
+   Each entity's aggregated health shall be the worst (most severe) health of
+   itself and all entities it contains. Rolling a child into a fault state
+   shall roll its ancestors at least to that state; clearing the last faulting
+   child shall be required before an ancestor can return to healthy.
+
+.. req:: Callback-hooks-only attach in v1
+   :id: REQ_0913
+   :status: open
+   :satisfies: FEAT_0100
+
+   v1 shall source its model exclusively from in-process taktora callback
+   hooks. It shall not attach over iceoryx2 shared memory and shall not stand
+   up its own iceoryx2 node; a shared-memory attach path is explicitly
+   deferred to a later revision.
+
+.. req:: SOVD entity-tree model
+   :id: REQ_0914
+   :status: open
+   :satisfies: FEAT_0100
+
+   The model shall represent the system as a tree of typed entities — Area,
+   Component, Function, App — each carrying a stable id, a human-readable
+   name, its place in the hierarchy, and the diagnostic capabilities it
+   exposes, matching the SOVD entity collections of the wire contract.
+
+.. req:: DTC / fault model with freeze-frames
+   :id: REQ_0915
+   :status: open
+   :satisfies: FEAT_0100
+
+   A fault shall be modelled as a DTC carrying a fault code, a SOVD/UDS-style
+   status sub-object, severity, occurrence count, the set of reporting
+   sources, and environment data — first/last occurrence records plus zero or
+   more freeze-frame / snapshot captures of the system state at fault time.
+
+.. req:: Extractable diagnostic core
+   :id: REQ_0916
+   :status: open
+   :satisfies: FEAT_0100
+
+   The core crates — model, provider seam, gateway, and HTTP gateway — shall
+   carry **zero** ``taktora-*`` dependencies, so the diagnostics folder can be
+   lifted out into a standalone repository via ``git filter-repo`` rather than
+   detangled. All coupling to taktora shall live in dedicated ``-binding-*``
+   crates that depend on the core through the provider seam only.
+
+Requirements at a glance
+------------------------
+
+.. needtable::
+   :columns: id, title, status, satisfies
+   :show_filters:
+   :filter: "FEAT_0100" in satisfies

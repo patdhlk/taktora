@@ -1,0 +1,28 @@
+[package]
+name         = "taktora-medkit-gateway"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Transport-neutral read-diagnostic core for taktora-medkit: resolves entity-tree queries, fault lists, and the worst-wins health rollup over a `Provider`, independent of any HTTP framework. Zero taktora dependencies."
+
+[dependencies]
+taktora-medkit-model    = { workspace = true }
+taktora-medkit-provider = { workspace = true }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"

@@ -19,6 +19,7 @@ detailed-design notes that predate the arc42 adoption.
    logging/index
    ethercat-netcfg/index
    motion/index
+   medkit/index
    safety
 
 Building blocks
