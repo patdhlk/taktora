@@ -1,0 +1,76 @@
+{
+  "_links": {
+    "component": "/api/v1/components/spark-6723",
+    "self": "/api/v1/components/spark-6723/hosts"
+  },
+  "items": [
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway",
+      "id": "ros2_medkit_gateway",
+      "name": "ros2_medkit_gateway",
+      "type": "app",
+      "x-medkit": {
+        "is_online": true,
+        "ros2": {
+          "node": "/ros2_medkit_gateway"
+        },
+        "source": "heuristic"
+      }
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway_fault_clients",
+      "id": "ros2_medkit_gateway_fault_clients",
+      "name": "ros2_medkit_gateway_fault_clients",
+      "type": "app",
+      "x-medkit": {
+        "is_online": true,
+        "ros2": {
+          "node": "/ros2_medkit_gateway_fault_clients"
+        },
+        "source": "heuristic"
+      }
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway_lifecycle_state_reader",
+      "id": "ros2_medkit_gateway_lifecycle_state_reader",
+      "name": "ros2_medkit_gateway_lifecycle_state_reader",
+      "type": "app",
+      "x-medkit": {
+        "is_online": true,
+        "ros2": {
+          "node": "/ros2_medkit_gateway_lifecycle_state_reader"
+        },
+        "source": "heuristic"
+      }
+    },
+    {
+      "href": "/api/v1/apps/ros2_medkit_gateway_sub",
+      "id": "ros2_medkit_gateway_sub",
+      "name": "ros2_medkit_gateway_sub",
+      "type": "app",
+      "x-medkit": {
+        "is_online": true,
+        "ros2": {
+          "node": "/ros2_medkit_gateway_sub"
+        },
+        "source": "heuristic"
+      }
+    },
+    {
+      "href": "/api/v1/apps/fault_manager",
+      "id": "fault_manager",
+      "name": "fault_manager",
+      "type": "app",
+      "x-medkit": {
+        "is_online": true,
+        "ros2": {
+          "node": "/fault_manager"
+        },
+        "source": "heuristic"
+      }
+    }
+  ],
+  "x-medkit": {
+    "total_count": 5
+  }
+}

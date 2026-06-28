@@ -1,0 +1,7 @@
+{
+  "error_code": "entity-not-found",
+  "message": "Entity not found",
+  "parameters": {
+    "entity_id": "does-not-exist"
+  }
+}

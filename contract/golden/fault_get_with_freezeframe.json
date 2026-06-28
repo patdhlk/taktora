@@ -1,0 +1,48 @@
+{
+  "environment_data": {
+    "extended_data_records": {
+      "first_occurrence": "2026-06-27T22:40:00.250Z",
+      "last_occurrence": "2026-06-28T15:45:00.750Z"
+    },
+    "snapshots": [
+      {
+        "data": {
+          "ambient_temp_c": 31.0,
+          "brake_pressure_bar": 11.3,
+          "vehicle_speed_kph": 42.5
+        },
+        "name": "freeze_frame_at_confirmation",
+        "type": "freeze_frame",
+        "x-medkit": {
+          "captured_at": "2026-06-28T15:45:00.750Z",
+          "full_data": {
+            "ambient_temp_c": 31.0,
+            "brake_pressure_bar": 11.3,
+            "vehicle_speed_kph": 42.5
+          },
+          "message_type": "diagnostic_msgs/msg/DiagnosticStatus",
+          "topic": "/diagnostics/brake_state"
+        }
+      }
+    ]
+  },
+  "item": {
+    "code": "BRAKE_PRESSURE_LOW",
+    "fault_name": "Brake circuit pressure below safe threshold",
+    "severity": 2,
+    "status": {
+      "aggregatedStatus": "active",
+      "confirmedDTC": "1",
+      "pendingDTC": "0",
+      "testFailed": "1"
+    }
+  },
+  "x-medkit": {
+    "occurrence_count": 7,
+    "reporting_sources": [
+      "/ros2_medkit_gateway"
+    ],
+    "severity_label": "ERROR",
+    "status_raw": "CONFIRMED"
+  }
+}

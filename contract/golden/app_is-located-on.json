@@ -1,0 +1,17 @@
+{
+  "_links": {
+    "app": "/api/v1/apps/ros2_medkit_gateway",
+    "self": "/api/v1/apps/ros2_medkit_gateway/is-located-on"
+  },
+  "items": [
+    {
+      "href": "/api/v1/components/spark-6723",
+      "id": "spark-6723",
+      "name": "spark-6723",
+      "type": "component"
+    }
+  ],
+  "x-medkit": {
+    "total_count": 1
+  }
+}

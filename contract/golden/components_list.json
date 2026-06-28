@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "description": "Ubuntu 24.04.4 LTS on x86_64",
+      "href": "/api/v1/components/spark-6723",
+      "id": "spark-6723",
+      "name": "spark-6723",
+      "type": "component",
+      "x-medkit": {
+        "source": "runtime"
+      }
+    }
+  ],
+  "x-medkit": {
+    "total_count": 1
+  }
+}

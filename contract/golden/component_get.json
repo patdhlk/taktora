@@ -1,0 +1,126 @@
+{
+  "_links": {
+    "collection": "/api/v1/components",
+    "self": "/api/v1/components/spark-6723"
+  },
+  "bulk-data": "/api/v1/components/spark-6723/bulk-data",
+  "capabilities": [
+    {
+      "href": "/api/v1/components/spark-6723/status",
+      "name": "status"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/data",
+      "name": "data"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/operations",
+      "name": "operations"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/configurations",
+      "name": "configurations"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/faults",
+      "name": "faults"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/logs",
+      "name": "logs"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/subcomponents",
+      "name": "subcomponents"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/hosts",
+      "name": "hosts"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/bulk-data",
+      "name": "bulk-data"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/cyclic-subscriptions",
+      "name": "cyclic-subscriptions"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/triggers",
+      "name": "triggers"
+    },
+    {
+      "href": "/api/v1/components/spark-6723/locks",
+      "name": "locks"
+    }
+  ],
+  "configurations": "/api/v1/components/spark-6723/configurations",
+  "cyclic-subscriptions": "/api/v1/components/spark-6723/cyclic-subscriptions",
+  "data": "/api/v1/components/spark-6723/data",
+  "description": "Ubuntu 24.04.4 LTS on x86_64",
+  "faults": "/api/v1/components/spark-6723/faults",
+  "hosts": "/api/v1/components/spark-6723/hosts",
+  "id": "spark-6723",
+  "logs": "/api/v1/components/spark-6723/logs",
+  "name": "spark-6723",
+  "operations": "/api/v1/components/spark-6723/operations",
+  "status": "/api/v1/components/spark-6723/status",
+  "subcomponents": "/api/v1/components/spark-6723/subcomponents",
+  "triggers": "/api/v1/components/spark-6723/triggers",
+  "type": "component",
+  "x-medkit": {
+    "capabilities": [
+      {
+        "href": "/api/v1/components/spark-6723/status",
+        "name": "status"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/data",
+        "name": "data"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/operations",
+        "name": "operations"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/configurations",
+        "name": "configurations"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/faults",
+        "name": "faults"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/logs",
+        "name": "logs"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/subcomponents",
+        "name": "subcomponents"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/hosts",
+        "name": "hosts"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/bulk-data",
+        "name": "bulk-data"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/cyclic-subscriptions",
+        "name": "cyclic-subscriptions"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/triggers",
+        "name": "triggers"
+      },
+      {
+        "href": "/api/v1/components/spark-6723/locks",
+        "name": "locks"
+      }
+    ],
+    "description": "Ubuntu 24.04.4 LTS on x86_64",
+    "source": "runtime",
+    "type": "Component"
+  }
+}

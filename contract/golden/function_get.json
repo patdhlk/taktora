@@ -1,0 +1,67 @@
+{
+  "_links": {
+    "collection": "/api/v1/functions",
+    "self": "/api/v1/functions/root"
+  },
+  "bulk-data": "/api/v1/functions/root/bulk-data",
+  "capabilities": [
+    {
+      "href": "/api/v1/functions/root/hosts",
+      "name": "hosts"
+    },
+    {
+      "href": "/api/v1/functions/root/data",
+      "name": "data"
+    },
+    {
+      "href": "/api/v1/functions/root/operations",
+      "name": "operations"
+    },
+    {
+      "href": "/api/v1/functions/root/configurations",
+      "name": "configurations"
+    },
+    {
+      "href": "/api/v1/functions/root/faults",
+      "name": "faults"
+    },
+    {
+      "href": "/api/v1/functions/root/logs",
+      "name": "logs"
+    },
+    {
+      "href": "/api/v1/functions/root/bulk-data",
+      "name": "bulk-data"
+    },
+    {
+      "href": "/api/v1/functions/root/cyclic-subscriptions",
+      "name": "cyclic-subscriptions"
+    },
+    {
+      "href": "/api/v1/functions/root/triggers",
+      "name": "triggers"
+    }
+  ],
+  "configurations": "/api/v1/functions/root/configurations",
+  "cyclic-subscriptions": "/api/v1/functions/root/cyclic-subscriptions",
+  "data": "/api/v1/functions/root/data",
+  "faults": "/api/v1/functions/root/faults",
+  "hosts": "/api/v1/functions/root/hosts",
+  "id": "root",
+  "logs": "/api/v1/functions/root/logs",
+  "name": "root",
+  "operations": "/api/v1/functions/root/operations",
+  "triggers": "/api/v1/functions/root/triggers",
+  "type": "function",
+  "x-medkit": {
+    "hosts": [
+      "ros2_medkit_gateway",
+      "_param_client_node",
+      "ros2_medkit_gateway_fault_clients",
+      "ros2_medkit_gateway_lifecycle_state_reader",
+      "ros2_medkit_gateway_sub"
+    ],
+    "source": "runtime"
+  },
+  "x-medkit-graph": "/api/v1/functions/root/x-medkit-graph"
+}
