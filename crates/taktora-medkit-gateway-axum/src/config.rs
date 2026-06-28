@@ -1,0 +1,89 @@
+//! Server configuration: the bind address and the transport-hardening knobs
+//! (CORS, rate limit, optional TLS), all with documented defaults and all off
+//! the control path (`REQ_0919`).
+
+use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
+
+/// The documented default bind: loopback, port 8080.
+///
+/// `ros2_medkit` binds `0.0.0.0:8080`; the dev default here is loopback so a
+/// freshly-started skeleton is not reachable off-host by accident. Override
+/// [`GatewayConfig::bind`] to expose it.
+pub const DEFAULT_BIND: SocketAddr =
+    SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 8080);
+
+/// How the gateway answers cross-origin requests.
+///
+/// Default: enabled and permissive (any origin, the read-only `GET`/`DELETE`
+/// methods the surface uses) so a browser-based diagnostic client works out of
+/// the box. Set `enabled` to `false` to mount no CORS layer.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CorsConfig {
+    /// Whether to mount a CORS layer at all.
+    pub enabled: bool,
+    /// Whether to allow any origin (`*`). When `false`, no origin is allowed.
+    pub allow_any_origin: bool,
+}
+
+impl Default for CorsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            allow_any_origin: true,
+        }
+    }
+}
+
+/// A token-bucket rate limit applied across all clients.
+///
+/// `capacity` is the burst size; `refill_per_second` is the steady-state rate.
+/// Rate limiting is **off by default** ([`GatewayConfig::rate_limit`] is `None`)
+/// so it never throttles the control-plane-free read path unless asked for.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct RateLimit {
+    /// Maximum tokens (burst size); must be positive to have any effect.
+    pub capacity: u32,
+    /// Tokens replenished per second.
+    pub refill_per_second: u32,
+}
+
+/// Paths to the PEM-encoded certificate chain and private key for TLS.
+///
+/// Serving over TLS additionally requires the crate's `tls` feature; with the
+/// feature off, [`serve`](crate::serve) returns an error rather than silently
+/// downgrading to plaintext. Default: no TLS (plaintext).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TlsConfig {
+    /// Path to the PEM certificate chain.
+    pub cert_path: PathBuf,
+    /// Path to the PEM private key.
+    pub key_path: PathBuf,
+}
+
+/// The full server configuration.
+///
+/// [`GatewayConfig::default`] yields the documented dev defaults: bind
+/// `127.0.0.1:8080`, permissive CORS, no rate limit, no TLS.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GatewayConfig {
+    /// The socket address to bind.
+    pub bind: SocketAddr,
+    /// Cross-origin policy.
+    pub cors: CorsConfig,
+    /// Optional token-bucket rate limit (off when `None`).
+    pub rate_limit: Option<RateLimit>,
+    /// Optional TLS (plaintext when `None`).
+    pub tls: Option<TlsConfig>,
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            bind: DEFAULT_BIND,
+            cors: CorsConfig::default(),
+            rate_limit: None,
+            tls: None,
+        }
+    }
+}

@@ -51,6 +51,50 @@ arc42 §4.
    model cannot reuse taktora types (e.g. ``ConnectorHealth``); it re-expresses
    them as its own DTOs and the binding maps across the boundary.
 
+.. arch-decision:: Snapshot/merge read seam + shape-diff contract verification
+   :id: ADR_0112
+   :status: accepted
+   :refines: FEAT_0100
+
+   **Context.** The walking skeleton (GitHub #81) must take HTTP in and emit
+   contract-correct SOVD JSON out, backed by the mock provider, and prove it
+   against ``contract/golden/*.json``. Two design questions fell out. (1) The
+   gateway needs a place to assemble the read-model that the later slices plug
+   into: #82 applies a manifest, #83/#84 contribute live snapshots from
+   bindings. (2) The captured golden corpus is **mutually inconsistent** — it
+   was recorded from the upstream binary at different times, so e.g.
+   ``function_hosts.json`` lists five apps including ``fault_manager`` while
+   ``component_hosts.json`` lists four without it. No single live server state
+   can reproduce every fixture byte-for-byte simultaneously.
+
+   **Decision.** (1) Introduce a plain-data ``ProviderSnapshot`` (entities,
+   typed relationship edges, faults, data) as the **snapshot contract** the
+   ``Provider`` seam produces, and a ``MergePipeline`` that folds snapshots
+   (and, later, a manifest) into an indexed ``MergedView``. Pure resolver
+   methods on the view produce the wire DTOs; the axum layer is a thin adapter
+   that holds an ``Arc<MergedView>`` built once at startup. Relationship items
+   carry their context-specific ``x-medkit`` decoration in the snapshot, since
+   the producer (mock now, binding later) knows it. (2) Verify the live HTTP
+   surface by **structural shape-diffing** against the golden corpus — every
+   key, nesting, and value type the contract constrains must be present — rather
+   than byte-identity. Byte-for-byte fidelity of the model types stays pinned by
+   the model crate's snapshot tests (:need:`TEST_0905`); the gateway test owns
+   the wire/transport contract (envelopes, status codes, ``501`` decline).
+   Deferred families decline through a single router ``fallback`` that returns a
+   contract-shaped ``501``, so any unmatched path is a clean decline, never a
+   ``404``.
+
+   **Consequences.** ✅ #82/#83/#84 have an obvious seam: add a snapshot source
+   or a manifest step to the pipeline without touching the HTTP layer. ✅ The
+   resolvers stay pure and transport-neutral, testable without a socket.
+   ✅ Shape-diffing tolerates the corpus's internal inconsistency while still
+   catching envelope/casing/structure regressions. ❌ The gateway test does not
+   assert exact bytes, so a value-level divergence within a correct shape would
+   pass there (the model crate's byte tests cover that axis). ❌ Server-rendered
+   views the model does not carry (the single-entity capability catalogue, the
+   ``/health`` telemetry blocks) are served best-effort and shape-diffed only
+   loosely, a documented gap until a richer provider lands.
+
 Building block view
 -------------------
 
@@ -85,22 +129,33 @@ provider seam.
 .. building-block:: taktora-medkit-gateway
    :id: BB_0106
    :status: open
-   :implements: REQ_0912, REQ_0916
+   :implements: REQ_0912, REQ_0916, REQ_0917
 
-   Transport-neutral read-diagnostic core. Resolves entity-tree queries, fault
-   lists, and the worst-wins health rollup over a ``Provider``, independent of
-   any HTTP framework. Zero taktora dependencies.
+   Transport-neutral read-diagnostic core. A ``MergePipeline`` folds one or more
+   ``ProviderSnapshot``\s (and, later, a manifest) into a ``MergedView``; pure
+   resolver methods on the view turn a request into a wire DTO — entity-tree
+   queries, relationship sub-resources, fault lists, the single-fault detail,
+   data reads, and the worst-wins health rollup — independent of any HTTP
+   framework. Zero taktora dependencies.
 
 .. building-block:: taktora-medkit-gateway-axum
    :id: BB_0107
    :status: open
-   :implements: REQ_0911, REQ_0916
+   :implements: REQ_0911, REQ_0916, REQ_0917, REQ_0918, REQ_0919
 
-   The HTTP surface: an axum router exposing the gateway over the ros2_medkit
-   REST contract, run on a tokio runtime. axum and tokio are not taktora
-   dependencies, so this crate remains part of the extractable core. The
-   walking skeleton that serves the read families (and ``501`` for deferred
-   ones) is a later slice.
+   The HTTP surface: an axum router exposing the gateway's read-core resolvers
+   over the ros2_medkit REST contract on the ``/api/v1`` prefix, run on a tokio
+   runtime. Serves the entity tree, relationship sub-resources, fault lists and
+   detail, and data reads; answers a contract-shaped ``501`` for deferred
+   families via a route fallback; and folds in baseline transport hardening
+   (CORS, a token-bucket rate limit, optional TLS behind a ``tls`` feature),
+   each configurable with documented defaults. The server holds an
+   ``Arc<MergedView>`` built once from the provider snapshot; live-refresh and
+   manifest application are downstream slices that do not change the HTTP
+   surface. axum and tokio are not taktora dependencies, so this crate remains
+   part of the extractable core. A sibling ``taktora-medkit-gateway-axum-tests``
+   crate (``publish = false``) hosts the live-server integration and smoke tests
+   so the published manifest stays free of internal-crate dev-deps.
 
 .. building-block:: taktora-medkit-binding-executor
    :id: BB_0108

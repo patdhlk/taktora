@@ -16,6 +16,8 @@ description  = "Transport-neutral read-diagnostic core for taktora-medkit: resol
 taktora-medkit-model    = { workspace = true }
 taktora-medkit-provider = { workspace = true }
 
+serde_json = { workspace = true, features = ["std"] }
+
 [lints.rust]
 unsafe_code  = "deny"
 missing_docs = "warn"

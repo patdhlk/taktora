@@ -60,6 +60,7 @@ members = [
     "crates/taktora-medkit-provider",
     "crates/taktora-medkit-gateway",
     "crates/taktora-medkit-gateway-axum",
+    "crates/taktora-medkit-gateway-axum-tests",
     "crates/taktora-medkit-binding-executor",
     "crates/taktora-medkit-binding-executor-tests",
     "crates/taktora-medkit-binding-connector",
@@ -160,6 +161,8 @@ clap              = { version = "4", features = ["derive"] }
 glob              = "0.3"
 libm              = "0.2"
 axum              = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tower-http        = { version = "0.6", default-features = false }
+axum-server       = { version = "0.7", default-features = false }
 
 # dev-only
 proptest          = "1"

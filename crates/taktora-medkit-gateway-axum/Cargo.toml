@@ -15,9 +15,21 @@ description  = "axum HTTP surface for taktora-medkit: serves the read-diagnostic
 [dependencies]
 taktora-medkit-gateway  = { workspace = true }
 taktora-medkit-provider = { workspace = true }
+taktora-medkit-model    = { workspace = true }
 
-axum  = { workspace = true }
-tokio = { workspace = true, features = ["net"] }
+axum       = { workspace = true, features = ["json"] }
+tokio      = { workspace = true, features = ["net"] }
+tower-http = { workspace = true, features = ["cors"] }
+serde      = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+
+# Optional TLS: enabling the `tls` feature serves over rustls via axum-server.
+axum-server = { workspace = true, optional = true, features = ["tls-rustls"] }
+
+[features]
+# Off by default: the dev skeleton serves plaintext. Enabling `tls` pulls in
+# axum-server + rustls and activates the TLS serve path when a TlsConfig is set.
+tls = ["dep:axum-server"]
 
 [lints.rust]
 unsafe_code  = "deny"
