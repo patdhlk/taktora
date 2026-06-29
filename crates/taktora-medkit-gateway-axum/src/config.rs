@@ -80,7 +80,7 @@ pub struct GatewayConfig {
     pub tls: Option<TlsConfig>,
     /// Whether the `/api/v1/auth/*` token endpoints are mounted (`REQ_0968`).
     ///
-    /// Default `true`: the dev-friendly permissive [`Authenticator`] is mounted
+    /// Default `true`: the dev-friendly permissive [`Authenticator`](crate::Authenticator) is mounted
     /// and answers `200`. Set `false` for **demo parity** with an upstream
     /// `ros2_medkit` started with auth disabled — the auth routes then answer a
     /// contract-shaped `404` (the family is *absent*, not deferred), so a client

@@ -20,6 +20,7 @@
 //! keeps the suite dependency-light, mirroring the sibling test files.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -30,7 +31,9 @@ use taktora_medkit_gateway::Gateway;
 use taktora_medkit_gateway_axum::{
     GatewayConfig, demo, ephemeral_listener, serve_listener, serve_listener_with_provider,
 };
-use taktora_medkit_model::{Entity, EntityKind, EntityMeta, FaultSummary, Health, Ros2Ref, Severity};
+use taktora_medkit_model::{
+    Entity, EntityKind, EntityMeta, FaultSummary, Health, Ros2Ref, Severity,
+};
 use taktora_medkit_provider::{Provider, ProviderSnapshot};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -53,13 +56,14 @@ async fn request(
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     let mut head = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n");
     for (k, v) in headers {
-        head.push_str(&format!("{k}: {v}\r\n"));
+        let _ = write!(head, "{k}: {v}\r\n");
     }
     if let Some(b) = body {
-        head.push_str(&format!(
+        let _ = write!(
+            head,
             "Content-Type: application/json\r\nContent-Length: {}\r\n",
             b.len()
-        ));
+        );
     }
     head.push_str("Connection: close\r\n\r\n");
     let req = format!("{head}{}", body.unwrap_or(""));
@@ -148,7 +152,10 @@ async fn health_carries_telemetry_blocks() {
     assert!(health["x-medkit-entity-cache"]["capacity"].is_number());
     // Best-effort placeholder blocks are present and field-complete.
     assert!(health["x-medkit-data-provider"]["pool_cap"].is_number());
-    assert_eq!(health["x-medkit-subscription-executor"]["worker_alive"], true);
+    assert_eq!(
+        health["x-medkit-subscription-executor"]["worker_alive"],
+        true
+    );
     assert_eq!(health["x-medkit-subscription-executor"]["degraded"], false);
 }
 
@@ -157,7 +164,11 @@ async fn health_carries_telemetry_blocks() {
 async fn global_delete_faults_acknowledges() {
     let addr = spawn_static(GatewayConfig::default()).await;
     let deleted = request(addr, "DELETE", "/api/v1/faults", &[], None).await;
-    assert_eq!(deleted.status, 204, "clear-all should ack: {}", deleted.body);
+    assert_eq!(
+        deleted.status, 204,
+        "clear-all should ack: {}",
+        deleted.body
+    );
 }
 
 /// `TEST_0939` (`REQ_0968`) — auth on issues a token; auth off answers `404`.
@@ -168,7 +179,11 @@ async fn auth_disabled_is_404_not_501() {
     // Default config: auth enabled -> 200 token.
     let on = spawn_static(GatewayConfig::default()).await;
     let issued = request(on, "POST", "/api/v1/auth/token", &[], Some(creds)).await;
-    assert_eq!(issued.status, 200, "auth on issues a token: {}", issued.body);
+    assert_eq!(
+        issued.status, 200,
+        "auth on issues a token: {}",
+        issued.body
+    );
 
     // Auth disabled -> the family is absent (404), not deferred (501).
     let off = spawn_static(GatewayConfig {
@@ -208,14 +223,7 @@ async fn lock_reads_expose_owner_view() {
     assert_eq!(listed["items"][0]["owned"], true);
 
     // GET detail without a client id -> found, but owned: false.
-    let detail = request(
-        addr,
-        "GET",
-        &format!("{resource}/{lock_id}"),
-        &[],
-        None,
-    )
-    .await;
+    let detail = request(addr, "GET", &format!("{resource}/{lock_id}"), &[], None).await;
     assert_eq!(detail.status, 200);
     assert_eq!(json(&detail.body)["owned"], false);
 
