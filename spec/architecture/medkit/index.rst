@@ -706,7 +706,7 @@ provider seam.
 .. building-block:: ActionSink write seam + operations surface
    :id: BB_0121
    :status: open
-   :implements: REQ_0969, REQ_0970
+   :implements: REQ_0969, REQ_0970, REQ_0971, REQ_0972, REQ_0973, REQ_0974, REQ_0975
 
    The command-side seam, mirroring the read ``Provider`` seam. In
    ``taktora-medkit-provider``: the ``ActionSink`` trait (operations catalogue,

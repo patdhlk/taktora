@@ -644,6 +644,76 @@ seam when a real-effect binding lands (:need:`ADR_0126`).
    deferred fallback and advertised honestly in the root capabilities
    (:need:`REQ_0965`).
 
+.. req:: Configurations family
+   :id: REQ_0971
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0121, ADR_0126, TEST_0946
+
+   The gateway shall serve the SOVD configurations family on every entity kind
+   through the ``ActionSink`` seam: ``GET …/configurations`` (list),
+   ``GET …/configurations/{config_id}`` (one; ``404`` if unset),
+   ``PUT …/configurations/{config_id}`` (upsert → ``200`` with the stored entry),
+   ``DELETE …/configurations/{config_id}`` (``204``; ``404`` if unset), and
+   ``DELETE …/configurations`` (delete all → ``204``). The simulation stores
+   values in memory and performs no real effect (:need:`ADR_0126`).
+
+.. req:: Bulk-data family
+   :id: REQ_0972
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0121, ADR_0126, TEST_0947
+
+   The gateway shall serve the SOVD bulk-data family on apps and components:
+   ``GET …/bulk-data`` (categories), ``GET …/bulk-data/{category}`` (descriptors),
+   ``POST …/bulk-data/{category}`` (upload the raw body → ``201`` with a
+   descriptor), ``GET …/bulk-data/{category}/{file_id}`` (download the stored
+   bytes), and ``DELETE …/bulk-data/{category}/{file_id}`` (``204``). Unknown
+   category/file is ``404``. The simulation stores bytes in memory (no multipart
+   parsing, no real effect — :need:`ADR_0126`).
+
+.. req:: Scripts family
+   :id: REQ_0973
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0121, ADR_0126, TEST_0948
+
+   The gateway shall serve the SOVD scripts family on apps and components: upload
+   (``POST …/scripts`` → ``201``), list/get/delete script metadata, and an
+   executions sub-resource reusing the operations execution model
+   (``POST …/scripts/{id}/executions`` → ``202``;
+   ``GET`` / ``PUT`` / ``DELETE …/executions/{exec_id}``). Unknown script or
+   execution is ``404``. The simulation completes executions synchronously and
+   performs no real effect (:need:`ADR_0126`).
+
+.. req:: Software-update family
+   :id: REQ_0974
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0121, ADR_0126, TEST_0949
+
+   The gateway shall serve the SOVD software-update family as a **global**
+   surface (not entity-scoped): ``GET`` / ``POST /updates`` (list / register →
+   ``201``), ``GET /updates/{id}`` (detail), ``GET /updates/{id}/status``,
+   ``PUT /updates/{id}/{prepare,execute,automated}`` (transition → ``202``), and
+   ``DELETE /updates/{id}`` (``204``). Unknown id is ``404``. The simulation
+   tracks status in memory (``registered`` → ``prepared`` → ``executed``) and
+   performs no real effect (:need:`ADR_0126`).
+
+.. req:: Lifecycle-status family
+   :id: REQ_0975
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0121, ADR_0126, TEST_0950
+
+   The gateway shall serve entity lifecycle transitions on apps and components:
+   ``GET …/status`` (current state, default ``running``) and
+   ``PUT …/status/{start,restart,shutdown,force-restart,force-shutdown}``
+   (transition → ``202`` with the new state). ``start``/``restart``/
+   ``force-restart`` map to ``running`` and ``shutdown``/``force-shutdown`` to
+   ``stopped``; an unrecognised transition is ``400``. The simulation tracks
+   state in memory and performs no real effect (:need:`ADR_0126`).
+
 Requirements at a glance
 ------------------------
 

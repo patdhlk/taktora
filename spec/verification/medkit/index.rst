@@ -418,3 +418,58 @@ they verify to ``implemented`` and link these tests.
 
    Over a live server, both ``GET …/operations/{unknown}`` and
    ``POST …/operations/{unknown}/executions`` return ``404``.
+
+.. test:: Configurations lifecycle over HTTP
+   :id: TEST_0946
+   :status: implemented
+   :verifies: REQ_0971
+
+   Over a live server, ``PUT …/configurations/{id}`` upserts a value (``200``),
+   ``GET`` reads it back, the list shows it, a second ``PUT`` updates it,
+   ``DELETE`` one returns ``204`` then ``GET`` is ``404``, and ``DELETE`` all
+   returns ``204``. A provider unit test confirms the upsert/get/delete and
+   delete-all behaviour at the sink level.
+
+.. test:: Bulk-data lifecycle over HTTP
+   :id: TEST_0947
+   :status: implemented
+   :verifies: REQ_0972
+
+   Over a live server, ``POST …/bulk-data/{category}`` uploads raw bytes
+   (``201`` with a descriptor), the category and descriptor lists show it, the
+   file downloads with the bytes round-tripping intact, and ``DELETE`` returns
+   ``204`` after which the download is ``404``. A provider unit test confirms the
+   upload/download/delete cycle at the sink level.
+
+.. test:: Scripts lifecycle over HTTP
+   :id: TEST_0948
+   :status: implemented
+   :verifies: REQ_0973
+
+   Over a live server, a script uploads (``201``), is fetched and listed, an
+   execution starts under it (``202`` completed), is polled and removed
+   (``204`` → ``404``), the script deletes (``204`` → ``404``), and starting an
+   execution under an unknown script is ``404``. A provider unit test confirms
+   the upload-and-execute lifecycle at the sink level.
+
+.. test:: Software-update lifecycle over HTTP
+   :id: TEST_0949
+   :status: implemented
+   :verifies: REQ_0974
+
+   Over a live server, an update registers (``201``, status ``registered``), is
+   fetched/listed, its status reads back, ``prepare`` and ``execute`` transition
+   it (``202`` → ``prepared`` → ``executed``), ``DELETE`` returns ``204`` then
+   ``GET`` is ``404``, and a transition on an unknown id is ``404``. A provider
+   unit test confirms the register/prepare/execute/delete cycle.
+
+.. test:: Lifecycle-status transitions over HTTP
+   :id: TEST_0950
+   :status: implemented
+   :verifies: REQ_0975
+
+   Over a live server, ``GET …/status`` on a fresh entity is ``running``,
+   ``PUT …/status/shutdown`` returns ``202`` and transitions to ``stopped``, and
+   ``PUT …/status/start`` returns ``202`` and transitions back to ``running``. A
+   provider unit test confirms the transition mapping and that an unknown
+   transition is a ``BadRequest``.
