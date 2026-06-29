@@ -8,7 +8,7 @@
 
 use serde_json::json;
 use taktora_medkit_model::{Entity, EntityKind, EntityMeta, FaultSummary, Ros2Ref, Severity};
-use taktora_medkit_provider::{MockProvider, Relation};
+use taktora_medkit_provider::{MockProvider, Relation, Telemetry};
 
 const COMPONENT: &str = "spark-6723";
 const APPS: [&str; 4] = [
@@ -116,6 +116,42 @@ fn fault(code: &str, description: &str, severity: Severity, status: &str) -> Fau
     }
 }
 
+/// Plausible non-zero `/health` telemetry for the walking skeleton, mirroring
+/// the captured `contract/golden/health.json` so the live `/health` looks real
+/// rather than all-zero (`REQ_0978`).
+fn demo_telemetry() -> Telemetry {
+    Telemetry {
+        data_provider: [
+            ("pool_cap".to_owned(), json!(256)),
+            ("cold_wait_cap".to_owned(), json!(4)),
+            ("pool_size".to_owned(), json!(5)),
+            ("pool_hits".to_owned(), json!(128)),
+            ("pool_misses".to_owned(), json!(5)),
+            ("graph_events_received".to_owned(), json!(42)),
+        ]
+        .into_iter()
+        .collect(),
+        subscription_executor: [
+            ("worker_alive".to_owned(), json!(true)),
+            ("queue_depth".to_owned(), json!(0)),
+            ("queue_max_depth_observed".to_owned(), json!(3)),
+            ("tasks_completed".to_owned(), json!(1024)),
+            ("last_task_latency_us".to_owned(), json!(180)),
+            ("max_task_latency_us".to_owned(), json!(1500)),
+            ("graph_events_received".to_owned(), json!(42)),
+        ]
+        .into_iter()
+        .collect(),
+        entity_cache: [
+            ("generation".to_owned(), json!(3)),
+            ("capacity".to_owned(), json!(256)),
+            ("grew".to_owned(), json!(false)),
+        ]
+        .into_iter()
+        .collect(),
+    }
+}
+
 /// Build the seeded walking-skeleton provider.
 #[must_use]
 pub fn provider() -> MockProvider {
@@ -139,7 +175,8 @@ pub fn provider() -> MockProvider {
         .with_fault(COMPONENT, motor.clone())
         .with_fault("ros2_medkit_gateway", brake)
         .with_fault("ros2_medkit_gateway_sub", motor)
-        .with_data(COMPONENT, json!({ "cpu": { "load_avg": 0.42 } }));
+        .with_data(COMPONENT, json!({ "cpu": { "load_avg": 0.42 } }))
+        .with_telemetry(demo_telemetry());
 
     for id in APPS {
         provider = provider

@@ -116,6 +116,48 @@ pub struct LogEntry {
     pub message: String,
 }
 
+/// Provider-sourced telemetry overlaid onto the `/health` document's `x-medkit-*`
+/// blocks (`REQ_0978`).
+///
+/// Each field is a map of override keys merged over the corresponding block's
+/// defaults: a provider that knows its pool/executor internals supplies the real
+/// counters; an absent (empty) map leaves the best-effort zero baseline in place,
+/// so back-compat holds. Maps (rather than fixed structs) keep the seam
+/// forward-compatible — a richer block grows new keys without a type change — and
+/// let the gateway's health-document overlay apply them without restructuring.
+///
+/// The live entity-cache counts (`apps`/`areas`/`components`/`functions`) stay
+/// authoritative: an `entity_cache` override can add `generation`/`grew`/etc.,
+/// but never overrides those four computed counts.
+#[derive(Clone, Debug, Default)]
+pub struct Telemetry {
+    /// Overrides merged over the `x-medkit-data-provider` block (key -> value).
+    pub data_provider: BTreeMap<String, Value>,
+    /// Overrides merged over the `x-medkit-subscription-executor` block.
+    pub subscription_executor: BTreeMap<String, Value>,
+    /// Overrides merged over the `x-medkit-entity-cache` block (e.g. `generation`,
+    /// `capacity`) — excluding the four live entity counts.
+    pub entity_cache: BTreeMap<String, Value>,
+}
+
+impl Telemetry {
+    /// Whether every override block is empty (the back-compat baseline).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.data_provider.is_empty()
+            && self.subscription_executor.is_empty()
+            && self.entity_cache.is_empty()
+    }
+
+    /// Fold `other`'s override keys over this telemetry's, later-wins per key.
+    pub fn extend(&mut self, other: Self) {
+        self.data_provider.extend(other.data_provider);
+        self.subscription_executor
+            .extend(other.subscription_executor);
+        self.entity_cache.extend(other.entity_cache);
+    }
+}
+
 /// A point-in-time, self-consistent read-model the gateway serves from.
 ///
 /// This is the **snapshot contract**: the shape a binding's snapshotting
@@ -142,6 +184,10 @@ pub struct ProviderSnapshot {
     /// Diagnostic log entries keyed by entity id (served under `…/logs`,
     /// `REQ_0976`). Empty for providers that surface none.
     pub logs: BTreeMap<String, Vec<LogEntry>>,
+    /// Provider-sourced `/health` telemetry overlaid onto the `x-medkit-*` blocks
+    /// (`REQ_0978`). Default-empty: an absent telemetry yields today's
+    /// best-effort zero blocks.
+    pub telemetry: Telemetry,
 }
 
 /// The data-source seam the gateway reads through.
@@ -201,6 +247,7 @@ pub trait Provider: Send + Sync {
             fault_environments: BTreeMap::new(),
             data: BTreeMap::new(),
             logs: BTreeMap::new(),
+            telemetry: Telemetry::default(),
         }
     }
 }
@@ -215,6 +262,7 @@ pub struct MockProvider {
     relationships: Vec<RelationshipEdge>,
     data: BTreeMap<String, Value>,
     logs: BTreeMap<String, Vec<LogEntry>>,
+    telemetry: Telemetry,
 }
 
 impl MockProvider {
@@ -274,6 +322,19 @@ impl MockProvider {
         self
     }
 
+    /// Supply provider-sourced `/health` [`Telemetry`] overlaid onto the
+    /// `x-medkit-*` blocks (`REQ_0978`).
+    ///
+    /// Replaces any previously-set telemetry on this builder. With no telemetry
+    /// the served `/health` keeps today's best-effort zero blocks; with it, the
+    /// supplied override keys surface as real values (the live entity-cache counts
+    /// stay authoritative).
+    #[must_use]
+    pub fn with_telemetry(mut self, telemetry: Telemetry) -> Self {
+        self.telemetry = telemetry;
+        self
+    }
+
     /// Attach freeze-frame environment data for a fault on an entity, surfaced by
     /// the gateway under `…/faults/{fault_code}` (`REQ_0929`).
     #[must_use]
@@ -327,6 +388,7 @@ impl Provider for MockProvider {
             fault_environments: self.fault_environments.clone(),
             data: self.data.clone(),
             logs: self.logs.clone(),
+            telemetry: self.telemetry.clone(),
         }
     }
 }
