@@ -245,7 +245,9 @@ async fn deferred_families_return_501() {
         "/api/v1/components/spark-6723/triggers",
         "/api/v1/components/spark-6723/cyclic-subscriptions",
         "/api/v1/updates",
-        "/api/v1/auth/token",
+        // `/auth/token` is a real POST route now (#86); a bare `/auth` path with
+        // no handler still declines via the deferred-family fallback.
+        "/api/v1/auth",
         "/api/v1/docs",
         "/api/v1/functions/root/x-medkit-graph",
     ];

@@ -371,6 +371,71 @@ Requirements
    ``data`` object shall be the golden fault-stream payload so a drop-in
    ``ros2_medkit`` client parses the stream unchanged (:need:`ADR_0117`).
 
+.. req:: Auth-light token endpoints preserve the client login flow
+   :id: REQ_0935
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0112, ADR_0118, TEST_0922
+
+   The gateway shall expose the SOVD authentication endpoints a drop-in client
+   calls before it reads any diagnostics: ``POST /api/v1/auth/token`` (singular
+   ``token``), ``POST /api/v1/auth/authorize``, and ``POST /api/v1/auth/revoke``,
+   POST-only, carved out from under the deferred-family ``501`` fallback. A
+   ``client_credentials`` request to the token endpoint shall return an HTTP
+   ``200`` carrying a contract-shaped ``AuthTokenResponse`` with the required
+   fields ``access_token``, ``token_type`` (``"Bearer"``), ``expires_in``, and
+   ``scope``, so a ``client_credentials`` login completes.
+
+.. req:: Permissive dev-mode authenticator is the default
+   :id: REQ_0936
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0112, ADR_0118, TEST_0922
+
+   The default authenticator shall be permissive (dev mode): any credentials
+   succeed at the token endpoint, and any or no ``Bearer`` token is accepted. The
+   issued ``access_token`` shall be a **shape-valid** JWT — three non-empty
+   ``base64url``-encoded, dot-separated segments
+   (``header.payload.signature``) — but not cryptographically signed. Real JWT
+   signing and validation are deferred to tracking issue #87.
+
+.. req:: Authentication flows through a substitutable Authenticator seam
+   :id: REQ_0937
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0112, ADR_0118, TEST_0924
+
+   Token issuance and bearer verification shall flow through a single
+   ``Authenticator`` trait seam. A strict implementation (real JWT validation +
+   RBAC, tracking issue #87) shall be substitutable for the permissive default
+   without modifying any request handler — the read-core handlers shall not
+   reference the authenticator, and the seam shall be exercisable from outside
+   the crate.
+
+.. req:: Resource routes run enforcement = none in v1
+   :id: REQ_0938
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0112, ADR_0118, TEST_0923
+
+   Resource (read-core) routes shall run enforcement = none in v1: a presented
+   ``Bearer`` token shall be accepted and never verified, and a request shall
+   pass auth whether or not it carries a token. The gateway shall never reject a
+   resource request on authentication grounds in v1. The enforcement modes
+   (``none`` / ``write`` / ``all``) and their RBAC checks are deferred to
+   tracking issue #87, behind the :need:`REQ_0937` seam.
+
+.. req:: Full client login-to-read flow over the live gateway
+   :id: REQ_0939
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0112, ADR_0118, TEST_0924
+
+   A drop-in client shall be able to complete the full shape against a live
+   gateway: ``POST`` ``client_credentials`` to ``/api/v1/auth/token``, obtain the
+   ``access_token``, and call a read-core endpoint presenting that token as a
+   ``Bearer`` credential, receiving an HTTP ``200``.
+
 Requirements at a glance
 ------------------------
 
