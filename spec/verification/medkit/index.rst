@@ -280,3 +280,37 @@ they verify to ``implemented`` and link these tests.
    and shows token issuance now returns ``401`` while the enforcement = none
    read-core still answers ``200``; a unit test confirms the trait is object-safe
    and a rejecting impl drops in behind ``dyn Authenticator``.
+
+.. test:: Lock acquire-extend-release round-trip
+   :id: TEST_0925
+   :status: implemented
+   :verifies: REQ_0940, REQ_0941
+
+   Over a live axum server, ``POST .../components/{id}/locks`` with an
+   ``X-Client-Id`` header and an ``AcquireLockRequest`` body returns ``201`` and a
+   ``Lock`` whose ``owned`` is true and whose ``lock_expiration`` is an absolute
+   RFC3339 instant; ``PUT`` extends it (``204``) and ``DELETE`` releases it
+   (``204``), after which a fresh acquire by another client succeeds. A registry
+   unit test drives TTL expiry against an injected clock: a held lock
+   auto-releases once advanced past its TTL and the resource is then
+   re-acquirable, and the formatted ``lock_expiration`` equals ``now + ttl``.
+
+.. test:: Lock conflict and break_lock override
+   :id: TEST_0926
+   :status: implemented
+   :verifies: REQ_0940, REQ_0942
+
+   Over a live server, a second client acquiring a held lock without
+   ``break_lock`` receives ``409``; the same acquire with ``break_lock: true``
+   evicts the incumbent and returns ``201`` with ``owned`` true. A registry unit
+   test confirms the eviction at the store level.
+
+.. test:: Lock ownership and X-Client-Id enforcement
+   :id: TEST_0927
+   :status: implemented
+   :verifies: REQ_0943, REQ_0944
+
+   Over a live server, a ``POST`` with no ``X-Client-Id`` header is ``400`` and a
+   non-owner ``PUT`` extend of a live lock is ``409``. A registry unit test
+   confirms ownership is enforced on extend and release, that a wrong lock id is
+   ``404``, and that the registry is in-memory and off the control path.

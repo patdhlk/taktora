@@ -436,6 +436,68 @@ Requirements
    ``access_token``, and call a read-core endpoint presenting that token as a
    ``Bearer`` credential, receiving an HTTP ``200``.
 
+.. req:: Diagnostic lock lifecycle — acquire, extend, release
+   :id: REQ_0940
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0113, ADR_0120, TEST_0925
+
+   The gateway shall expose SOVD diagnostic-scoped exclusive access on the entity
+   kinds the contract defines ``/locks`` for (apps, components):
+   ``POST /api/v1/{entity}/{id}/locks`` shall acquire a lock and return HTTP
+   ``201`` with a contract-shaped ``Lock`` (``id``, ``owned``, an absolute RFC3339
+   ``lock_expiration``, optional ``scopes``); ``PUT .../locks/{lock_id}`` shall
+   extend it and return ``204``; ``DELETE .../locks/{lock_id}`` shall release it
+   and return ``204``. The acquire body ``AcquireLockRequest`` carries
+   ``lock_expiration`` as a millisecond TTL from now; the response renders the
+   expiry as an absolute RFC3339 instant.
+
+.. req:: Lock TTL expiry auto-releases
+   :id: REQ_0941
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0113, ADR_0120, TEST_0925
+
+   A lock shall auto-release once its TTL elapses: after expiry the resource shall
+   be freely re-acquirable by any client without an explicit release. TTL shall be
+   evaluated against an injectable wall-clock source so expiry is deterministic
+   and testable without sleeping on real time.
+
+.. req:: break_lock supervisor override
+   :id: REQ_0942
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0113, ADR_0120, TEST_0926
+
+   A ``break_lock: true`` acquire shall evict a lock currently held by another
+   client (supervisor override) and grant the lock to the requester, returning
+   HTTP ``201``.
+
+.. req:: X-Client-Id lock ownership
+   :id: REQ_0943
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0113, ADR_0120, TEST_0927
+
+   The required ``X-Client-Id`` header (1–256 chars) shall identify the lock
+   holder. A second client acquiring a live lock without ``break_lock`` shall
+   receive HTTP ``409``; only the holder shall extend or release its lock — a
+   non-owner attempt on a live lock shall receive ``409`` — and a missing or
+   out-of-range ``X-Client-Id`` shall receive ``400``.
+
+.. req:: Locks are diagnostic-coordination-only QM metadata
+   :id: REQ_0944
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0113, ADR_0119, ADR_0120, TEST_0927
+
+   The lock registry shall be in-memory and off the control path, guarding no
+   safety-critical resource and adding no edge to the executor/connector binding
+   crates or the taktora runtime (preserving the extractable core,
+   :need:`REQ_0916`). Locks shall coordinate diagnostic clients against each other
+   only; the moment a lock guards an SC resource, the write-surface safety gate
+   (:need:`ADR_0119`) applies.
+
 Requirements at a glance
 ------------------------
 

@@ -349,6 +349,79 @@ arc42 §4.
    v1, so a rejecting authenticator changes token issuance but not resource
    access while enforcement is none.
 
+.. arch-decision:: Diagnostic write surface gated by Freedom-From-Interference; only QM-scoped families are v1
+   :id: ADR_0119
+   :status: accepted
+   :refines: FEAT_0100
+
+   **Context.** medkit is a QM-grade, off-control-path diagnostic surface
+   (:need:`REQ_0910`, :need:`ADR_0111`). Adding SOVD write/action families would
+   let a diagnostic client cause an effect on a live real-time control system for
+   the first time.
+
+   **Decision.** A QM→SC write is **forbidden** by the safety argument:
+   :need:`AFSR_0002` (a reader of integrity ``L_r`` may only receive from a writer
+   of ``L_w >= L_r``) and :need:`TSR_0007` (the SC process holds the *only* write
+   capability to its shared memory); :need:`ADR_0050` rejected cohosting for the
+   same reason. medkit's off-control-path placement (:need:`ADR_0111`) is
+   therefore a load-bearing safety assumption, not a convenience. A diagnostic
+   write into SC state instantiates :need:`AHZ_0001` (cycle starvation / halt) and
+   :need:`AHZ_0002` (erroneous output) — the hazards :need:`ASG_0002` exists to
+   prevent. **Consequence:** of the six write families, only those that touch
+   **no** SC resource ship in v1 (locks — see :need:`ADR_0120`); every
+   SC-affecting family (operations / executions #150, configurations-write #151,
+   bulk-data #152, scripts #153, OTA #154) is gated behind: a HARA update, an
+   SC-rated (ASIL B(D)) command-acceptance gate mediating QM→SC with a safe-state
+   precondition, FTTI-compatible detection (FTTI = 100 ms per :need:`AOU_0006`;
+   internal-fault detection within FTTI/2 = 50 ms per :need:`AFSR_0004`), watchdog
+   interaction (:need:`AOU_0016`), and a strict ``Authenticator`` replacing the
+   permissive :need:`ADR_0118` default (authz + rate-limit + audit). OTA
+   additionally needs its own item-level safety case (replacing the running SC
+   binary terminates the safety function).
+
+   **Alternatives considered.** (a) Ship all write families with gateway-side
+   guards only — rejected, violates :need:`AFSR_0002`. (b) Cohost a write path in
+   the SC process now — rejected per :need:`ADR_0050`. (c) Defer the entire write
+   surface indefinitely — rejected; locks is safe and unblocks future coordinated
+   writes (issue #149).
+
+   **Consequences.** ✅ The QM→SC boundary stays a hard safety invariant rather
+   than a per-feature judgement call. ✅ locks (:need:`ADR_0120`) ships now as the
+   one zero-SC-coupling family. ❌ Every other write family carries a HARA + SC-gate
+   prerequisite before it can land.
+
+.. arch-decision:: Locks are diagnostic-coordination-only QM metadata
+   :id: ADR_0120
+   :status: accepted
+   :refines: FEAT_0100
+
+   **Context.** Of the six SOVD write families, locks is the only one that can be
+   built clean-room in v1 without a HARA update (:need:`ADR_0119`): a lock
+   coordinates diagnostic clients against each other and governs no
+   safety-critical resource.
+
+   **Decision.** The lock registry (:need:`BB_0113`, issue #149) is **in-memory,
+   off the control path, and guards nothing SC**. It is pure QM coordination
+   metadata: at most one live lock per ``(entity-kind, id)`` resource, TTL-expiry
+   auto-release against an injectable clock, ``break_lock`` supervisor override,
+   and ``X-Client-Id`` ownership. It adds **no** edge to the executor / connector
+   binding crates and **no** taktora-runtime dependency, so the extractable-core
+   invariant (:need:`ADR_0111`, :need:`REQ_0916`) holds and the surface stays
+   strictly QM — out of any HARA update. **The moment a lock guards an SC
+   resource, the full write-surface gate of :need:`ADR_0119` applies**: it would
+   become a QM→SC mediator and inherit every prerequisite recorded there.
+
+   **Alternatives considered.** (a) Back locks with an SC-managed resource handle
+   so they actually arbitrate control access — rejected; that is exactly the
+   QM→SC write :need:`ADR_0119` forbids without the full gate. (b) Persist locks
+   across restarts — deferred; in-memory is sufficient for diagnostic-session
+   coordination and adds no durability surface.
+
+   **Consequences.** ✅ locks ships as a strictly-QM v1 feature with no HARA
+   impact. ✅ The extractable core is preserved. ❌ Locks provide no guarantee
+   against a non-diagnostic actor (e.g. the SC process itself) — they coordinate
+   diagnostic clients only, by design.
+
 Building block view
 -------------------
 
@@ -517,6 +590,28 @@ provider seam.
    The seam is the drop-in point for the deferred strict path — real JWT
    validation, RBAC, and enforcement modes (tracking issue #87) — which lands
    without reworking handlers (:need:`ADR_0118`).
+
+.. building-block:: diagnostic lock registry
+   :id: BB_0113
+   :status: implemented
+   :implements: REQ_0940, REQ_0941, REQ_0942, REQ_0943, REQ_0944
+   :links: ADR_0119, ADR_0120, TEST_0925, TEST_0926, TEST_0927
+
+   The lock-registry slice inside ``taktora-medkit-gateway-axum``
+   (:need:`BB_0107`), off the request path. An in-memory ``LockRegistry`` — a
+   ``HashMap`` keyed by ``(entity-kind, id)`` behind a ``Mutex`` — backs the
+   ``POST`` / ``PUT`` / ``DELETE`` routes under
+   ``/api/v1/{apps,components}/{id}/locks`` (the two entity kinds the contract
+   exposes ``/locks`` on), carved out from under the deferred-family ``501``
+   fallback. Acquire returns a contract-shaped ``Lock`` with an absolute RFC3339
+   ``lock_expiration`` (a millisecond TTL in the request); TTL expiry
+   auto-releases against an **injectable** ``Clock`` so the behaviour is
+   deterministic in tests; ``break_lock`` evicts a held lock (supervisor
+   override); ownership is enforced by the ``X-Client-Id`` holder header, and a
+   second client without ``break_lock`` gets ``409``. The registry guards no
+   safety-critical resource and adds no taktora-runtime edge, so the crate stays
+   part of the extractable core (:need:`ADR_0120`). One minimal, zero-dependency
+   ``humantime`` dependency formats the RFC3339 instant. See :need:`ADR_0119`.
 
 .. architecture:: medkit crate decomposition
    :id: ARCH_0080
