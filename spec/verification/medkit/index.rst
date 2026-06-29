@@ -314,3 +314,76 @@ they verify to ``implemented`` and link these tests.
    non-owner ``PUT`` extend of a live lock is ``409``. A registry unit test
    confirms ownership is enforced on extend and release, that a wrong lock id is
    ``404``, and that the registry is in-memory and off the control path.
+
+.. test:: Root advertises the served surface honestly
+   :id: TEST_0936
+   :status: implemented
+   :verifies: REQ_0965
+
+   A unit test over ``root_document`` asserts every served family
+   (data-access, discovery, faults, authentication, locking, triggers,
+   vendor-extensions) advertises ``true`` and every deferred family ``false``,
+   and that the endpoint catalogue lists the global stream and clear-all. A live
+   server confirms the same root over the wire, including the entity-trigger,
+   lock, and auth catalogue entries.
+
+.. test:: Health carries the golden telemetry blocks
+   :id: TEST_0937
+   :status: implemented
+   :verifies: REQ_0967
+
+   A unit test asserts ``health_document`` carries the ``x-medkit-entity-cache``
+   (with real counts plus ``capacity``), ``x-medkit-data-provider``, and
+   ``x-medkit-subscription-executor`` blocks field-complete. Over a live server
+   the response additionally carries a numeric ``timestamp`` stamped at the HTTP
+   edge.
+
+.. test:: Global fault clear-all acknowledges
+   :id: TEST_0938
+   :status: implemented
+   :verifies: REQ_0964
+
+   Over a live server, ``DELETE /api/v1/faults`` returns ``204``.
+
+.. test:: Auth disable is 404, not 501
+   :id: TEST_0939
+   :status: implemented
+   :verifies: REQ_0968
+
+   Over a live server with auth enabled (default), ``POST /api/v1/auth/token``
+   issues a ``200`` token; with ``auth_enabled = false`` the same call returns a
+   contract-shaped ``404`` (``error_code: not-found``), distinct from the ``501``
+   deferred fallback.
+
+.. test:: Lock reads expose the owner view
+   :id: TEST_0940
+   :status: implemented
+   :verifies: REQ_0963
+
+   Over a live server, after acquiring a lock as ``alice``, ``GET …/locks``
+   returns a one-item collection with ``owned: true``; a ``GET`` of the detail
+   with no ``X-Client-Id`` returns ``owned: false``; an unknown lock id is
+   ``404``. A registry unit test confirms list/detail surface the live lock with
+   the owner-derived flag, echo the scopes, and omit an expired lock.
+
+.. test:: Entity-scoped triggers are pinned and isolated
+   :id: TEST_0941
+   :status: implemented
+   :verifies: REQ_0962
+
+   Over a live server, ``POST /api/v1/apps/{id}/triggers`` pins ``entity_id`` to
+   the path entity regardless of the body; the entity-scoped list returns it; a
+   fetch of that trigger under a different entity is ``404``; the owning entity
+   fetches (``200``) and deletes (``204``) it. A store unit test confirms
+   entity-scoped listing and in-place update.
+
+.. test:: Global stream replays the ring and honours Last-Event-ID
+   :id: TEST_0942
+   :status: implemented
+   :verifies: REQ_0961, REQ_0966
+
+   Over a live server driven by a provider whose snapshot changes between polls,
+   a fault raised before any client connects is replayed from the ring on a
+   fresh connect to ``/api/v1/faults/stream`` (no trigger registered — the global
+   stream is unfiltered). A reconnect with a ``Last-Event-ID`` past every
+   retained id suppresses the replay.

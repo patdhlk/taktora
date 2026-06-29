@@ -422,6 +422,45 @@ arc42 §4.
    against a non-diagnostic actor (e.g. the SC process itself) — they coordinate
    diagnostic clients only, by design.
 
+.. arch-decision:: Tier-A wire-compatibility parity pass
+   :id: ADR_0125
+   :status: accepted
+   :links: REQ_0961, REQ_0962, REQ_0963, REQ_0964, REQ_0965, REQ_0966, REQ_0967, REQ_0968
+
+   **Context.** A gap analysis of the served surface against the captured
+   contract found breaks *inside* families already nominally implemented: the
+   global ``/faults/stream`` was absent (the diff stream lived only at
+   ``/triggers/events``); triggers were mounted only globally, not per entity as
+   the contract paths require; locks exposed no ``GET``; there was no global
+   ``DELETE /faults``; the root capability flags advertised served extensions as
+   ``false``; the SSE stream had no keep-alive or reconnect replay; the health
+   document omitted the golden ``x-medkit-*`` telemetry blocks; and auth was
+   always mounted, so it could not match an upstream started with auth off. Each
+   would surface a drop-in ``ros2_medkit`` client to a 404/parse-error/skip even
+   though the family was "done".
+
+   **Decision.** Land these as one cohesive parity pass (:need:`REQ_0961` –
+   :need:`REQ_0968`), all in ``gateway-axum`` plus the ``view.rs`` root/health
+   documents, touching no binding crate. The pass is strictly QM and adds **no**
+   write to a safety-critical resource — the global clear-all is a shape-only
+   ``204`` acknowledgement like the per-entity fault ``DELETE`` — so
+   :need:`ADR_0119` is untouched and no HARA update is triggered. The honest
+   capability advertisement (:need:`REQ_0965`) makes the served-vs-deferred
+   boundary machine-readable at the root.
+
+   **Alternatives.** (a) Treat the trigger surface as "good enough" globally —
+   rejected; a path-hardcoding client reaches triggers only at
+   ``/{collection}/{id}/triggers``. (b) Repoint the trigger stream rather than
+   add ``/faults/stream`` — rejected; the contract has *both*, with distinct
+   semantics (global vs trigger-filtered).
+
+   **Consequences.** ✅ A read/coordination ``ros2_medkit`` client (dashboards,
+   monitors, fault viewers) is now drop-in. ✅ No safety entanglement; the
+   ``501`` write families remain the documented boundary. ❌ Full wire
+   compatibility still excludes the write/action families gated by
+   :need:`ADR_0119`. ❌ The health provider/executor telemetry stays best-effort
+   (zeros) until a richer provider lands (:need:`REQ_0967`).
+
 Building block view
 -------------------
 
@@ -612,6 +651,21 @@ provider seam.
    safety-critical resource and adds no taktora-runtime edge, so the crate stays
    part of the extractable core (:need:`ADR_0120`). One minimal, zero-dependency
    ``humantime`` dependency formats the RFC3339 instant. See :need:`ADR_0119`.
+
+.. building-block:: SSE replay ring + keep-alive
+   :id: BB_0120
+   :status: open
+   :implements: REQ_0961, REQ_0966
+
+   A bounded (100-event) replay ring retained alongside the change-event
+   broadcast in ``gateway-axum``'s ``triggers`` module. A shared SSE builder
+   subscribes the live broadcast, snapshots the ring (filtered by
+   ``Last-Event-ID`` and the endpoint's pass predicate), replays it, then chains
+   the live stream — dropping anything already replayed so the hand-off neither
+   gaps nor duplicates — and attaches a ``:keepalive`` comment interval. The
+   global ``/faults/stream`` (pass = all), ``/triggers/events`` (pass = any
+   registered trigger), and per-trigger ``…/events`` (pass = that trigger) all
+   build on it. Off the control path; no taktora-runtime edge.
 
 .. architecture:: medkit crate decomposition
    :id: ARCH_0080

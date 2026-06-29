@@ -231,14 +231,40 @@ fn api_router() -> Router<ServerState> {
         )
         .route(
             &format!("{API_BASE}/health"),
-            get(|State(view): State<AppState>| async move { Json(view.health_document()) }),
+            get(|State(view): State<AppState>| async move {
+                // The structural blocks come from the (clock-free, testable)
+                // resolver; the wall-clock `timestamp` is stamped here at the
+                // edge so the golden's field is present (`REQ_0967`).
+                let mut doc = view.health_document();
+                if let Value::Object(map) = &mut doc {
+                    let nanos = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_nanos());
+                    map.insert(
+                        "timestamp".to_owned(),
+                        json!(u64::try_from(nanos).unwrap_or(u64::MAX)),
+                    );
+                }
+                Json(doc)
+            }),
         )
         .route(
             &format!("{API_BASE}/faults"),
             get(|State(view): State<AppState>, uri: Uri| async move {
                 let filter = status_filter(&uri)?;
                 Ok::<_, ApiError>(ok(&view.global_faults(filter)))
-            }),
+            })
+            // Global clear-all (`REQ_0964`). The read-only skeleton cannot mutate
+            // the snapshot, so — like the per-entity fault DELETE — this is a
+            // shape-compatible `204` acknowledgement, not a write-through. A real
+            // clear lands with the binding write-path under the `ADR_0119` gate.
+            .delete(|| async { StatusCode::NO_CONTENT }),
+        )
+        // The contract's canonical **global** fault SSE stream (`REQ_0961`); the
+        // trigger-filtered stream stays at `/triggers/events`.
+        .route(
+            &format!("{API_BASE}/faults/stream"),
+            get(triggers::faults_stream),
         )
         .merge(kind_routes(
             EntityKind::Area,
@@ -277,6 +303,14 @@ fn api_router() -> Router<ServerState> {
             &format!("{API_BASE}/triggers/{{id}}"),
             get(triggers::get_trigger).delete(triggers::delete_trigger),
         )
+        // Entity-scoped triggers (`REQ_0962`): the contract mounts triggers per
+        // entity (`/{collection}/{id}/triggers…`), so a path-hardcoding client
+        // reaches them where it expects. Backed by the same store as the global
+        // surface above; carved out from under the `deferred` `501` fallback.
+        .merge(triggers::trigger_routes(EntityKind::Area))
+        .merge(triggers::trigger_routes(EntityKind::Component))
+        .merge(triggers::trigger_routes(EntityKind::App))
+        .merge(triggers::trigger_routes(EntityKind::Function))
         // SOVD diagnostic-scoped exclusive access (`REQ_0940`–`REQ_0944`, issue
         // #149), carved out from under the `deferred` fallback for the two entity
         // kinds the contract exposes `/locks` on (apps, components). Guards no SC
@@ -310,9 +344,14 @@ fn router_with_state(
     config: &GatewayConfig,
     authenticator: Arc<dyn Authenticator>,
 ) -> Router {
-    let mut app = api_router()
-        .with_state(state)
-        .merge(auth::auth_router(API_BASE, authenticator));
+    let auth_routes = if config.auth_enabled {
+        auth::auth_router(API_BASE, authenticator)
+    } else {
+        // Demo parity: auth off → `/auth/*` is absent (`404`), not deferred
+        // (`501`) (`REQ_0968`).
+        auth::auth_disabled_router(API_BASE)
+    };
+    let mut app = api_router().with_state(state).merge(auth_routes);
 
     if let Some(layer) = cors_layer(&config.cors) {
         app = app.layer(layer);
@@ -456,9 +495,9 @@ pub async fn serve_listener_with_provider<P: Provider + Send + 'static>(
         provider.snapshot(),
         manifest.clone(),
     ));
-    let (state, view_tx, events) = triggers::live_state(Arc::clone(&initial));
+    let (state, view_tx, events, ring) = triggers::live_state(Arc::clone(&initial));
     tokio::spawn(triggers::refresh_loop(
-        provider, manifest, initial, view_tx, events, cadence,
+        provider, manifest, initial, view_tx, events, ring, cadence,
     ));
     axum::serve(
         listener,
