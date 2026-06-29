@@ -78,6 +78,16 @@ pub struct GatewayConfig {
     pub rate_limit: Option<RateLimit>,
     /// Optional TLS (plaintext when `None`).
     pub tls: Option<TlsConfig>,
+    /// Whether the `/api/v1/auth/*` token endpoints are mounted (`REQ_0968`).
+    ///
+    /// Default `true`: the dev-friendly permissive [`Authenticator`](crate::Authenticator) is mounted
+    /// and answers `200`. Set `false` for **demo parity** with an upstream
+    /// `ros2_medkit` started with auth disabled — the auth routes then answer a
+    /// contract-shaped `404` (the family is *absent*, not deferred), so a client
+    /// probing `/auth/*` learns auth is off rather than receiving an unusable
+    /// token. Enforcement of issued tokens (real JWT/RBAC) stays deferred to #87
+    /// regardless of this flag.
+    pub auth_enabled: bool,
     /// The grouping [`Manifest`] applied when building the read-model: declared
     /// Areas/Components become entities and the binding-emitted raw entities are
     /// re-parented under them (`REQ_0921`). `None` or empty leaves grouping flat
@@ -93,6 +103,7 @@ impl Default for GatewayConfig {
             cors: CorsConfig::default(),
             rate_limit: None,
             tls: None,
+            auth_enabled: true,
             manifest: None,
         }
     }

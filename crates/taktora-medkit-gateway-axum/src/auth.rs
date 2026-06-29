@@ -289,6 +289,28 @@ pub fn auth_router(api_base: &str, auth: AuthState) -> Router {
         .with_state(auth)
 }
 
+/// A contract-shaped `404` for an `/auth/*` path (`REQ_0968`). Used when auth is
+/// disabled, so the family reads as *absent* rather than deferred (`501`).
+async fn auth_absent() -> Response {
+    let body = GenericError {
+        error_code: "not-found".to_owned(),
+        message: "Authentication is not enabled on this gateway".to_owned(),
+        parameters: BTreeMap::new(),
+    };
+    (StatusCode::NOT_FOUND, Json(body)).into_response()
+}
+
+/// The `/api/v1/auth/*` routes when auth is **disabled** (`REQ_0968`): the three
+/// paths are bound to a `404` so the surface matches an upstream `ros2_medkit`
+/// started with auth off, instead of falling through to the `501` deferred
+/// fallback (which would mis-signal "not yet implemented").
+pub fn auth_disabled_router(api_base: &str) -> Router {
+    Router::new()
+        .route(&format!("{api_base}/auth/token"), post(auth_absent))
+        .route(&format!("{api_base}/auth/authorize"), post(auth_absent))
+        .route(&format!("{api_base}/auth/revoke"), post(auth_absent))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

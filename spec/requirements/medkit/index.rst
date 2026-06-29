@@ -498,6 +498,112 @@ Requirements
    only; the moment a lock guards an SC resource, the write-surface safety gate
    (:need:`ADR_0119`) applies.
 
+Wire-compatibility parity pass (Tier A)
+---------------------------------------
+
+The fixes below close gaps *inside* the already-served surface — places a
+path/field-hardcoding ``ros2_medkit`` client would break even though the family
+is nominally implemented (:need:`ADR_0125`). They add no write to a
+safety-critical resource (:need:`ADR_0119` is untouched).
+
+.. req:: Global fault SSE stream
+   :id: REQ_0961
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0120, ADR_0125, TEST_0942
+
+   The gateway shall serve the contract's canonical **global** fault event
+   stream at ``GET /api/v1/faults/stream`` as Server-Sent Events, emitting every
+   change event unfiltered in the captured golden frame shape
+   (``contract/golden/faults_stream_sse_sample.txt``). The trigger-filtered
+   stream remains at ``/api/v1/triggers/events``.
+
+.. req:: Entity-scoped triggers
+   :id: REQ_0962
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0111, ADR_0125, TEST_0941
+
+   The gateway shall expose triggers per entity at
+   ``/{collection}/{id}/triggers`` (list, create, get, update, delete) plus the
+   per-trigger SSE stream at ``…/{trigger_id}/events``, for every entity kind. A
+   trigger created under an entity shall be pinned to that entity, the
+   entity-scoped list shall return only that entity's triggers, and a fetch of
+   one entity's trigger under another entity shall be ``404``.
+
+.. req:: Lock read endpoints
+   :id: REQ_0963
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0113, ADR_0120, TEST_0940
+
+   The gateway shall serve ``GET /{collection}/{id}/locks`` (list) and
+   ``GET …/locks/{lock_id}`` (detail) on the lock-bearing kinds (apps,
+   components). ``X-Client-Id`` shall be optional on a read and determine only
+   the ``owned`` flag; an expired lock shall be omitted and an unknown lock id
+   shall be ``404``.
+
+.. req:: Global fault clear-all
+   :id: REQ_0964
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0107, ADR_0119, ADR_0125, TEST_0938
+
+   The gateway shall answer ``DELETE /api/v1/faults`` with ``204``. As with the
+   per-entity fault ``DELETE``, the read-only skeleton acknowledges the
+   clear-all without mutating state; a real write-through lands with the binding
+   write-path under the :need:`ADR_0119` gate.
+
+.. req:: Honest capability advertisement
+   :id: REQ_0965
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0106, ADR_0125, TEST_0936
+
+   The root document (``GET /api/v1/``) shall advertise a capability flag as
+   ``true`` exactly when the gateway mounts that family's routes, and its
+   endpoint catalogue shall list the served vendor extensions (the global
+   stream, clear-all, triggers, locks, auth). A capability-gating client shall
+   thereby neither skip a working family nor probe a deferred one.
+
+.. req:: SSE keep-alive and reconnect replay
+   :id: REQ_0966
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0120, ADR_0125, TEST_0942
+
+   Every SSE endpoint shall hold the connection open with a ``:keepalive``
+   comment on an idle interval, and shall replay a bounded ring of recent events
+   on connect — filtered by the client's ``Last-Event-ID`` when present — before
+   switching to the live broadcast, so a brief disconnect drops no events. The
+   hand-off shall neither gap nor duplicate events.
+
+.. req:: Health telemetry shape
+   :id: REQ_0967
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0106, ADR_0125, TEST_0937
+
+   The ``GET /api/v1/health`` document shall carry the golden's ``x-medkit-*``
+   telemetry blocks (entity-cache, data-provider, subscription-executor),
+   field-complete, plus a wall-clock ``timestamp``. The entity-cache counts
+   shall be real; the provider/executor blocks are best-effort placeholders
+   (benign zeros) until a richer provider lands, so a field-hardcoding client
+   never hits a missing key.
+
+.. req:: Auth disable parity
+   :id: REQ_0968
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0112, ADR_0125, TEST_0939
+
+   The ``/api/v1/auth/*`` endpoints shall be mountable or absent by
+   configuration. When auth is disabled the three paths shall answer a
+   contract-shaped ``404`` (the family is *absent*, matching an upstream
+   ``ros2_medkit`` started with auth off), not the ``501`` deferred fallback.
+   Enforcement of issued tokens (real JWT/RBAC) remains deferred to #87
+   regardless of the flag (:need:`REQ_0938`).
+
 Requirements at a glance
 ------------------------
 

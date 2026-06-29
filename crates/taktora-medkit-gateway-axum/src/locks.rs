@@ -93,6 +93,20 @@ pub struct Lock {
     pub scopes: Option<Vec<String>>,
 }
 
+/// The list envelope for `GET /{entity}/{id}/locks`: `items` plus the
+/// `x-medkit.total_count` the collection shape carries.
+#[derive(Debug, Serialize)]
+pub struct LockList {
+    items: Vec<Lock>,
+    #[serde(rename = "x-medkit")]
+    x_medkit: LockListMeta,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LockListMeta {
+    total_count: usize,
+}
+
 /// A lock-lifecycle failure, mapped to a contract-shaped [`ApiError`] by the
 /// handlers with the offending resource/lock context attached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,12 +119,28 @@ pub enum LockError {
     NotFound,
 }
 
-/// One held lock: its id, the holder (`X-Client-Id`), and the absolute expiry.
+/// One held lock: its id, the holder (`X-Client-Id`), the absolute expiry, and
+/// any coordination scopes (echoed back on reads as well as on acquire).
 #[derive(Debug, Clone)]
 struct LockEntry {
     lock_id: String,
     holder: String,
     expires_at: SystemTime,
+    scopes: Option<Vec<String>>,
+}
+
+impl LockEntry {
+    /// Render this entry as the contract [`Lock`] from `requester`'s viewpoint:
+    /// `owned` is `true` only when `requester` is the holder (a read with no
+    /// `X-Client-Id` sees `owned: false`).
+    fn to_lock(&self, requester: Option<&str>) -> Lock {
+        Lock {
+            id: self.lock_id.clone(),
+            owned: requester == Some(self.holder.as_str()),
+            lock_expiration: format_rfc3339(self.expires_at),
+            scopes: self.scopes.clone(),
+        }
+    }
 }
 
 /// The resource a lock is scoped to: an entity kind plus its id.
@@ -168,6 +198,7 @@ impl LockRegistry {
                     lock_id: lock_id.clone(),
                     holder,
                     expires_at,
+                    scopes: scopes.clone(),
                 },
             );
         }
@@ -177,6 +208,30 @@ impl LockRegistry {
             lock_expiration: format_rfc3339(expires_at),
             scopes,
         })
+    }
+
+    /// List the live locks on `key` from `requester`'s viewpoint (`REQ_0963`).
+    ///
+    /// At most one lock is live per resource, so this returns a 0- or 1-element
+    /// vector; an expired lock is omitted (treated as released).
+    fn list_for(&self, key: &ResourceKey, requester: Option<&str>) -> Vec<Lock> {
+        let now = self.clock.now();
+        let map = self.locks.lock().expect("lock registry poisoned");
+        map.get(key)
+            .filter(|entry| entry.expires_at > now)
+            .map(|entry| entry.to_lock(requester))
+            .into_iter()
+            .collect()
+    }
+
+    /// Fetch a single live lock by id from `requester`'s viewpoint, or `None` if
+    /// no live lock with that id is held on `key` (`REQ_0963`).
+    fn get_one(&self, key: &ResourceKey, lock_id: &str, requester: Option<&str>) -> Option<Lock> {
+        let now = self.clock.now();
+        let map = self.locks.lock().expect("lock registry poisoned");
+        map.get(key)
+            .filter(|entry| entry.lock_id == lock_id && entry.expires_at > now)
+            .map(|entry| entry.to_lock(requester))
     }
 
     /// Extend a live lock owned by `holder` to a new TTL.
@@ -246,6 +301,18 @@ fn client_id(headers: &HeaderMap) -> Result<String, ApiError> {
     }
 }
 
+/// Read the optional `X-Client-Id` on a GET: present and in range yields the
+/// holder identity (so `owned` can be computed), absent/invalid yields `None`
+/// (the read still succeeds, just with `owned: false`). Reads, unlike
+/// mutations, do not require the header.
+fn client_id_opt(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-client-id")
+        .and_then(|v| v.to_str().ok())
+        .filter(|value| (1..=256).contains(&value.chars().count()))
+        .map(ToOwned::to_owned)
+}
+
 /// Map a [`LockError`] to a contract-shaped [`ApiError`] with resource context.
 fn lock_error(error: LockError, kind: EntityKind, id: &str, lock_id: Option<&str>) -> ApiError {
     let mut parameters = BTreeMap::from([
@@ -295,11 +362,39 @@ pub fn lock_routes(kind: EntityKind) -> Router<ServerState> {
                         .map_err(|e| lock_error(e, kind, &id, None))?;
                     Ok::<_, ApiError>((StatusCode::CREATED, Json(lock)))
                 },
+            )
+            .get(
+                // `GET /{entity}/{id}/locks` — list live locks (`REQ_0963`).
+                // `X-Client-Id` is optional here; it only decides `owned`.
+                move |State(state): State<ServerState>,
+                      Path(id): Path<String>,
+                      headers: HeaderMap| async move {
+                    let requester = client_id_opt(&headers);
+                    let items = state.locks().list_for(&(kind, id), requester.as_deref());
+                    let total_count = items.len();
+                    Json(LockList {
+                        items,
+                        x_medkit: LockListMeta { total_count },
+                    })
+                },
             ),
         )
         .route(
             &item,
-            axum::routing::put(
+            axum::routing::get(
+                // `GET /{entity}/{id}/locks/{lock_id}` — single lock (`REQ_0963`).
+                move |State(state): State<ServerState>,
+                      Path((id, lock_id)): Path<(String, String)>,
+                      headers: HeaderMap| async move {
+                    let requester = client_id_opt(&headers);
+                    state
+                        .locks()
+                        .get_one(&(kind, id.clone()), &lock_id, requester.as_deref())
+                        .map(Json)
+                        .ok_or_else(|| lock_error(LockError::NotFound, kind, &id, Some(&lock_id)))
+                },
+            )
+            .put(
                 move |State(state): State<ServerState>,
                       Path((id, lock_id)): Path<(String, String)>,
                       headers: HeaderMap,
@@ -446,6 +541,49 @@ mod tests {
                 .is_ok(),
             "resource is free after release"
         );
+    }
+
+    /// `REQ_0963` — reads surface the live lock and compute `owned` from the
+    /// requester; an expired lock is omitted and a wrong id is `None`.
+    #[test]
+    fn reads_surface_live_lock_with_owner_view() {
+        let clock = TestClock::new(0);
+        let reg = LockRegistry::with_clock(Box::new(clock.clone()));
+        let lock = reg
+            .acquire(
+                key("c1"),
+                "alice".to_owned(),
+                1_000,
+                false,
+                Some(vec!["s".to_owned()]),
+            )
+            .expect("acquire");
+
+        // List as the owner -> owned: true, scopes echoed.
+        let owned = reg.list_for(&key("c1"), Some("alice"));
+        assert_eq!(owned.len(), 1);
+        assert!(owned[0].owned);
+        assert_eq!(
+            owned[0].scopes.as_deref(),
+            Some(["s".to_owned()].as_slice())
+        );
+
+        // List as a stranger (or anonymous) -> owned: false.
+        assert!(!reg.list_for(&key("c1"), Some("bob"))[0].owned);
+        assert!(!reg.list_for(&key("c1"), None)[0].owned);
+
+        // Detail by id, then a wrong id -> None.
+        assert_eq!(
+            reg.get_one(&key("c1"), &lock.id, Some("alice"))
+                .map(|l| l.owned),
+            Some(true)
+        );
+        assert!(reg.get_one(&key("c1"), "lck-999", None).is_none());
+
+        // Past the TTL the resource reads as empty (auto-released).
+        clock.advance(1_500);
+        assert!(reg.list_for(&key("c1"), Some("alice")).is_empty());
+        assert!(reg.get_one(&key("c1"), &lock.id, Some("alice")).is_none());
     }
 
     /// The RFC3339 expiry is the absolute instant `now + ttl`, formatted as a

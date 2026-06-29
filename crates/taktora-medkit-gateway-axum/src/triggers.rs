@@ -34,33 +34,48 @@
 //! predicates (data-value thresholds, debounce, boolean composition) are
 //! deferred to issue #87.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Json;
+use axum::Router;
 use axum::extract::{FromRef, Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use axum::response::sse::{Event, Sse};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::routing::get;
 use serde::{Deserialize, Serialize};
-use taktora_medkit_gateway::view::collection_segment;
+use taktora_medkit_gateway::view::{API_BASE, collection_segment};
 use taktora_medkit_gateway::{FaultStatusFilter, Manifest, MergedView};
 use taktora_medkit_model::{
     EntityKind, FaultEvent, FaultEventMeta, FaultSummary, GenericError, Health, Severity,
 };
 use taktora_medkit_provider::{Provider, severity_to_health};
 use tokio::sync::{broadcast, watch};
-use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::{Stream, StreamExt};
 
 use crate::error::ApiError;
 use crate::locks::LockRegistry;
 
 /// How many change events the broadcast channel buffers for a slow subscriber.
 const EVENT_BUFFER: usize = 256;
+
+/// How many recent events the replay ring retains for a reconnecting client
+/// (`REQ_0966`). Mirrors the upstream `ros2_medkit` 100-event reconnect buffer:
+/// a fresh SSE connection replays this ring (filtered by `Last-Event-ID`) before
+/// switching to the live broadcast, so a brief disconnect drops no events.
+const REPLAY_RING: usize = 100;
+
+/// The SSE keep-alive cadence: a `:keepalive` comment every 30s holds the
+/// connection open through idle periods and proxies (`REQ_0966`).
+const KEEPALIVE_SECS: u64 = 30;
+
+/// The retained replay ring of recent events, newest at the back.
+type EventRing = Arc<Mutex<VecDeque<StreamEvent>>>;
 
 /// One broadcast item: a sequence id plus the golden-shaped [`FaultEvent`].
 #[derive(Clone, Debug)]
@@ -141,6 +156,24 @@ impl TriggerStore {
         self.triggers.iter().find(|t| t.id == id).cloned()
     }
 
+    /// Replace the filter of an existing trigger (`PUT`); `None` if absent.
+    fn update(&mut self, id: &str, spec: TriggerSpec) -> Option<Trigger> {
+        let trigger = self.triggers.iter_mut().find(|t| t.id == id)?;
+        trigger.entity_id = spec.entity_id;
+        trigger.severity = spec.severity;
+        Some(trigger.clone())
+    }
+
+    /// The triggers scoped to `entity_id`, for the entity-scoped list
+    /// (`REQ_0962`).
+    fn list_for_entity(&self, entity_id: &str) -> Vec<Trigger> {
+        self.triggers
+            .iter()
+            .filter(|t| t.entity_id.as_deref() == Some(entity_id))
+            .cloned()
+            .collect()
+    }
+
     fn remove(&mut self, id: &str) -> bool {
         let before = self.triggers.len();
         self.triggers.retain(|t| t.id != id);
@@ -163,6 +196,7 @@ pub struct ServerState {
     view: watch::Receiver<Arc<MergedView>>,
     triggers: Arc<Mutex<TriggerStore>>,
     events: broadcast::Sender<StreamEvent>,
+    ring: EventRing,
     locks: Arc<LockRegistry>,
 }
 
@@ -189,9 +223,20 @@ impl ServerState {
             view,
             triggers: Arc::new(Mutex::new(TriggerStore::default())),
             events,
+            ring: Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_RING))),
             locks: Arc::new(LockRegistry::system()),
         }
     }
+}
+
+/// Append `event` to the bounded replay ring, evicting the oldest once full
+/// (`REQ_0966`).
+fn retain(ring: &Mutex<VecDeque<StreamEvent>>, event: StreamEvent) {
+    let mut ring = ring.lock().expect("event ring poisoned");
+    if ring.len() == REPLAY_RING {
+        ring.pop_front();
+    }
+    ring.push_back(event);
 }
 
 impl FromRef<ServerState> for Arc<MergedView> {
@@ -277,20 +322,209 @@ fn render(event: &StreamEvent) -> Event {
         .expect("FaultEvent serializes to JSON")
 }
 
-/// `GET /api/v1/triggers/events` — the SSE stream of change events matching any
-/// registered trigger (`REQ_0934`).
-pub async fn events_stream(State(state): State<ServerState>) -> impl IntoResponse {
-    let receiver = state.events.subscribe();
-    let triggers = Arc::clone(&state.triggers);
-    let stream = BroadcastStream::new(receiver).filter_map(move |result| {
+/// The `Last-Event-ID` an SSE client sends on reconnect (the id of the last frame
+/// it received); events at or below it are not replayed (`REQ_0966`).
+fn last_event_id(headers: &HeaderMap) -> Option<u64> {
+    headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse().ok())
+}
+
+/// Build the SSE response shared by every event endpoint (`REQ_0966`).
+///
+/// Replays the retained ring (filtered by `floor` = `Last-Event-ID` and by
+/// `pass`) before switching to the live broadcast, so a brief disconnect drops no
+/// events. The receiver is subscribed *before* the ring is snapshotted, and the
+/// live side drops anything already replayed (`id <= max_replayed`), so the
+/// hand-off neither gaps nor duplicates. A `:keepalive` comment every
+/// [`KEEPALIVE_SECS`] holds the connection open.
+fn build_sse<F>(
+    events: &broadcast::Sender<StreamEvent>,
+    ring: &Mutex<VecDeque<StreamEvent>>,
+    floor: u64,
+    pass: F,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>> + use<F>>
+where
+    F: Fn(&FaultEvent) -> bool + Send + 'static,
+{
+    let receiver = events.subscribe();
+    let replayed: Vec<StreamEvent> = {
+        let ring = ring.lock().expect("event ring poisoned");
+        ring.iter()
+            .filter(|e| e.id > floor && pass(&e.event))
+            .cloned()
+            .collect()
+    };
+    let max_replayed = replayed.iter().map(|e| e.id).max().unwrap_or(floor);
+    let replay = tokio_stream::iter(
+        replayed
+            .into_iter()
+            .map(|e| Ok::<_, Infallible>(render(&e))),
+    );
+    let live = BroadcastStream::new(receiver).filter_map(move |result| {
         let event = result.ok()?;
-        let pass = triggers
-            .lock()
-            .expect("trigger store poisoned")
-            .any_matches(&event.event);
-        pass.then(|| Ok::<_, Infallible>(render(&event)))
+        (event.id > max_replayed && pass(&event.event)).then(|| Ok::<_, Infallible>(render(&event)))
     });
-    Sse::new(stream)
+    Sse::new(replay.chain(live)).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(KEEPALIVE_SECS))
+            .text("keepalive"),
+    )
+}
+
+/// `GET /api/v1/triggers/events` — the SSE stream of change events matching any
+/// registered trigger (`REQ_0934`), with ring replay + keep-alive (`REQ_0966`).
+pub async fn events_stream(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let triggers = Arc::clone(&state.triggers);
+    build_sse(
+        &state.events,
+        &state.ring,
+        last_event_id(&headers).unwrap_or(0),
+        move |event| {
+            triggers
+                .lock()
+                .expect("trigger store poisoned")
+                .any_matches(event)
+        },
+    )
+}
+
+/// `GET /api/v1/faults/stream` — the **global** SSE fault stream (`REQ_0961`).
+///
+/// The contract's canonical fault stream: every change event, unfiltered, in the
+/// golden frame shape (`contract/golden/faults_stream_sse_sample.txt`). taktora's
+/// trigger-filtered stream lives at `/triggers/events`; this is the drop-in
+/// `ros2_medkit` endpoint a path-hardcoding client connects to.
+pub async fn faults_stream(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    build_sse(
+        &state.events,
+        &state.ring,
+        last_event_id(&headers).unwrap_or(0),
+        |_event| true,
+    )
+}
+
+// ---- Entity-scoped triggers (`REQ_0962`) -----------------------------------
+
+/// The contract mounts triggers **per entity** (`/{collection}/{id}/triggers…`),
+/// not just the single global `/triggers` surface. These routes give a
+/// path-hardcoding `ros2_medkit` client the entity-scoped surface it expects: a
+/// trigger created here is pinned to the path entity, the list is filtered to it,
+/// and the per-trigger `…/events` SSE streams just that trigger's matches.
+///
+/// One shared [`TriggerStore`] backs both the global and the entity-scoped
+/// surfaces; entity scoping is by the trigger's `entity_id`.
+pub fn trigger_routes(kind: EntityKind) -> Router<ServerState> {
+    let base = format!("{API_BASE}/{}/{{id}}/triggers", collection_segment(kind));
+    let item = format!("{base}/{{trigger_id}}");
+    let events = format!("{item}/events");
+    Router::new()
+        .route(
+            &base,
+            get(
+                move |State(state): State<ServerState>, Path(id): Path<String>| async move {
+                    let items = state
+                        .triggers
+                        .lock()
+                        .expect("trigger store poisoned")
+                        .list_for_entity(&id);
+                    let total_count = items.len();
+                    Json(TriggerList {
+                        items,
+                        x_medkit: TriggerListMeta { total_count },
+                    })
+                },
+            )
+            .post(
+                move |State(state): State<ServerState>,
+                      Path(id): Path<String>,
+                      Json(mut spec): Json<TriggerSpec>| async move {
+                    // Pin the trigger to the path entity regardless of the body.
+                    spec.entity_id = Some(id);
+                    let trigger = state
+                        .triggers
+                        .lock()
+                        .expect("trigger store poisoned")
+                        .create(spec);
+                    (StatusCode::CREATED, Json(trigger))
+                },
+            ),
+        )
+        .route(
+            &item,
+            get(
+                move |State(state): State<ServerState>,
+                      Path((id, trigger_id)): Path<(String, String)>| async move {
+                    scoped_trigger(&state, &id, &trigger_id).map(Json)
+                },
+            )
+            .put(
+                move |State(state): State<ServerState>,
+                      Path((id, trigger_id)): Path<(String, String)>,
+                      Json(mut spec): Json<TriggerSpec>| async move {
+                    // The trigger must already belong to this entity to update it.
+                    scoped_trigger(&state, &id, &trigger_id)?;
+                    spec.entity_id = Some(id);
+                    state
+                        .triggers
+                        .lock()
+                        .expect("trigger store poisoned")
+                        .update(&trigger_id, spec)
+                        .map(Json)
+                        .ok_or_else(|| ApiError::NotFound(trigger_not_found(&trigger_id)))
+                },
+            )
+            .delete(
+                move |State(state): State<ServerState>,
+                      Path((id, trigger_id)): Path<(String, String)>| async move {
+                    scoped_trigger(&state, &id, &trigger_id)?;
+                    state
+                        .triggers
+                        .lock()
+                        .expect("trigger store poisoned")
+                        .remove(&trigger_id);
+                    Ok::<_, ApiError>(StatusCode::NO_CONTENT)
+                },
+            ),
+        )
+        .route(
+            &events,
+            get(
+                move |State(state): State<ServerState>,
+                      Path((id, trigger_id)): Path<(String, String)>,
+                      headers: HeaderMap| async move {
+                    let trigger = scoped_trigger(&state, &id, &trigger_id)?;
+                    let floor = last_event_id(&headers).unwrap_or(0);
+                    Ok::<_, ApiError>(build_sse(&state.events, &state.ring, floor, move |event| {
+                        trigger.matches(event)
+                    }))
+                },
+            ),
+        )
+}
+
+/// Fetch a trigger and confirm it is scoped to `entity_id`; a missing trigger or
+/// one owned by a different entity is a `404` (the entity-scoped view never
+/// reveals another entity's triggers).
+fn scoped_trigger(
+    state: &ServerState,
+    entity_id: &str,
+    trigger_id: &str,
+) -> Result<Trigger, ApiError> {
+    state
+        .triggers
+        .lock()
+        .expect("trigger store poisoned")
+        .get(trigger_id)
+        .filter(|t| t.entity_id.as_deref() == Some(entity_id))
+        .ok_or_else(|| ApiError::NotFound(trigger_not_found(trigger_id)))
 }
 
 // ---- Refresh-and-diff loop -------------------------------------------------
@@ -299,12 +533,14 @@ pub async fn events_stream(State(state): State<ServerState>) -> impl IntoRespons
 /// diff against the previous view as change events (`REQ_0930`, `REQ_0931`).
 ///
 /// Runs off the request path on the tokio side; detached by the caller.
+#[allow(clippy::too_many_arguments)]
 pub async fn refresh_loop<P: Provider>(
     provider: P,
     manifest: Option<Manifest>,
     initial: Arc<MergedView>,
     view_tx: watch::Sender<Arc<MergedView>>,
     events: broadcast::Sender<StreamEvent>,
+    ring: EventRing,
     cadence: Duration,
 ) {
     let seq = AtomicU64::new(1);
@@ -317,6 +553,9 @@ pub async fn refresh_loop<P: Provider>(
             manifest.clone(),
         ));
         for event in diff_events(&prev, &next, &seq) {
+            // Retain before broadcast so a client reconnecting right after an
+            // event always finds it in the replay ring (`REQ_0966`).
+            retain(&ring, event.clone());
             let _ = events.send(event);
         }
         let _ = view_tx.send(Arc::clone(&next));
@@ -444,17 +683,22 @@ pub fn diff_events(prev: &MergedView, next: &MergedView, seq: &AtomicU64) -> Vec
 }
 
 /// Build the composite state plus the live channel ends for the refresh loop.
+///
+/// Returns the shared replay [`EventRing`] too, so the loop retains each
+/// broadcast event in the same ring the SSE handlers replay from (`REQ_0966`).
 pub fn live_state(
     initial: Arc<MergedView>,
 ) -> (
     ServerState,
     watch::Sender<Arc<MergedView>>,
     broadcast::Sender<StreamEvent>,
+    EventRing,
 ) {
     let (view_tx, view_rx) = watch::channel(initial);
     let (events, _) = broadcast::channel(EVENT_BUFFER);
     let state = ServerState::new(view_rx, events.clone());
-    (state, view_tx, events)
+    let ring = Arc::clone(&state.ring);
+    (state, view_tx, events, ring)
 }
 
 #[cfg(test)]
@@ -602,6 +846,39 @@ mod tests {
         assert!(store.remove(&created.id));
         assert!(store.get(&created.id).is_none());
         assert!(!store.remove(&created.id));
+    }
+
+    /// `REQ_0962` — the store lists triggers by entity and updates in place.
+    #[test]
+    fn store_scopes_by_entity_and_updates() {
+        let mut store = TriggerStore::default();
+        let a = store.create(TriggerSpec {
+            entity_id: Some("app-a".to_owned()),
+            severity: None,
+        });
+        store.create(TriggerSpec {
+            entity_id: Some("app-b".to_owned()),
+            severity: None,
+        });
+
+        // The entity-scoped list never leaks another entity's triggers.
+        let for_a = store.list_for_entity("app-a");
+        assert_eq!(for_a.len(), 1);
+        assert_eq!(for_a[0].id, a.id);
+        assert!(store.list_for_entity("app-c").is_empty());
+
+        // Update replaces the filter; an unknown id is None.
+        let updated = store
+            .update(
+                &a.id,
+                TriggerSpec {
+                    entity_id: Some("app-a".to_owned()),
+                    severity: Some(3),
+                },
+            )
+            .expect("update existing");
+        assert_eq!(updated.severity, Some(3));
+        assert!(store.update("trg-999", TriggerSpec::default()).is_none());
     }
 
     /// `FromRef` exposes the live view snapshot to the read-core handlers.

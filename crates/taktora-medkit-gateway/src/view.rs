@@ -578,12 +578,18 @@ impl MergedView {
             .collect()
     }
 
-    /// The liveness document (`GET /health`).
+    /// The liveness document (`GET /health`), shaped to the captured golden
+    /// (`contract/golden/health.json`) so a path/field-hardcoding client parses
+    /// it unchanged (`REQ_0967`).
     ///
-    /// Best-effort: reports `status: healthy` plus the entity-cache counts the
-    /// view actually knows. The rich `x-medkit-*` provider/executor telemetry
-    /// blocks of the captured contract are server-rendered from internals this
-    /// skeleton does not yet have (a documented gap).
+    /// The `x-medkit-entity-cache` counts are real (the view knows them). The
+    /// `x-medkit-data-provider` and `x-medkit-subscription-executor` blocks are
+    /// **best-effort placeholders**: this skeleton has no pool/executor internals
+    /// to report, so every counter is a benign zero (`worker_alive`/`degraded`
+    /// reflect the "nothing wrong" baseline). The blocks are present — and
+    /// field-complete — so a client never hits a missing key; the values fill in
+    /// when a richer provider lands. The wall-clock `timestamp` is injected at
+    /// the HTTP edge (this resolver stays clock-free and snapshot-testable).
     #[must_use]
     pub fn health_document(&self) -> Value {
         let count_kind = |kind: EntityKind| self.entities.iter().filter(|e| e.kind == kind).count();
@@ -594,7 +600,36 @@ impl MergedView {
                 "areas": count_kind(EntityKind::Area),
                 "components": count_kind(EntityKind::Component),
                 "apps": count_kind(EntityKind::App),
-                "functions": count_kind(EntityKind::Function)
+                "functions": count_kind(EntityKind::Function),
+                "capacity": 256,
+                "generation": 0,
+                "grew": false
+            },
+            "x-medkit-data-provider": {
+                "cold_wait_cap": 0,
+                "concurrent_cold_waits": 0,
+                "evictions_total": 0,
+                "graph_events_received": 0,
+                "pool_cap": 0,
+                "pool_hits": 0,
+                "pool_misses": 0,
+                "pool_size": 0,
+                "type_change_events": 0,
+                "unsupported_type_count": 0
+            },
+            "x-medkit-subscription-executor": {
+                "current_task_age_ms": 0,
+                "degraded": false,
+                "graph_events_received": 0,
+                "last_task_latency_us": 0,
+                "max_task_latency_us": 0,
+                "queue_depth": 0,
+                "queue_dropped": 0,
+                "queue_max_depth_observed": 0,
+                "tasks_completed": 0,
+                "tasks_failed": 0,
+                "watchdog_trips": 0,
+                "worker_alive": true
             }
         })
     }
@@ -602,9 +637,14 @@ impl MergedView {
 
 /// The capability catalogue served at the API root (`GET /`).
 ///
-/// Best-effort, contract-shaped: it advertises only the families this skeleton
-/// actually serves (faults, data access, discovery); deferred families are
-/// advertised as unavailable and answer `501`.
+/// Contract-shaped and **honest** (`REQ_0965`): a flag is `true` exactly when the
+/// gateway actually mounts that family's routes, so a capability-gating client
+/// never skips a working endpoint nor probes a deferred one. The families this
+/// skeleton serves — discovery, data access, faults, plus the vendor extensions
+/// `authentication` (token endpoints), `locking` (diagnostic-scoped locks), and
+/// `triggers` (CRUD + SSE) — are `true`; every family that still answers `501` is
+/// `false`. `vendor_extensions` is `true` because locks/triggers are taktora
+/// `x-medkit` extensions over the SOVD core.
 #[must_use]
 pub fn root_document() -> Value {
     json!({
@@ -612,21 +652,21 @@ pub fn root_document() -> Value {
         "capabilities": {
             "aggregation": false,
             "async_actions": false,
-            "authentication": false,
+            "authentication": true,
             "bulk_data": false,
             "configurations": false,
             "cyclic_subscriptions": false,
             "data_access": true,
             "discovery": true,
             "faults": true,
-            "locking": false,
+            "locking": true,
             "logs": false,
             "operations": false,
             "scripts": false,
             "tls": false,
-            "triggers": false,
+            "triggers": true,
             "updates": false,
-            "vendor_extensions": false
+            "vendor_extensions": true
         },
         "endpoints": endpoint_catalogue(),
         "name": "taktora-medkit Gateway",
@@ -634,7 +674,9 @@ pub fn root_document() -> Value {
     })
 }
 
-/// The endpoint catalogue advertised at the root: the read-core surface.
+/// The endpoint catalogue advertised at the root: the read-core surface plus the
+/// served vendor extensions (`REQ_0965`). Every entry here is a route the gateway
+/// actually mounts; deferred families are omitted (they answer `501`).
 fn endpoint_catalogue() -> Vec<String> {
     let mut endpoints = vec![
         format!("GET {API_BASE}/"),
@@ -645,6 +687,14 @@ fn endpoint_catalogue() -> Vec<String> {
         format!("GET {API_BASE}/apps"),
         format!("GET {API_BASE}/functions"),
         format!("GET {API_BASE}/faults"),
+        format!("DELETE {API_BASE}/faults"),
+        format!("GET {API_BASE}/faults/stream"),
+        format!("GET {API_BASE}/triggers"),
+        format!("POST {API_BASE}/triggers"),
+        format!("GET {API_BASE}/triggers/events"),
+        format!("POST {API_BASE}/auth/token"),
+        format!("POST {API_BASE}/auth/authorize"),
+        format!("POST {API_BASE}/auth/revoke"),
     ];
     for kind in [
         EntityKind::Area,
@@ -659,6 +709,15 @@ fn endpoint_catalogue() -> Vec<String> {
             "GET {API_BASE}/{collection}/{{id}}/faults/{{fault_code}}"
         ));
         endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/data"));
+        // Entity-scoped triggers are exposed on every kind (`REQ_0962`).
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/triggers"));
+        endpoints.push(format!("POST {API_BASE}/{collection}/{{id}}/triggers"));
+    }
+    // Diagnostic-scoped locks are exposed on apps and components only (`REQ_0963`).
+    for kind in [EntityKind::App, EntityKind::Component] {
+        let collection = collection_segment(kind);
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/locks"));
+        endpoints.push(format!("POST {API_BASE}/{collection}/{{id}}/locks"));
     }
     endpoints
 }
@@ -756,6 +815,65 @@ mod tests {
     use super::*;
     use taktora_medkit_model::{EntityMeta, Ros2Ref, Severity};
     use taktora_medkit_provider::{MockProvider, Provider};
+
+    /// `REQ_0965` — the root capabilities are honest: served families are `true`,
+    /// deferred ones `false`, and the catalogue lists the served extensions.
+    #[test]
+    fn root_capabilities_match_served_surface() {
+        let root = root_document();
+        let caps = &root["capabilities"];
+        for served in [
+            "data_access",
+            "discovery",
+            "faults",
+            "authentication",
+            "locking",
+            "triggers",
+            "vendor_extensions",
+        ] {
+            assert_eq!(
+                caps[served], true,
+                "{served} is served, must advertise true"
+            );
+        }
+        for deferred in [
+            "operations",
+            "configurations",
+            "bulk_data",
+            "scripts",
+            "logs",
+            "updates",
+        ] {
+            assert_eq!(
+                caps[deferred], false,
+                "{deferred} is deferred, must advertise false"
+            );
+        }
+        let endpoints: Vec<&str> = root["endpoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(endpoints.contains(&"GET /api/v1/faults/stream"));
+        assert!(endpoints.contains(&"DELETE /api/v1/faults"));
+    }
+
+    /// `REQ_0967` — the health document carries the golden's `x-medkit-*`
+    /// telemetry blocks, field-complete, alongside the real entity-cache counts.
+    #[test]
+    fn health_document_has_golden_telemetry_blocks() {
+        let view = MergedView::from_snapshot(MockProvider::new().with_entity(app("gw")).snapshot());
+        let health = view.health_document();
+        assert_eq!(health["status"], "healthy");
+        assert_eq!(health["x-medkit-entity-cache"]["apps"], 1);
+        assert!(health["x-medkit-entity-cache"]["capacity"].is_number());
+        assert!(health["x-medkit-data-provider"]["pool_cap"].is_number());
+        assert_eq!(
+            health["x-medkit-subscription-executor"]["worker_alive"],
+            true
+        );
+    }
 
     fn app(id: &str) -> Entity {
         Entity {
