@@ -25,12 +25,13 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::{get, put};
 use serde::Serialize;
 use serde_json::{Value, json};
 use taktora_medkit_gateway::view::API_BASE;
 use taktora_medkit_model::GenericError;
-use taktora_medkit_provider::ActionError;
+use taktora_medkit_provider::{ActionError, UpdateRecord};
 
 use crate::error::ApiError;
 use crate::triggers::ServerState;
@@ -79,96 +80,100 @@ fn action_error(error: ActionError, update_id: &str) -> ApiError {
     }
 }
 
+// ---- Handlers (named, so the route factory stays flat) ---------------------
+
+async fn list_updates(State(state): State<ServerState>) -> Json<Collection<UpdateRecord>> {
+    collection(state.actions().updates())
+}
+
+async fn register_update(
+    State(state): State<ServerState>,
+    body: Option<Json<Value>>,
+) -> impl IntoResponse {
+    let spec = body.map_or(Value::Null, |Json(value)| value);
+    (
+        StatusCode::CREATED,
+        Json(state.actions().register_update(spec)),
+    )
+}
+
+async fn get_update(
+    State(state): State<ServerState>,
+    Path(update_id): Path<String>,
+) -> Result<Json<UpdateRecord>, ApiError> {
+    state
+        .actions()
+        .update(&update_id)
+        .map(Json)
+        .map_err(|e| action_error(e, &update_id))
+}
+
+async fn delete_update(
+    State(state): State<ServerState>,
+    Path(update_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .actions()
+        .delete_update(&update_id)
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|e| action_error(e, &update_id))
+}
+
+async fn update_status(
+    State(state): State<ServerState>,
+    Path(update_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .actions()
+        .update(&update_id)
+        .map(|record| Json(json!({ "status": record.status })))
+        .map_err(|e| action_error(e, &update_id))
+}
+
+/// Apply a `state → record` transition (prepare / execute / automated), shaping
+/// the `202 Accepted` response and mapping errors. Keeps the three transition
+/// handlers a single line each.
+fn transitioned(
+    result: Result<UpdateRecord, ActionError>,
+    update_id: &str,
+) -> Result<(StatusCode, Json<UpdateRecord>), ApiError> {
+    result
+        .map(|record| (StatusCode::ACCEPTED, Json(record)))
+        .map_err(|e| action_error(e, update_id))
+}
+
+async fn prepare_update(
+    State(state): State<ServerState>,
+    Path(update_id): Path<String>,
+) -> Result<(StatusCode, Json<UpdateRecord>), ApiError> {
+    transitioned(state.actions().prepare_update(&update_id), &update_id)
+}
+
+async fn execute_update(
+    State(state): State<ServerState>,
+    Path(update_id): Path<String>,
+) -> Result<(StatusCode, Json<UpdateRecord>), ApiError> {
+    transitioned(state.actions().execute_update(&update_id), &update_id)
+}
+
+async fn automated_update(
+    State(state): State<ServerState>,
+    Path(update_id): Path<String>,
+) -> Result<(StatusCode, Json<UpdateRecord>), ApiError> {
+    transitioned(state.actions().automated_update(&update_id), &update_id)
+}
+
 /// The global updates routes, mounted under `/updates` (`REQ_0974`). Unlike the
-/// per-entity write families, this factory takes no kind and is mounted once.
+/// per-entity write families, this factory takes no kind and is mounted once. The
+/// handlers are named (above) so this stays a flat wiring of routes.
 pub fn update_routes() -> Router<ServerState> {
     let base = format!("{API_BASE}/updates");
     let detail = format!("{base}/{{update_id}}");
-    let status = format!("{detail}/status");
-    let prepare = format!("{detail}/prepare");
-    let execute = format!("{detail}/execute");
-    let automated = format!("{detail}/automated");
     Router::new()
-        .route(
-            &base,
-            get(|State(state): State<ServerState>| async move {
-                collection(state.actions().updates())
-            })
-            .post(
-                |State(state): State<ServerState>, body: Option<Json<Value>>| async move {
-                    let spec = body.map_or(Value::Null, |Json(value)| value);
-                    let record = state.actions().register_update(spec);
-                    (StatusCode::CREATED, Json(record))
-                },
-            ),
-        )
-        .route(
-            &detail,
-            get(
-                |State(state): State<ServerState>, Path(update_id): Path<String>| async move {
-                    state
-                        .actions()
-                        .update(&update_id)
-                        .map(Json)
-                        .map_err(|e| action_error(e, &update_id))
-                },
-            )
-            .delete(
-                |State(state): State<ServerState>, Path(update_id): Path<String>| async move {
-                    state
-                        .actions()
-                        .delete_update(&update_id)
-                        .map(|()| StatusCode::NO_CONTENT)
-                        .map_err(|e| action_error(e, &update_id))
-                },
-            ),
-        )
-        .route(
-            &status,
-            get(
-                |State(state): State<ServerState>, Path(update_id): Path<String>| async move {
-                    state
-                        .actions()
-                        .update(&update_id)
-                        .map(|record| Json(json!({ "status": record.status })))
-                        .map_err(|e| action_error(e, &update_id))
-                },
-            ),
-        )
-        .route(
-            &prepare,
-            put(
-                |State(state): State<ServerState>, Path(update_id): Path<String>| async move {
-                    state
-                        .actions()
-                        .prepare_update(&update_id)
-                        .map(|record| (StatusCode::ACCEPTED, Json(record)))
-                        .map_err(|e| action_error(e, &update_id))
-                },
-            ),
-        )
-        .route(
-            &execute,
-            put(
-                |State(state): State<ServerState>, Path(update_id): Path<String>| async move {
-                    state
-                        .actions()
-                        .execute_update(&update_id)
-                        .map(|record| (StatusCode::ACCEPTED, Json(record)))
-                        .map_err(|e| action_error(e, &update_id))
-                },
-            ),
-        )
-        .route(
-            &automated,
-            put(
-                |State(state): State<ServerState>, Path(update_id): Path<String>| async move {
-                    state
-                        .actions()
-                        .automated_update(&update_id)
-                        .map(|record| (StatusCode::ACCEPTED, Json(record)))
-                        .map_err(|e| action_error(e, &update_id))
-                },
-            ),
-        )
+        .route(&base, get(list_updates).post(register_update))
+        .route(&detail, get(get_update).delete(delete_update))
+        .route(&format!("{detail}/status"), get(update_status))
+        .route(&format!("{detail}/prepare"), put(prepare_update))
+        .route(&format!("{detail}/execute"), put(execute_update))
+        .route(&format!("{detail}/automated"), put(automated_update))
 }
