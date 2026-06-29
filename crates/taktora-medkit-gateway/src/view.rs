@@ -653,19 +653,19 @@ pub fn root_document() -> Value {
             "aggregation": false,
             "async_actions": false,
             "authentication": true,
-            "bulk_data": false,
-            "configurations": false,
+            "bulk_data": true,
+            "configurations": true,
             "cyclic_subscriptions": false,
             "data_access": true,
             "discovery": true,
             "faults": true,
             "locking": true,
             "logs": false,
-            "operations": false,
-            "scripts": false,
+            "operations": true,
+            "scripts": true,
             "tls": false,
             "triggers": true,
-            "updates": false,
+            "updates": true,
             "vendor_extensions": true
         },
         "endpoints": endpoint_catalogue(),
@@ -692,6 +692,10 @@ fn endpoint_catalogue() -> Vec<String> {
         format!("GET {API_BASE}/triggers"),
         format!("POST {API_BASE}/triggers"),
         format!("GET {API_BASE}/triggers/events"),
+        // Updates are a global family (`REQ_0974`): mounted at the top level, not
+        // per entity, like `/faults` and `/triggers`.
+        format!("GET {API_BASE}/updates"),
+        format!("POST {API_BASE}/updates"),
         format!("POST {API_BASE}/auth/token"),
         format!("POST {API_BASE}/auth/authorize"),
         format!("POST {API_BASE}/auth/revoke"),
@@ -712,12 +716,44 @@ fn endpoint_catalogue() -> Vec<String> {
         // Entity-scoped triggers are exposed on every kind (`REQ_0962`).
         endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/triggers"));
         endpoints.push(format!("POST {API_BASE}/{collection}/{{id}}/triggers"));
+        // Operations + async executions are exposed on every kind (`REQ_0969`).
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/operations"));
+        endpoints.push(format!(
+            "POST {API_BASE}/{collection}/{{id}}/operations/{{op}}/executions"
+        ));
+        // Configurations are exposed on every kind (`REQ_0971`).
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/configurations"));
+        endpoints.push(format!(
+            "PUT {API_BASE}/{collection}/{{id}}/configurations/{{config_id}}"
+        ));
     }
     // Diagnostic-scoped locks are exposed on apps and components only (`REQ_0963`).
     for kind in [EntityKind::App, EntityKind::Component] {
         let collection = collection_segment(kind);
         endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/locks"));
         endpoints.push(format!("POST {API_BASE}/{collection}/{{id}}/locks"));
+    }
+    // Writable bulk-data is exposed on apps and components only (`REQ_0972`).
+    for kind in [EntityKind::App, EntityKind::Component] {
+        let collection = collection_segment(kind);
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/bulk-data"));
+        endpoints.push(format!(
+            "POST {API_BASE}/{collection}/{{id}}/bulk-data/{{category_id}}"
+        ));
+    }
+    // Scripts (storage + executions) are exposed on apps and components only
+    // (`REQ_0973`).
+    for kind in [EntityKind::App, EntityKind::Component] {
+        let collection = collection_segment(kind);
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/scripts"));
+        endpoints.push(format!("POST {API_BASE}/{collection}/{{id}}/scripts"));
+    }
+    // Lifecycle-status (start/restart/shutdown transitions) is exposed on apps
+    // and components only (`REQ_0975`).
+    for kind in [EntityKind::App, EntityKind::Component] {
+        let collection = collection_segment(kind);
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/status"));
+        endpoints.push(format!("PUT {API_BASE}/{collection}/{{id}}/status/start"));
     }
     endpoints
 }
@@ -829,6 +865,11 @@ mod tests {
             "authentication",
             "locking",
             "triggers",
+            "operations",
+            "configurations",
+            "bulk_data",
+            "scripts",
+            "updates",
             "vendor_extensions",
         ] {
             assert_eq!(
@@ -836,19 +877,11 @@ mod tests {
                 "{served} is served, must advertise true"
             );
         }
-        for deferred in [
-            "operations",
-            "configurations",
-            "bulk_data",
-            "scripts",
-            "logs",
-            "updates",
-        ] {
-            assert_eq!(
-                caps[deferred], false,
-                "{deferred} is deferred, must advertise false"
-            );
-        }
+        // `logs` is the last deferred family on the read/write surface.
+        assert_eq!(
+            caps["logs"], false,
+            "logs is deferred, must advertise false"
+        );
         let endpoints: Vec<&str> = root["endpoints"]
             .as_array()
             .unwrap()

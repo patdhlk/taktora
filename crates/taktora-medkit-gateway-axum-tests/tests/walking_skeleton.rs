@@ -235,18 +235,27 @@ async fn deferred_families_return_501() {
     let addr = spawn(GatewayConfig::default()).await;
 
     let deferred = [
-        "/api/v1/components/spark-6723/operations",
-        "/api/v1/components/spark-6723/configurations",
-        "/api/v1/components/spark-6723/bulk-data",
+        // `operations` is a live family now (`REQ_0969`): SOVD async executions
+        // are mounted per kind through the `ActionSink` seam, not deferred.
+        // `configurations` is a live family now (`REQ_0971`): per-entity config
+        // storage is mounted per kind through the same seam, not deferred.
+        // `bulk-data` is a live family now (`REQ_0972`): apps/components expose a
+        // real GET/POST/DELETE file surface through the `ActionSink` seam, so
+        // `…/{id}/bulk-data` is no longer a wholesale-deferred path.
         // `locks` is a live family now (#149): `…/{id}/locks` is a real
         // POST/PUT/DELETE surface, so it is no longer a wholesale-deferred path.
-        "/api/v1/components/spark-6723/scripts",
+        // `scripts` is a live family now (`REQ_0973`): apps/components expose a
+        // real storage + executions surface through the `ActionSink` seam, so
+        // `…/{id}/scripts` is no longer a wholesale-deferred path.
+        // `status` (lifecycle-status) is a live family now (`REQ_0975`):
+        // apps/components expose a real GET/PUT transition surface through the
+        // `ActionSink` seam, so `…/{id}/status` is no longer a deferred path.
         "/api/v1/components/spark-6723/logs",
-        "/api/v1/components/spark-6723/status",
         // `triggers` is a live family now (`REQ_0962`): entity-scoped triggers are
         // mounted per kind, so `…/{id}/triggers` is a real surface, not deferred.
         "/api/v1/components/spark-6723/cyclic-subscriptions",
-        "/api/v1/updates",
+        // `updates` is a live family now (`REQ_0974`): the global software-update
+        // surface is mounted at `/api/v1/updates`, so it is no longer deferred.
         // `/auth/token` is a real POST route now (#86); a bare `/auth` path with
         // no handler still declines via the deferred-family fallback.
         "/api/v1/auth",

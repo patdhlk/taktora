@@ -461,6 +461,42 @@ arc42 §4.
    :need:`ADR_0119`. ❌ The health provider/executor telemetry stays best-effort
    (zeros) until a richer provider lands (:need:`REQ_0967`).
 
+.. arch-decision:: Write plane as a port/adapter seam with a deferred safety gate
+   :id: ADR_0126
+   :status: accepted
+   :links: REQ_0969, REQ_0970
+
+   **Context.** The write/action families (operations, configurations,
+   bulk-data, scripts, updates, lifecycle) were ``501`` by design under
+   :need:`ADR_0119`, which forbids a QM→SC write from the diagnostic plane
+   without a per-family safety case. We want the write *surface* — wire-shape,
+   async-execution model, testability — buildable now without waiting on those
+   safety cases or on deep taktora runtime integration.
+
+   **Decision.** Model the write side as a ports-&-adapters seam mirroring the
+   read ``Provider`` seam: an ``ActionSink`` trait (the facade) the gateway
+   depends on, an in-memory ``SimActionSink`` adapter that **performs no real
+   effect** (executions complete synchronously in memory), and the HTTP handlers
+   as thin adapters over the trait. Because the only adapter is the simulation,
+   **no safety-critical resource is touched**, so :need:`ADR_0119` is not yet
+   engaged — exactly as Locks shipped (real surface, guards nothing). The safety
+   gate re-enters as a ``SafetyGate<RealBindingSink>`` decorator **at this seam**
+   when a real-effect binding lands with deep taktora support; no handler
+   changes.
+
+   **Alternatives.** (a) Wait for the per-family safety cases before any write
+   code — rejected; it blocks the entire surface and its client integration on
+   work that is months out. (b) Implement effects now behind a runtime check —
+   rejected; that *is* the QM→SC write :need:`ADR_0119` forbids without the full
+   gate.
+
+   **Consequences.** ✅ The write surface is shape-complete, wire-compatible, and
+   fully testable against the simulation today. ✅ The safety boundary is
+   preserved — the only backend performs no effect, and the gate has a defined
+   insertion point. ❌ A client cannot yet cause a real effect (by design). ❌
+   The advertised ``operations: true`` capability now means "the surface exists",
+   not "effects occur" — documented here and in :need:`REQ_0969`.
+
 Building block view
 -------------------
 
@@ -666,6 +702,24 @@ provider seam.
    global ``/faults/stream`` (pass = all), ``/triggers/events`` (pass = any
    registered trigger), and per-trigger ``…/events`` (pass = that trigger) all
    build on it. Off the control path; no taktora-runtime edge.
+
+.. building-block:: ActionSink write seam + operations surface
+   :id: BB_0121
+   :status: open
+   :implements: REQ_0969, REQ_0970, REQ_0971, REQ_0972, REQ_0973, REQ_0974, REQ_0975
+
+   The command-side seam, mirroring the read ``Provider`` seam. In
+   ``taktora-medkit-provider``: the ``ActionSink`` trait (operations catalogue,
+   start/list/get/cancel executions), the wire types (``ResourceRef``,
+   ``OperationDef``, ``Execution``, ``ExecutionStatus``, ``ActionError``), and the
+   in-memory ``SimActionSink`` (per-resource catalogue, synchronously-completing
+   echo executions) — zero taktora dependencies, so it stays in the extractable
+   core. In ``taktora-medkit-gateway-axum``: ``actions.rs`` mounts the per-kind
+   ``operation_routes`` as thin adapters over the trait, and ``ServerState``
+   carries an ``Arc<dyn ActionSink>`` (defaulting to an empty ``SimActionSink``,
+   injectable via ``router_with_actions`` / ``serve_listener_with_actions``). The
+   safety gate decorator slots in at the trait when a real binding lands
+   (:need:`ADR_0126`).
 
 .. architecture:: medkit crate decomposition
    :id: ARCH_0080
