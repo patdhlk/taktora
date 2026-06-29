@@ -200,6 +200,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Check for duplicate need-IDs (fast collision guard)
+        run: ./scripts/check-duplicate-need-ids.sh
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:

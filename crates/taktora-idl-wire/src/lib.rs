@@ -4,17 +4,17 @@
 //! codegen emits one [`WireType`] implementation per message; that generated
 //! code calls *only* the primitives in this crate. The split exists so the
 //! safety-relevant (de)serialization path is `no_std`, allocation-free, and
-//! free of `serde`/reflection (`REQ_0934`) — small enough to keep
+//! free of `serde`/reflection (`REQ_0950`) — small enough to keep
 //! Kani/Miri-verifiable — while the policy-heavy emission stays host-side.
 //!
 //! # Contents
 //!
 //! * [`WireType`] — the `encode`/`decode` contract every generated message
-//!   type implements (`REQ_0933`).
+//!   type implements (`REQ_0949`).
 //! * [`WireError`] — the closed error set the path can produce.
 //! * [`ByteOrder`] and the [`pack_unsigned`] / [`pack_signed`] /
 //!   [`unpack_unsigned`] / [`unpack_signed`] free functions — CAN signal
-//!   bit-packing, addressing the two DBC bit-numbering conventions (`REQ_0935`).
+//!   bit-packing, addressing the two DBC bit-numbering conventions (`REQ_0951`).
 //!
 //! The bit primitives take an explicit frame slice and never allocate; a
 //! generated `encode` zeroes its `DLC` bytes and packs each signal in place.
@@ -39,7 +39,7 @@ pub trait WireType: Sized {
     /// least this many bytes.
     ///
     /// This is the backend's wire footprint and need not equal the `idl-core`
-    /// [`max_serialized_len`] of the source type (`REQ_0933`): a backend that
+    /// [`max_serialized_len`] of the source type (`REQ_0949`): a backend that
     /// frames into a fixed envelope reports that envelope. For the CAN backend
     /// it is the message `DLC` — the on-wire frame length — which can exceed the
     /// packed extent of its signals.

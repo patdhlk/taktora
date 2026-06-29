@@ -7,7 +7,7 @@ arc42 §6 — known risks carried by the delivered slice. Each ``risk``
 .. risk:: Unbounded-rejection path unexercised until a second frontend
    :id: RISK_0024
    :status: open
-   :links: ADR_0119, REQ_0942
+   :links: ADR_0123, REQ_0958
 
    DBC is bounded by construction, so nothing in the delivered slice ever
    drives the IR's unbounded-sequence rejection. The first frontend that
@@ -21,7 +21,7 @@ arc42 §6 — known risks carried by the delivered slice. Each ``risk``
 .. risk:: bool/float CAN fields are rejected, not yet supported
    :id: RISK_0025
    :status: open
-   :links: REQ_0940, REQ_0943
+   :links: REQ_0956, REQ_0959
 
    The CAN backend rejects ``bool`` and floating-point signal fields this
    round. The fixture DBC corpus exercised so far does not need them, but

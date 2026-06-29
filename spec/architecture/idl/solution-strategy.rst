@@ -5,7 +5,7 @@ arc42 §5 — the architecture decisions that shape the toolchain. Each
 ``arch-decision`` ``:refines:`` the requirement or feature it serves.
 
 .. arch-decision:: Two planes: a message-plane IR mirroring the device plane
-   :id: ADR_0117
+   :id: ADR_0121
    :status: accepted
    :refines: FEAT_0110
 
@@ -28,7 +28,7 @@ arc42 §5 — the architecture decisions that shape the toolchain. Each
    their parallel structure, so a reader who knows one reads the other.
 
 .. arch-decision:: Split the serde-free wire runtime from host-side codegen
-   :id: ADR_0118
+   :id: ADR_0122
    :status: accepted
    :refines: FEAT_0112
 
@@ -48,7 +48,7 @@ arc42 §5 — the architecture decisions that shape the toolchain. Each
    stable primitive surface — a deliberate, small API boundary.
 
 .. arch-decision:: DBC as the first frontend (bounded by construction)
-   :id: ADR_0119
+   :id: ADR_0123
    :status: accepted
    :refines: FEAT_0113
 
@@ -69,7 +69,7 @@ arc42 §5 — the architecture decisions that shape the toolchain. Each
    lands (tracked as :need:`RISK_0024`).
 
 .. arch-decision:: Plane-generic codegen with a backend trait; CAN is one backend
-   :id: ADR_0120
+   :id: ADR_0124
    :status: accepted
    :refines: FEAT_0114
 

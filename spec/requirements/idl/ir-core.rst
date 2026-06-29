@@ -1,7 +1,7 @@
 Bounded message-type IR
 =======================
 
-The shared bounded message-type IR (:need:`BB_0111`): the plane-generic
+The shared bounded message-type IR (:need:`BB_0117`): the plane-generic
 description of a message — structs, enums, bounded sequences, and
 request/reply services — onto which every frontend lowers. The
 message-plane twin of ``fieldbus-od-core``.
@@ -17,10 +17,10 @@ message-plane twin of ``fieldbus-od-core``.
    finite, compile-time-known serialized-length bound.
 
 .. req:: Boundedness is unrepresentable to violate
-   :id: REQ_0930
+   :id: REQ_0946
    :status: implemented
    :satisfies: FEAT_0111
-   :links: BB_0111, TEST_0920
+   :links: BB_0117, TEST_0928
 
    Every type the IR can express shall have a finite, statically
    computable maximum serialized length. ``String`` and ``Sequence``
@@ -30,10 +30,10 @@ message-plane twin of ``fieldbus-od-core``.
    bound for any validated module.
 
 .. req:: Structural validation before sizing
-   :id: REQ_0931
+   :id: REQ_0947
    :status: implemented
    :satisfies: FEAT_0111
-   :links: BB_0111, TEST_0920
+   :links: BB_0117, TEST_0928
 
    ``Module::validate`` shall reject a module that is not structurally
    sound: a type that references an unknown struct or enum, a duplicate
@@ -43,14 +43,14 @@ message-plane twin of ``fieldbus-od-core``.
    that has validated.
 
 .. req:: Plane-generic, policy-free IR
-   :id: REQ_0932
+   :id: REQ_0948
    :status: implemented
    :satisfies: FEAT_0111
-   :links: BB_0111, TEST_0920
+   :links: BB_0117, TEST_0928
 
    ``taktora-idl-core`` shall name no wire format, no transport, and no
    target language. It shall not depend on ``ethercrab``, ``socketcan``,
    ``proc-macro2``, ``quote``, or any ``taktora-connector-*`` crate.
    Source identifiers shall be carried verbatim; sanitisation to a
-   target-language identifier is a codegen concern (:need:`REQ_0938`),
+   target-language identifier is a codegen concern (:need:`REQ_0954`),
    not an IR one.

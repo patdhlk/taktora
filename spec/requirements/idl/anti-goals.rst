@@ -7,7 +7,7 @@ not do this round, and why. Each rejected requirement ``:satisfies:``
 :need:`FEAT_0110` to keep the umbrella's traceability complete.
 
 .. req:: NO additional frontends this round
-   :id: REQ_0942
+   :id: REQ_0958
    :status: rejected
    :satisfies: FEAT_0110
 
@@ -20,18 +20,18 @@ not do this round, and why. Each rejected requirement ``:satisfies:``
    the same codegen layer (:need:`FEAT_0114`) without an IR break.
 
 .. req:: NO bool or float CAN fields this round
-   :id: REQ_0943
+   :id: REQ_0959
    :status: rejected
    :satisfies: FEAT_0110
 
    ``taktora-idl-codegen-can`` shall **not** emit ``bool`` or
    floating-point signal fields this round; such fields are rejected with
    a backend error. DBC signals lower to integer and enum fields in the
-   delivered slice (:need:`REQ_0940`). Admitting ``bool``/float is a
+   delivered slice (:need:`REQ_0956`). Admitting ``bool``/float is a
    follow-on that touches only the backend, not the IR or wire runtime.
 
 .. req:: NO J1939 application-layer consumer this round
-   :id: REQ_0944
+   :id: REQ_0960
    :status: rejected
    :satisfies: FEAT_0110
 
@@ -72,6 +72,6 @@ in :doc:`../../verification/idl/index`.
 
 .. needtable::
    :types: req
-   :filter: id >= "REQ_0930" and id <= "REQ_0945"
+   :filter: id >= "REQ_0946" and id <= "REQ_0945"
    :columns: id, title, status, satisfies
    :show_filters:
