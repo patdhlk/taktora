@@ -4,7 +4,7 @@ use core::fmt;
 
 /// An error from a [`WireType`](crate::WireType) operation or a bit-packing
 /// primitive. Hand-rolled (no `thiserror`) to keep this crate dependency-free
-/// and `no_std` (`REQ_0934`).
+/// and `no_std` (`REQ_0950`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WireError {

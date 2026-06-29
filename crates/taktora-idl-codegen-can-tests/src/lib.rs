@@ -3,7 +3,7 @@
 //! The generated module (`build.rs` → `$OUT_DIR/vehicle.rs`) is compiled into
 //! this crate and round-tripped in the tests below. This is the slice's
 //! proof-of-life: generated `WireType` code that actually compiles and whose
-//! `encode`/`decode` agree (`TEST_0924`+).
+//! `encode`/`decode` agree (`TEST_0932`+).
 
 #![allow(dead_code)]
 

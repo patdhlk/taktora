@@ -1,7 +1,7 @@
 Wire runtime
 ============
 
-The ``serde``-free, ``no_std`` runtime half (:need:`BB_0112`): the
+The ``serde``-free, ``no_std`` runtime half (:need:`BB_0118`): the
 ``WireType`` trait the generated code implements and the CAN signal
 bit-packing primitives it calls. This is the only layer of the toolchain
 that links into a runtime consumer, so it is kept small enough to keep
@@ -19,10 +19,10 @@ the (de)serialization path auditable.
    the policy-heavy code emission stays host-side.
 
 .. req:: WireType trait surface
-   :id: REQ_0933
+   :id: REQ_0949
    :status: implemented
    :satisfies: FEAT_0112
-   :links: BB_0112, TEST_0924, TEST_0926
+   :links: BB_0118, TEST_0932, TEST_0934
 
    ``taktora-idl-wire`` shall define a ``WireType`` trait carrying a
    ``const MAX_SERIALIZED_LEN: usize`` upper bound, an
@@ -32,10 +32,10 @@ the (de)serialization path auditable.
    caller can size a buffer from the type alone.
 
 .. req:: no_std, allocation-free, serde-free path
-   :id: REQ_0934
+   :id: REQ_0950
    :status: implemented
    :satisfies: FEAT_0112
-   :links: BB_0112, TEST_0924
+   :links: BB_0118, TEST_0932
 
    ``taktora-idl-wire`` shall be ``#![no_std]``, perform no heap
    allocation on the encode/decode path, and depend on no external
@@ -45,10 +45,10 @@ the (de)serialization path auditable.
    remain Kani/Miri-tractable.
 
 .. req:: CAN signal bit-packing primitives
-   :id: REQ_0935
+   :id: REQ_0951
    :status: implemented
    :satisfies: FEAT_0112
-   :links: BB_0112, TEST_0924, TEST_0925, TEST_0926
+   :links: BB_0118, TEST_0932, TEST_0933, TEST_0934
 
    ``taktora-idl-wire`` shall provide signed and unsigned pack/unpack
    primitives over a byte frame addressed by start bit and bit length,

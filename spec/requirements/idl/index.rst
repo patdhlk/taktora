@@ -14,7 +14,7 @@ toolchain) and :doc:`../../requirements/canopen-codegen/index`. Where the
 device-plane toolchains describe a *device* (identity + object dictionary
 + cyclic process image), this toolchain describes a *message* (the
 structs, enums, and request/reply services that cross a channel). The
-bounded message-type IR (:need:`BB_0111`) is the peer of
+bounded message-type IR (:need:`BB_0117`) is the peer of
 ``fieldbus-od-core``:
 
 * **Top-level umbrella feature** — :need:`FEAT_0110` — peer to
@@ -45,7 +45,7 @@ Top-level umbrella
 .. feat:: Message-plane interface-description codegen
    :id: FEAT_0110
    :status: implemented
-   :links: BB_0111, BB_0112, BB_0113, BB_0114, BB_0115
+   :links: BB_0117, BB_0118, BB_0119, BB_0114, BB_0115
 
    A layered set of Rust crates that consumes interface descriptions and
    emits strongly-typed message (de)serializers at build time. The

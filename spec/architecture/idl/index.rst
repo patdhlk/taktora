@@ -43,7 +43,7 @@ Quality goals capture the qualities the architecture is optimised for.
    Every type the IR can express shall have a finite, compile-time-known
    serialized-length bound, and that property shall be unrepresentable to
    violate — ``String`` and ``Sequence`` carry their capacity in the type
-   (:need:`REQ_0930`). The bound is what sizes downstream fixed buffers,
+   (:need:`REQ_0946`). The bound is what sizes downstream fixed buffers,
    so it must be a true upper bound, not a hint.
 
 .. quality-goal:: Auditable runtime (serde-free, no_std, no-heap)
@@ -54,7 +54,7 @@ Quality goals capture the qualities the architecture is optimised for.
    The only crate that links into a runtime consumer
    (``taktora-idl-wire``) shall be ``no_std``, allocation-free, and
    dependency-free, with no ``serde`` and no reflection
-   (:need:`REQ_0934`). The (de)serialization path is kept small enough to
+   (:need:`REQ_0950`). The (de)serialization path is kept small enough to
    stay tractable for Kani/Miri so the bytes-on-the-wire contract can be
    reasoned about formally.
 
@@ -81,7 +81,7 @@ Quality goals capture the qualities the architecture is optimised for.
    :refines: FEAT_0112
 
    ``taktora-idl-wire`` shall be ``#![no_std]`` and carry no external
-   dependency (per :need:`REQ_0934`). The IR (``taktora-idl-core``) and
+   dependency (per :need:`REQ_0950`). The IR (``taktora-idl-core``) and
    the host-side codegen crates may depend on ``std``, ``serde``,
    ``proc-macro2``, and ``quote``; the runtime crate may not. This is the
    structural guarantee behind :need:`QG_0023`.

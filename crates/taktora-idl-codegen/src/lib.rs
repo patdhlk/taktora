@@ -1,11 +1,11 @@
 //! Policy-owning codegen layer for the message-plane IR (`FEAT_0110`).
 //!
 //! This crate is the message-plane twin of the device-plane `esi-codegen`. It
-//! owns the naming policy ([`naming`], `REQ_0938`), defines the
+//! owns the naming policy ([`naming`], `REQ_0954`), defines the
 //! [`MessageBackend`] trait, and exposes [`generate`]. It resolves a
 //! [`taktora_idl_core::Module`] into a borrowing [`ResolvedModule`] — every
 //! identifier already chosen, every field classified — and hands that to a
-//! backend, which emits [`proc_macro2::TokenStream`] (`REQ_0939`). The crate is
+//! backend, which emits [`proc_macro2::TokenStream`] (`REQ_0955`). The crate is
 //! **plane-generic**: it knows nothing about CAN, CDR, or any wire format. A
 //! backend (e.g. `taktora-idl-codegen-can`) owns that.
 
@@ -146,7 +146,7 @@ pub enum CodegenError {
 /// A backend that turns a [`ResolvedModule`]'s items into Rust token streams.
 ///
 /// Implementors are policy-free: identifiers and field classification are
-/// already decided (`REQ_0938`). A backend supplies the wire format — for CAN,
+/// already decided (`REQ_0954`). A backend supplies the wire format — for CAN,
 /// the [`WireType`](https://docs.rs/taktora-idl-wire) implementation.
 pub trait MessageBackend {
     /// Items emitted once at the top of the generated module (typically a
@@ -171,7 +171,7 @@ pub trait MessageBackend {
 
 /// Resolve `module` and emit a token stream of items via `backend`.
 ///
-/// The returned stream is unformatted (`REQ_0939`); the build layer renders it
+/// The returned stream is unformatted (`REQ_0955`); the build layer renders it
 /// with `prettyplease`. It does not wrap items in a `mod`; the caller chooses
 /// the module boundary.
 ///

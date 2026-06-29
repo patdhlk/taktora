@@ -14,9 +14,9 @@ through to the ``WireType`` surface the generated code implements.
 
    graph LR
        dbc["DBC text<br/>&str"]
-       c["BB_0111 taktora-idl-core<br/>Module / Struct / Field IR<br/>validate() + max_serialized_len()"]
-       w["BB_0112 taktora-idl-wire<br/>WireType + pack/unpack<br/>(no_std, no deps)"]
-       d["BB_0113 taktora-idl-dbc<br/>parse() → DbcDatabase<br/>lower() → (Module, DbcLayout)"]
+       c["BB_0117 taktora-idl-core<br/>Module / Struct / Field IR<br/>validate() + max_serialized_len()"]
+       w["BB_0118 taktora-idl-wire<br/>WireType + pack/unpack<br/>(no_std, no deps)"]
+       d["BB_0119 taktora-idl-dbc<br/>parse() → DbcDatabase<br/>lower() → (Module, DbcLayout)"]
        g["BB_0114 taktora-idl-codegen<br/>resolve() + generate&lt;B&gt;<br/>naming + collision policy"]
        b["BB_0115 taktora-idl-codegen-can<br/>CanBackend: MessageBackend impl"]
        t["BB_0116 taktora-idl-codegen-can-tests<br/>build.rs round-trip harness"]
@@ -30,7 +30,7 @@ through to the ``WireType`` surface the generated code implements.
        w -.->|generated code calls| t
 
 .. building-block:: taktora-idl-core
-   :id: BB_0111
+   :id: BB_0117
    :status: implemented
    :implements: FEAT_0111
 
@@ -42,7 +42,7 @@ through to the ``WireType`` surface the generated code implements.
    format, no transport dep, no ``proc-macro2``/``quote``.
 
 .. building-block:: taktora-idl-wire
-   :id: BB_0112
+   :id: BB_0118
    :status: implemented
    :implements: FEAT_0112
 
@@ -54,7 +54,7 @@ through to the ``WireType`` surface the generated code implements.
    external dependencies.
 
 .. building-block:: taktora-idl-dbc
-   :id: BB_0113
+   :id: BB_0119
    :status: implemented
    :implements: FEAT_0113
 

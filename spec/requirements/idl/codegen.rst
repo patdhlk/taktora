@@ -17,10 +17,10 @@ nothing about CAN, CDR, or any wire format; a backend owns that.
    owns naming and collision policy; it owns no wire format.
 
 .. req:: Deterministic naming policy with collision detection
-   :id: REQ_0938
+   :id: REQ_0954
    :status: implemented
    :satisfies: FEAT_0114
-   :links: BB_0114, TEST_0922
+   :links: BB_0114, TEST_0930
 
    ``taktora-idl-codegen`` shall own the policy that maps verbatim source
    names to Rust identifiers: PascalCase for types and enum variants,
@@ -30,10 +30,10 @@ nothing about CAN, CDR, or any wire format; a backend owns that.
    with a collision error rather than emit colliding code.
 
 .. req:: MessageBackend trait and resolve/generate entry point
-   :id: REQ_0939
+   :id: REQ_0955
    :status: implemented
    :satisfies: FEAT_0114
-   :links: BB_0114, TEST_0922, TEST_0923
+   :links: BB_0114, TEST_0930, TEST_0931
 
    ``taktora-idl-codegen`` shall expose ``resolve(&Module) ->
    Result<ResolvedModule, CodegenError>`` (identifiers chosen, every
