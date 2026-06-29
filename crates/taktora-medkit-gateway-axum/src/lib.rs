@@ -29,6 +29,7 @@ mod config;
 mod configurations;
 pub mod demo;
 mod error;
+mod lifecycle;
 mod locks;
 mod ratelimit;
 mod scripts;
@@ -370,6 +371,15 @@ fn api_router() -> Router<ServerState> {
         // the write-surface safety gate (`ADR_0119`) re-enters at the seam when a
         // real binding lands (`ADR_0126`).
         .merge(updates::update_routes())
+        // Lifecycle-status: SOVD per-entity start/restart/shutdown transitions
+        // (`REQ_0975`), served through the same `ActionSink` seam and carved out
+        // from under the `deferred` `501` fallback for the two kinds the contract
+        // exposes `/status` on (apps, components). v1 is an in-memory simulation
+        // (transitions tracked in memory, no real effect); the write-surface
+        // safety gate (`ADR_0119`) re-enters at the seam when a real binding lands
+        // (`ADR_0126`).
+        .merge(lifecycle::lifecycle_routes(EntityKind::App))
+        .merge(lifecycle::lifecycle_routes(EntityKind::Component))
         .fallback(deferred)
 }
 

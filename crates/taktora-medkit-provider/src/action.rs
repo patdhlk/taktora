@@ -152,6 +152,19 @@ pub struct UpdateRecord {
     pub status: String,
 }
 
+/// The lifecycle status of an entity on the lifecycle-status surface — the
+/// `{ "status": "<state>" }` document served under `…/status` and returned by a
+/// transition (`REQ_0975`).
+///
+/// The in-memory simulation tracks a free-form state string (`"running"` /
+/// `"stopped"`); a real binding would surface the binding's own lifecycle
+/// vocabulary.
+#[derive(Clone, Debug, Serialize)]
+pub struct LifecycleStatus {
+    /// The current lifecycle state (`"running"`, `"stopped"`, …).
+    pub status: String,
+}
+
 /// A write/action failure, mapped to a contract-shaped error by the gateway.
 ///
 /// Reserves no `Forbidden` variant yet: the safety gate is deferred (`ADR_0126`),
@@ -444,6 +457,27 @@ pub trait ActionSink: Send + Sync {
     ///
     /// [`ActionError::NotFound`] if `update_id` is not registered.
     fn delete_update(&self, update_id: &str) -> Result<(), ActionError>;
+
+    /// The current lifecycle status of `target` (`REQ_0975`).
+    ///
+    /// Defaults to `"running"` if the entity has never been transitioned.
+    fn lifecycle_status(&self, target: &ResourceRef) -> LifecycleStatus;
+
+    /// Request a lifecycle `transition` on `target`, storing and returning the
+    /// resulting status (`REQ_0975`).
+    ///
+    /// `start` / `restart` / `force-restart` map to `"running"`;
+    /// `shutdown` / `force-shutdown` map to `"stopped"`.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::BadRequest`] if `transition` is not a recognised
+    /// transition name.
+    fn request_transition(
+        &self,
+        target: &ResourceRef,
+        transition: &str,
+    ) -> Result<LifecycleStatus, ActionError>;
 }
 
 /// The resource a catalogue/execution is keyed by.
@@ -490,6 +524,8 @@ pub struct SimActionSink {
     script_execs: Mutex<HashMap<String, ScriptExecRecord>>,
     /// The global software-update store, keyed by update id (`REQ_0974`).
     updates: Mutex<BTreeMap<String, UpdateRecord>>,
+    /// Per-resource lifecycle status (`REQ_0975`); absent means `"running"`.
+    lifecycle: Mutex<HashMap<ResourceKey, String>>,
     next: AtomicU64,
 }
 
@@ -991,6 +1027,40 @@ impl ActionSink for SimActionSink {
             Err(ActionError::NotFound)
         }
     }
+
+    fn lifecycle_status(&self, target: &ResourceRef) -> LifecycleStatus {
+        let status = self
+            .lifecycle
+            .lock()
+            .expect("lifecycle store poisoned")
+            .get(&(target.kind, target.id.clone()))
+            .cloned()
+            .unwrap_or_else(|| "running".to_owned());
+        LifecycleStatus { status }
+    }
+
+    fn request_transition(
+        &self,
+        target: &ResourceRef,
+        transition: &str,
+    ) -> Result<LifecycleStatus, ActionError> {
+        let state = match transition {
+            "start" | "restart" | "force-restart" => "running",
+            "shutdown" | "force-shutdown" => "stopped",
+            other => {
+                return Err(ActionError::BadRequest(format!(
+                    "Unknown lifecycle transition: {other}"
+                )));
+            }
+        };
+        self.lifecycle
+            .lock()
+            .expect("lifecycle store poisoned")
+            .insert((target.kind, target.id.clone()), state.to_owned());
+        Ok(LifecycleStatus {
+            status: state.to_owned(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -1289,5 +1359,39 @@ mod tests {
             ActionError::NotFound
         );
         assert_eq!(sink.update(&record.id).unwrap_err(), ActionError::NotFound);
+    }
+
+    /// `REQ_0975` — lifecycle defaults to `running`, transitions drive the state
+    /// (`start` → running, `shutdown` → stopped), and an unknown transition is a
+    /// `BadRequest`.
+    #[test]
+    fn lifecycle_transitions() {
+        let sink = SimActionSink::new();
+
+        // A fresh entity defaults to `running`.
+        assert_eq!(sink.lifecycle_status(&target()).status, "running");
+
+        // `start` keeps it running; the status reads back.
+        assert_eq!(
+            sink.request_transition(&target(), "start").unwrap().status,
+            "running"
+        );
+        assert_eq!(sink.lifecycle_status(&target()).status, "running");
+
+        // `shutdown` → stopped; the status reads back.
+        assert_eq!(
+            sink.request_transition(&target(), "shutdown")
+                .unwrap()
+                .status,
+            "stopped"
+        );
+        assert_eq!(sink.lifecycle_status(&target()).status, "stopped");
+
+        // An unknown transition is rejected and leaves the state unchanged.
+        assert!(matches!(
+            sink.request_transition(&target(), "explode").unwrap_err(),
+            ActionError::BadRequest(_)
+        ));
+        assert_eq!(sink.lifecycle_status(&target()).status, "stopped");
     }
 }

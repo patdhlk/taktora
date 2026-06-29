@@ -748,6 +748,13 @@ fn endpoint_catalogue() -> Vec<String> {
         endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/scripts"));
         endpoints.push(format!("POST {API_BASE}/{collection}/{{id}}/scripts"));
     }
+    // Lifecycle-status (start/restart/shutdown transitions) is exposed on apps
+    // and components only (`REQ_0975`).
+    for kind in [EntityKind::App, EntityKind::Component] {
+        let collection = collection_segment(kind);
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/status"));
+        endpoints.push(format!("PUT {API_BASE}/{collection}/{{id}}/status/start"));
+    }
     endpoints
 }
 

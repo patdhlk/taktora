@@ -18,7 +18,7 @@ pub mod action;
 
 pub use action::{
     ActionError, ActionSink, BulkCategory, BulkDescriptor, ConfigEntry, Execution, ExecutionStatus,
-    OperationDef, ResourceRef, ScriptDef, SimActionSink, UpdateRecord,
+    LifecycleStatus, OperationDef, ResourceRef, ScriptDef, SimActionSink, UpdateRecord,
 };
 
 /// A typed relationship between two SOVD entities, as the contract exposes them
