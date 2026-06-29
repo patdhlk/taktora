@@ -47,7 +47,7 @@ fn action_error(error: ActionError, kind: EntityKind, id: &str) -> ApiError {
         }),
         ActionError::Conflict => ApiError::Conflict(GenericError {
             error_code: "conflict".to_owned(),
-            message: "The entity is not in a transitionable state".to_owned(),
+            message: "The lifecycle transition conflicts with the current state".to_owned(),
             parameters: params,
         }),
         ActionError::BadRequest(message) => ApiError::BadRequest(GenericError {

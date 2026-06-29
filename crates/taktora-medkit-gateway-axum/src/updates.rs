@@ -68,7 +68,7 @@ fn action_error(error: ActionError, update_id: &str) -> ApiError {
         }),
         ActionError::Conflict => ApiError::Conflict(GenericError {
             error_code: "conflict".to_owned(),
-            message: "The update is not in a transitionable state".to_owned(),
+            message: "The update cannot be transitioned from its current state".to_owned(),
             parameters: params,
         }),
         ActionError::BadRequest(message) => ApiError::BadRequest(GenericError {
