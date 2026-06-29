@@ -526,6 +526,7 @@ impl Provider for MedkitProvider {
             faults,
             fault_environments,
             data,
+            ..ProviderSnapshot::default()
         }
     }
 }

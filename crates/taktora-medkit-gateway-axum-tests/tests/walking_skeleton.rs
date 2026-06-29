@@ -250,7 +250,9 @@ async fn deferred_families_return_501() {
         // `status` (lifecycle-status) is a live family now (`REQ_0975`):
         // apps/components expose a real GET/PUT transition surface through the
         // `ActionSink` seam, so `…/{id}/status` is no longer a deferred path.
-        "/api/v1/components/spark-6723/logs",
+        // `logs` is a live family now (`REQ_0976`): all four kinds expose a real
+        // `…/{id}/logs` read surface plus a `…/logs/configuration` GET/PUT, so it
+        // is no longer a deferred path.
         // `triggers` is a live family now (`REQ_0962`): entity-scoped triggers are
         // mounted per kind, so `…/{id}/triggers` is a real surface, not deferred.
         "/api/v1/components/spark-6723/cyclic-subscriptions",

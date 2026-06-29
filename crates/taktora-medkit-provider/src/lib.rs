@@ -11,6 +11,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use serde::Serialize;
 use serde_json::Value;
 use taktora_medkit_model::{Entity, EnvironmentData, FaultSummary, Health, Severity};
 
@@ -96,6 +97,25 @@ pub struct RelationshipEdge {
     pub item: Entity,
 }
 
+/// One diagnostic log entry, surfaced under `…/logs` (`REQ_0976`).
+///
+/// Log entries ride the **read** seam alongside readable `data`: a binding's
+/// snapshotting populates [`ProviderSnapshot::logs`], and the gateway serves the
+/// filtered list. The shape mirrors a structured log record — a fractional epoch
+/// `timestamp`, a `severity` token, a `context` (the emitting source), and the
+/// human-readable `message`.
+#[derive(Clone, Debug, Serialize)]
+pub struct LogEntry {
+    /// Fractional epoch seconds at which the entry was emitted.
+    pub timestamp: f64,
+    /// The severity token (`debug`, `info`, `warning`, `error`, `fatal`).
+    pub severity: String,
+    /// The emitting context / source (filtered by the `?context=` substring).
+    pub context: String,
+    /// The human-readable log message.
+    pub message: String,
+}
+
 /// A point-in-time, self-consistent read-model the gateway serves from.
 ///
 /// This is the **snapshot contract**: the shape a binding's snapshotting
@@ -119,6 +139,9 @@ pub struct ProviderSnapshot {
     pub fault_environments: BTreeMap<String, BTreeMap<String, EnvironmentData<Value>>>,
     /// Readable data trees keyed by entity id (served under `…/data`).
     pub data: BTreeMap<String, Value>,
+    /// Diagnostic log entries keyed by entity id (served under `…/logs`,
+    /// `REQ_0976`). Empty for providers that surface none.
+    pub logs: BTreeMap<String, Vec<LogEntry>>,
 }
 
 /// The data-source seam the gateway reads through.
@@ -177,6 +200,7 @@ pub trait Provider: Send + Sync {
             faults,
             fault_environments: BTreeMap::new(),
             data: BTreeMap::new(),
+            logs: BTreeMap::new(),
         }
     }
 }
@@ -190,6 +214,7 @@ pub struct MockProvider {
     health: HashMap<String, Health>,
     relationships: Vec<RelationshipEdge>,
     data: BTreeMap<String, Value>,
+    logs: BTreeMap<String, Vec<LogEntry>>,
 }
 
 impl MockProvider {
@@ -238,6 +263,14 @@ impl MockProvider {
     #[must_use]
     pub fn with_data(mut self, entity_id: impl Into<String>, data: Value) -> Self {
         self.data.insert(entity_id.into(), data);
+        self
+    }
+
+    /// Append a diagnostic log `entry` to an entity (served under `…/logs`,
+    /// `REQ_0976`).
+    #[must_use]
+    pub fn with_log(mut self, entity_id: impl Into<String>, entry: LogEntry) -> Self {
+        self.logs.entry(entity_id.into()).or_default().push(entry);
         self
     }
 
@@ -293,6 +326,7 @@ impl Provider for MockProvider {
                 .collect(),
             fault_environments: self.fault_environments.clone(),
             data: self.data.clone(),
+            logs: self.logs.clone(),
         }
     }
 }

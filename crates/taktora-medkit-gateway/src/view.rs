@@ -15,7 +15,7 @@ use taktora_medkit_model::{
     Collection, CollectionMeta, DtcStatus, EntityKind, EnvironmentData, ExtendedDataRecords,
     FaultDetail, FaultDetailMeta, FaultItem, FaultList, FaultListMeta, FaultSummary, GenericError,
 };
-use taktora_medkit_provider::{ProviderSnapshot, Relation, RelationshipEdge};
+use taktora_medkit_provider::{LogEntry, ProviderSnapshot, Relation, RelationshipEdge};
 
 /// The API path prefix every served resource hangs off.
 pub const API_BASE: &str = "/api/v1";
@@ -174,6 +174,7 @@ impl MergePipeline {
         let mut fault_environments: BTreeMap<String, BTreeMap<String, EnvironmentData<Value>>> =
             BTreeMap::new();
         let mut data: BTreeMap<String, Value> = BTreeMap::new();
+        let mut logs: BTreeMap<String, Vec<LogEntry>> = BTreeMap::new();
 
         for snapshot in self.snapshots {
             for entity in snapshot.entities {
@@ -193,6 +194,7 @@ impl MergePipeline {
                     .extend(envs);
             }
             data.extend(snapshot.data);
+            logs.extend(snapshot.logs);
         }
 
         if let Some(manifest) = self.manifest.filter(|m| !m.is_empty()) {
@@ -206,6 +208,7 @@ impl MergePipeline {
             faults,
             fault_environments,
             data,
+            logs,
         }
     }
 }
@@ -301,6 +304,7 @@ pub struct MergedView {
     faults: BTreeMap<String, Vec<FaultSummary>>,
     fault_environments: BTreeMap<String, BTreeMap<String, EnvironmentData<Value>>>,
     data: BTreeMap<String, Value>,
+    logs: BTreeMap<String, Vec<LogEntry>>,
 }
 
 impl MergedView {
@@ -563,6 +567,38 @@ impl MergedView {
         }
     }
 
+    /// Diagnostic log entries under an entity (`…/{id}/logs`), filtered by an
+    /// optional exact `severity` match and an optional `context` substring match
+    /// (`REQ_0976`).
+    ///
+    /// Lenient like [`data`](Self::data) is about an absent data tree: an entity
+    /// with no log entries — known or unknown — yields an empty list rather than a
+    /// `404`, so a polling client distinguishes "no logs" from "bad path" by the
+    /// status code, not by guessing. Pure and clock-free.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolveError`] for symmetry with the other resolvers; the current
+    /// lenient implementation never produces one.
+    pub fn logs(
+        &self,
+        _kind: EntityKind,
+        id: &str,
+        severity: Option<&str>,
+        context: Option<&str>,
+    ) -> Result<Vec<LogEntry>, ResolveError> {
+        let items = self
+            .logs
+            .get(id)
+            .into_iter()
+            .flatten()
+            .filter(|entry| severity.is_none_or(|want| entry.severity == want))
+            .filter(|entry| context.is_none_or(|want| entry.context.contains(want)))
+            .cloned()
+            .collect();
+        Ok(items)
+    }
+
     /// The ros2 node FQNs of the apps a component hosts, for fault aggregation.
     fn aggregation_sources(&self, component_id: &str) -> Vec<String> {
         self.relationships
@@ -660,7 +696,7 @@ pub fn root_document() -> Value {
             "discovery": true,
             "faults": true,
             "locking": true,
-            "logs": false,
+            "logs": true,
             "operations": true,
             "scripts": true,
             "tls": false,
@@ -726,6 +762,9 @@ fn endpoint_catalogue() -> Vec<String> {
         endpoints.push(format!(
             "PUT {API_BASE}/{collection}/{{id}}/configurations/{{config_id}}"
         ));
+        // Logs (read entries + a config GET/PUT) are exposed on every kind
+        // (`REQ_0976`).
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/logs"));
     }
     // Diagnostic-scoped locks are exposed on apps and components only (`REQ_0963`).
     for kind in [EntityKind::App, EntityKind::Component] {
@@ -870,6 +909,7 @@ mod tests {
             "bulk_data",
             "scripts",
             "updates",
+            "logs",
             "vendor_extensions",
         ] {
             assert_eq!(
@@ -877,11 +917,6 @@ mod tests {
                 "{served} is served, must advertise true"
             );
         }
-        // `logs` is the last deferred family on the read/write surface.
-        assert_eq!(
-            caps["logs"], false,
-            "logs is deferred, must advertise false"
-        );
         let endpoints: Vec<&str> = root["endpoints"]
             .as_array()
             .unwrap()

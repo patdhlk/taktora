@@ -31,6 +31,7 @@ pub mod demo;
 mod error;
 mod lifecycle;
 mod locks;
+mod logs;
 mod ratelimit;
 mod scripts;
 mod triggers;
@@ -380,6 +381,15 @@ fn api_router() -> Router<ServerState> {
         // (`ADR_0126`).
         .merge(lifecycle::lifecycle_routes(EntityKind::App))
         .merge(lifecycle::lifecycle_routes(EntityKind::Component))
+        // Logs: SOVD per-entity diagnostic logs (`REQ_0976`). The `…/logs` entry
+        // list rides the **read** seam (the `MergedView` snapshot, like `…/data`);
+        // the `…/logs/configuration` GET/PUT rides the `ActionSink` write seam.
+        // Mounted on all four entity kinds and carved out from under the
+        // `deferred` `501` fallback.
+        .merge(logs::log_routes(EntityKind::Area))
+        .merge(logs::log_routes(EntityKind::Component))
+        .merge(logs::log_routes(EntityKind::App))
+        .merge(logs::log_routes(EntityKind::Function))
         .fallback(deferred)
 }
 
