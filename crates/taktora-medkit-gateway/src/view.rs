@@ -654,7 +654,7 @@ pub fn root_document() -> Value {
             "async_actions": false,
             "authentication": true,
             "bulk_data": false,
-            "configurations": false,
+            "configurations": true,
             "cyclic_subscriptions": false,
             "data_access": true,
             "discovery": true,
@@ -716,6 +716,11 @@ fn endpoint_catalogue() -> Vec<String> {
         endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/operations"));
         endpoints.push(format!(
             "POST {API_BASE}/{collection}/{{id}}/operations/{{op}}/executions"
+        ));
+        // Configurations are exposed on every kind (`REQ_0971`).
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/configurations"));
+        endpoints.push(format!(
+            "PUT {API_BASE}/{collection}/{{id}}/configurations/{{config_id}}"
         ));
     }
     // Diagnostic-scoped locks are exposed on apps and components only (`REQ_0963`).
@@ -835,6 +840,7 @@ mod tests {
             "locking",
             "triggers",
             "operations",
+            "configurations",
             "vendor_extensions",
         ] {
             assert_eq!(
@@ -842,7 +848,7 @@ mod tests {
                 "{served} is served, must advertise true"
             );
         }
-        for deferred in ["configurations", "bulk_data", "scripts", "logs", "updates"] {
+        for deferred in ["bulk_data", "scripts", "logs", "updates"] {
             assert_eq!(
                 caps[deferred], false,
                 "{deferred} is deferred, must advertise false"

@@ -25,6 +25,7 @@
 mod actions;
 mod auth;
 mod config;
+mod configurations;
 pub mod demo;
 mod error;
 mod locks;
@@ -329,6 +330,16 @@ fn api_router() -> Router<ServerState> {
         .merge(actions::operation_routes(EntityKind::Component))
         .merge(actions::operation_routes(EntityKind::App))
         .merge(actions::operation_routes(EntityKind::Function))
+        // Configurations: SOVD per-entity configuration storage (`REQ_0971`),
+        // served through the same `ActionSink` seam and carved out from under the
+        // `deferred` `501` fallback for the kinds the contract exposes
+        // configurations on. v1 is an in-memory simulation (no real effect); the
+        // write-surface safety gate (`ADR_0119`) re-enters at the seam when a real
+        // binding lands (`ADR_0126`).
+        .merge(configurations::configuration_routes(EntityKind::Area))
+        .merge(configurations::configuration_routes(EntityKind::Component))
+        .merge(configurations::configuration_routes(EntityKind::App))
+        .merge(configurations::configuration_routes(EntityKind::Function))
         .fallback(deferred)
 }
 

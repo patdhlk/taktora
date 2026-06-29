@@ -22,7 +22,7 @@
 //! This crate carries **zero** taktora dependencies, holding the
 //! extractable-core invariant (`REQ_0916`, `ADR_0111`).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -98,6 +98,16 @@ pub struct Execution {
     pub result: Option<Value>,
 }
 
+/// One configuration entry on a target — the value stored under
+/// `…/configurations/{id}` (`REQ_0971`).
+#[derive(Clone, Debug, Serialize)]
+pub struct ConfigEntry {
+    /// The configuration id (URL path component).
+    pub id: String,
+    /// The stored configuration value (an arbitrary JSON document).
+    pub value: Value,
+}
+
 /// A write/action failure, mapped to a contract-shaped error by the gateway.
 ///
 /// Reserves no `Forbidden` variant yet: the safety gate is deferred (`ADR_0126`),
@@ -168,6 +178,58 @@ pub trait ActionSink: Send + Sync {
         op: &str,
         exec_id: &str,
     ) -> Result<(), ActionError>;
+
+    /// The configurations currently set on `target` (empty if none), ordered by
+    /// id (`REQ_0971`).
+    fn configurations(&self, target: &ResourceRef) -> Vec<ConfigEntry>;
+
+    /// One configuration by id (`REQ_0971`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if `config_id` is not set on `target`.
+    fn configuration(
+        &self,
+        target: &ResourceRef,
+        config_id: &str,
+    ) -> Result<ConfigEntry, ActionError>;
+
+    /// Upsert configuration `config_id` on `target` to `value` (`REQ_0971`).
+    ///
+    /// Idempotent set: creating or overwriting either way yields the stored
+    /// entry.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::BadRequest`] if `value` is rejected by a real binding; the
+    /// in-memory simulation always succeeds.
+    fn set_configuration(
+        &self,
+        target: &ResourceRef,
+        config_id: &str,
+        value: Value,
+    ) -> Result<ConfigEntry, ActionError>;
+
+    /// Delete configuration `config_id` from `target` (`REQ_0971`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if `config_id` is not set on `target`.
+    fn delete_configuration(
+        &self,
+        target: &ResourceRef,
+        config_id: &str,
+    ) -> Result<(), ActionError>;
+
+    /// Delete every configuration set on `target` (`REQ_0971`).
+    ///
+    /// Idempotent clear: succeeds whether or not the target had any.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::BadRequest`] if a real binding rejects the clear; the
+    /// in-memory simulation always succeeds.
+    fn delete_configurations(&self, target: &ResourceRef) -> Result<(), ActionError>;
 }
 
 /// The resource a catalogue/execution is keyed by.
@@ -192,6 +254,7 @@ struct ExecRecord {
 pub struct SimActionSink {
     catalogue: Mutex<HashMap<ResourceKey, Vec<OperationDef>>>,
     executions: Mutex<HashMap<String, ExecRecord>>,
+    configs: Mutex<HashMap<ResourceKey, BTreeMap<String, Value>>>,
     next: AtomicU64,
 }
 
@@ -328,6 +391,80 @@ impl ActionSink for SimActionSink {
         drop(map);
         Ok(())
     }
+
+    fn configurations(&self, target: &ResourceRef) -> Vec<ConfigEntry> {
+        self.configs
+            .lock()
+            .expect("config store poisoned")
+            .get(&(target.kind, target.id.clone()))
+            .map(|m| {
+                m.iter()
+                    .map(|(id, value)| ConfigEntry {
+                        id: id.clone(),
+                        value: value.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn configuration(
+        &self,
+        target: &ResourceRef,
+        config_id: &str,
+    ) -> Result<ConfigEntry, ActionError> {
+        self.configs
+            .lock()
+            .expect("config store poisoned")
+            .get(&(target.kind, target.id.clone()))
+            .and_then(|m| m.get(config_id))
+            .map(|value| ConfigEntry {
+                id: config_id.to_owned(),
+                value: value.clone(),
+            })
+            .ok_or(ActionError::NotFound)
+    }
+
+    fn set_configuration(
+        &self,
+        target: &ResourceRef,
+        config_id: &str,
+        value: Value,
+    ) -> Result<ConfigEntry, ActionError> {
+        let mut map = self.configs.lock().expect("config store poisoned");
+        map.entry((target.kind, target.id.clone()))
+            .or_default()
+            .insert(config_id.to_owned(), value.clone());
+        drop(map);
+        Ok(ConfigEntry {
+            id: config_id.to_owned(),
+            value,
+        })
+    }
+
+    fn delete_configuration(
+        &self,
+        target: &ResourceRef,
+        config_id: &str,
+    ) -> Result<(), ActionError> {
+        let key = (target.kind, target.id.clone());
+        let mut map = self.configs.lock().expect("config store poisoned");
+        let removed = map
+            .get_mut(&key)
+            .is_some_and(|m| m.remove(config_id).is_some());
+        if !removed {
+            return Err(ActionError::NotFound);
+        }
+        drop(map);
+        Ok(())
+    }
+
+    fn delete_configurations(&self, target: &ResourceRef) -> Result<(), ActionError> {
+        let mut map = self.configs.lock().expect("config store poisoned");
+        map.remove(&(target.kind, target.id.clone()));
+        drop(map);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -388,5 +525,70 @@ mod tests {
                 .unwrap_err(),
             ActionError::NotFound
         );
+    }
+
+    /// `REQ_0971` — upsert → get → overwrite → delete → 404, plus delete-all.
+    #[test]
+    fn config_upsert_get_delete() {
+        let sink = SimActionSink::new();
+
+        // Unset config is NotFound; the list is empty.
+        assert_eq!(
+            sink.configuration(&target(), "rate").unwrap_err(),
+            ActionError::NotFound
+        );
+        assert_eq!(sink.configurations(&target()).len(), 0);
+
+        // Upsert stores and echoes the value.
+        let stored = sink
+            .set_configuration(&target(), "rate", serde_json::json!({"hz": 50}))
+            .expect("set");
+        assert_eq!(stored.id, "rate");
+        assert_eq!(stored.value, serde_json::json!({"hz": 50}));
+
+        // Get finds it; the list shows it.
+        assert_eq!(
+            sink.configuration(&target(), "rate").unwrap().value,
+            serde_json::json!({"hz": 50})
+        );
+        assert_eq!(sink.configurations(&target()).len(), 1);
+
+        // Upsert again overwrites the value.
+        sink.set_configuration(&target(), "rate", serde_json::json!({"hz": 100}))
+            .expect("update");
+        assert_eq!(
+            sink.configuration(&target(), "rate").unwrap().value,
+            serde_json::json!({"hz": 100})
+        );
+        assert_eq!(sink.configurations(&target()).len(), 1);
+
+        // Delete one removes it; a second delete is NotFound.
+        sink.delete_configuration(&target(), "rate")
+            .expect("delete");
+        assert_eq!(
+            sink.configuration(&target(), "rate").unwrap_err(),
+            ActionError::NotFound
+        );
+        assert_eq!(
+            sink.delete_configuration(&target(), "rate").unwrap_err(),
+            ActionError::NotFound
+        );
+    }
+
+    /// `REQ_0971` — delete-all clears every config and always succeeds.
+    #[test]
+    fn config_delete_all() {
+        let sink = SimActionSink::new();
+        sink.set_configuration(&target(), "a", serde_json::json!(1))
+            .expect("set a");
+        sink.set_configuration(&target(), "b", serde_json::json!(2))
+            .expect("set b");
+        assert_eq!(sink.configurations(&target()).len(), 2);
+
+        sink.delete_configurations(&target()).expect("clear");
+        assert_eq!(sink.configurations(&target()).len(), 0);
+
+        // Idempotent: clearing an already-empty resource still succeeds.
+        sink.delete_configurations(&target()).expect("clear again");
     }
 }

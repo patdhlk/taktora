@@ -237,7 +237,8 @@ async fn deferred_families_return_501() {
     let deferred = [
         // `operations` is a live family now (`REQ_0969`): SOVD async executions
         // are mounted per kind through the `ActionSink` seam, not deferred.
-        "/api/v1/components/spark-6723/configurations",
+        // `configurations` is a live family now (`REQ_0971`): per-entity config
+        // storage is mounted per kind through the same seam, not deferred.
         "/api/v1/components/spark-6723/bulk-data",
         // `locks` is a live family now (#149): `…/{id}/locks` is a real
         // POST/PUT/DELETE surface, so it is no longer a wholesale-deferred path.
