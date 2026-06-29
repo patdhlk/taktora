@@ -235,7 +235,8 @@ async fn deferred_families_return_501() {
     let addr = spawn(GatewayConfig::default()).await;
 
     let deferred = [
-        "/api/v1/components/spark-6723/operations",
+        // `operations` is a live family now (`REQ_0969`): SOVD async executions
+        // are mounted per kind through the `ActionSink` seam, not deferred.
         "/api/v1/components/spark-6723/configurations",
         "/api/v1/components/spark-6723/bulk-data",
         // `locks` is a live family now (#149): `…/{id}/locks` is a real

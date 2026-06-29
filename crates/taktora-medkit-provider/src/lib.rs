@@ -14,6 +14,12 @@ use std::collections::{BTreeMap, HashMap};
 use serde_json::Value;
 use taktora_medkit_model::{Entity, EnvironmentData, FaultSummary, Health, Severity};
 
+pub mod action;
+
+pub use action::{
+    ActionError, ActionSink, Execution, ExecutionStatus, OperationDef, ResourceRef, SimActionSink,
+};
+
 /// A typed relationship between two SOVD entities, as the contract exposes them
 /// under relationship sub-resources (`…/hosts`, `…/depends-on`, …).
 ///

@@ -387,3 +387,34 @@ they verify to ``implemented`` and link these tests.
    fresh connect to ``/api/v1/faults/stream`` (no trigger registered — the global
    stream is unfiltered). A reconnect with a ``Last-Event-ID`` past every
    retained id suppresses the replay.
+
+.. test:: Operations catalogue lists and details
+   :id: TEST_0943
+   :status: implemented
+   :verifies: REQ_0969
+
+   Over a live server whose write seam is a configured ``SimActionSink``,
+   ``GET …/operations`` returns the configured operation in a collection
+   envelope and ``GET …/operations/{op}`` returns its detail; a resource with no
+   configured operations returns an empty catalogue. A provider unit test
+   confirms the catalogue gates ``start_operation`` (an unknown op is
+   ``NotFound``).
+
+.. test:: Operation execution lifecycle over HTTP
+   :id: TEST_0944
+   :status: implemented
+   :verifies: REQ_0970
+
+   Over a live server, ``POST …/operations/{op}/executions`` returns ``202`` with
+   a completed execution whose ``result`` echoes the request args; ``GET`` polls
+   it; the executions list contains it; ``DELETE`` returns ``204`` and a
+   subsequent ``GET`` is ``404``. A provider unit test confirms the same
+   start → list → get → cancel lifecycle at the sink level.
+
+.. test:: Unknown operation is 404
+   :id: TEST_0945
+   :status: implemented
+   :verifies: REQ_0970
+
+   Over a live server, both ``GET …/operations/{unknown}`` and
+   ``POST …/operations/{unknown}/executions`` return ``404``.

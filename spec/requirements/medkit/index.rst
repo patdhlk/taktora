@@ -604,6 +604,46 @@ safety-critical resource (:need:`ADR_0119` is untouched).
    Enforcement of issued tokens (real JWT/RBAC) remains deferred to #87
    regardless of the flag (:need:`REQ_0938`).
 
+Write plane — operations (simulation-backed)
+--------------------------------------------
+
+The first write family, built on a command-side seam that mirrors the read
+[`Provider`] seam. v1 is backed by an in-memory simulation that performs **no
+real effect**, so it touches no safety-critical resource and the write-surface
+safety gate (:need:`ADR_0119`) is not yet engaged; the gate re-enters at the
+seam when a real-effect binding lands (:need:`ADR_0126`).
+
+.. req:: Write/action seam
+   :id: REQ_0969
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0121, ADR_0126, TEST_0943
+
+   The gateway shall perform every write through an ``ActionSink`` trait — the
+   command-side analogue of the read ``Provider`` seam — never touching taktora
+   directly. The crate shall ship an in-memory ``SimActionSink`` (configurable
+   per-resource operation catalogue, synchronously-completing executions that
+   echo their args) so the write surface is fully testable with no runtime and
+   no real effect. The seam shall be the single substitution point at which a
+   future ``SafetyGate``-wrapped real binding drops in without any handler
+   change, preserving the extractable core (:need:`REQ_0916`).
+
+.. req:: Operations family with async executions
+   :id: REQ_0970
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0121, ADR_0126, TEST_0944, TEST_0945
+
+   The gateway shall serve the SOVD operations family on every entity kind:
+   ``GET …/operations`` (catalogue), ``GET …/operations/{op}`` (detail),
+   ``GET`` / ``POST …/operations/{op}/executions`` (list / start), and
+   ``GET`` / ``PUT`` / ``DELETE …/operations/{op}/executions/{exec_id}`` (poll /
+   update / cancel). A start shall return ``202`` with the execution; an unknown
+   operation or execution shall return ``404``; a cancel shall return ``204`` and
+   remove the execution. These paths shall be carved out from under the ``501``
+   deferred fallback and advertised honestly in the root capabilities
+   (:need:`REQ_0965`).
+
 Requirements at a glance
 ------------------------
 

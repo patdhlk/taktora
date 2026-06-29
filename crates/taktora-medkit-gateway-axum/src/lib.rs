@@ -22,6 +22,7 @@
 //! handle; #82 applies a manifest inside the pipeline; #83/#84 contribute extra
 //! `ProviderSnapshot`s to merge. None of that changes the HTTP surface.
 
+mod actions;
 mod auth;
 mod config;
 pub mod demo;
@@ -44,7 +45,7 @@ use serde_json::{Value, json};
 use taktora_medkit_gateway::view::{API_BASE, root_document, version_info_document};
 use taktora_medkit_gateway::{FaultStatusFilter, Gateway, MergedView, collection_segment};
 use taktora_medkit_model::EntityKind;
-use taktora_medkit_provider::{Provider, Relation};
+use taktora_medkit_provider::{ActionSink, Provider, Relation};
 use tower_http::cors::{Any, CorsLayer};
 
 use triggers::ServerState;
@@ -318,6 +319,16 @@ fn api_router() -> Router<ServerState> {
         // (`ADR_0120`).
         .merge(locks::lock_routes(EntityKind::App))
         .merge(locks::lock_routes(EntityKind::Component))
+        // Operations: SOVD async action executions (`REQ_0969`, `REQ_0970`),
+        // served through the `ActionSink` seam and carved out from under the
+        // `deferred` `501` fallback for the kinds the contract exposes operations
+        // on. v1 is backed by an in-memory simulation that performs no real
+        // effect; the write-surface safety gate (`ADR_0119`) re-enters at the
+        // seam when a real binding lands (`ADR_0126`).
+        .merge(actions::operation_routes(EntityKind::Area))
+        .merge(actions::operation_routes(EntityKind::Component))
+        .merge(actions::operation_routes(EntityKind::App))
+        .merge(actions::operation_routes(EntityKind::Function))
         .fallback(deferred)
 }
 
@@ -397,6 +408,25 @@ pub fn router_with_authenticator(
     router_with_state(ServerState::detached(view), config, authenticator)
 }
 
+/// Build the application with a caller-supplied [`ActionSink`] behind the write
+/// seam (`REQ_0969`).
+///
+/// Like [`router`] but substitutes `actions` for the default empty
+/// [`SimActionSink`](taktora_medkit_provider::SimActionSink), so the operations
+/// surface is backed by a configured simulation (tests, demos) or — later — a
+/// real binding. The read core and auth are unchanged.
+pub fn router_with_actions(
+    view: AppState,
+    config: &GatewayConfig,
+    actions: Arc<dyn ActionSink>,
+) -> Router {
+    router_with_state(
+        ServerState::detached_with_actions(view, actions),
+        config,
+        Arc::new(PermissiveAuthenticator),
+    )
+}
+
 /// Build the application from a [`Gateway`], folding its provider snapshot into
 /// the merged read-model once at construction.
 ///
@@ -469,6 +499,24 @@ pub async fn serve_listener(
     config: &GatewayConfig,
 ) -> std::io::Result<()> {
     axum::serve(listener, router(view, config)).await
+}
+
+/// Serve the read-core plus the operations write surface backed by `actions` on
+/// an already-bound `listener` (`REQ_0969`).
+///
+/// Like [`serve_listener`] but substitutes a configured [`ActionSink`] for the
+/// default empty simulation.
+///
+/// # Errors
+///
+/// Returns the underlying I/O error if the server loop fails.
+pub async fn serve_listener_with_actions(
+    listener: tokio::net::TcpListener,
+    view: AppState,
+    config: &GatewayConfig,
+    actions: Arc<dyn ActionSink>,
+) -> std::io::Result<()> {
+    axum::serve(listener, router_with_actions(view, config, actions)).await
 }
 
 /// Serve the read-core plus the **live** triggers + SSE surface on an

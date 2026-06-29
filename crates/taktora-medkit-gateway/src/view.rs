@@ -661,7 +661,7 @@ pub fn root_document() -> Value {
             "faults": true,
             "locking": true,
             "logs": false,
-            "operations": false,
+            "operations": true,
             "scripts": false,
             "tls": false,
             "triggers": true,
@@ -712,6 +712,11 @@ fn endpoint_catalogue() -> Vec<String> {
         // Entity-scoped triggers are exposed on every kind (`REQ_0962`).
         endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/triggers"));
         endpoints.push(format!("POST {API_BASE}/{collection}/{{id}}/triggers"));
+        // Operations + async executions are exposed on every kind (`REQ_0969`).
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/operations"));
+        endpoints.push(format!(
+            "POST {API_BASE}/{collection}/{{id}}/operations/{{op}}/executions"
+        ));
     }
     // Diagnostic-scoped locks are exposed on apps and components only (`REQ_0963`).
     for kind in [EntityKind::App, EntityKind::Component] {
@@ -829,6 +834,7 @@ mod tests {
             "authentication",
             "locking",
             "triggers",
+            "operations",
             "vendor_extensions",
         ] {
             assert_eq!(
@@ -836,14 +842,7 @@ mod tests {
                 "{served} is served, must advertise true"
             );
         }
-        for deferred in [
-            "operations",
-            "configurations",
-            "bulk_data",
-            "scripts",
-            "logs",
-            "updates",
-        ] {
+        for deferred in ["configurations", "bulk_data", "scripts", "logs", "updates"] {
             assert_eq!(
                 caps[deferred], false,
                 "{deferred} is deferred, must advertise false"

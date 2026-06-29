@@ -53,7 +53,7 @@ use taktora_medkit_gateway::{FaultStatusFilter, Manifest, MergedView};
 use taktora_medkit_model::{
     EntityKind, FaultEvent, FaultEventMeta, FaultSummary, GenericError, Health, Severity,
 };
-use taktora_medkit_provider::{Provider, severity_to_health};
+use taktora_medkit_provider::{ActionSink, Provider, SimActionSink, severity_to_health};
 use tokio::sync::{broadcast, watch};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt};
@@ -198,6 +198,7 @@ pub struct ServerState {
     events: broadcast::Sender<StreamEvent>,
     ring: EventRing,
     locks: Arc<LockRegistry>,
+    actions: Arc<dyn ActionSink>,
 }
 
 impl ServerState {
@@ -205,6 +206,26 @@ impl ServerState {
     /// routes (`BB_0113`, issue #149).
     pub fn locks(&self) -> &LockRegistry {
         &self.locks
+    }
+
+    /// The write/action seam behind the `…/{id}/operations` routes (`BB_0121`,
+    /// `REQ_0969`). Defaults to an empty in-memory [`SimActionSink`]; inject a
+    /// configured one with [`with_actions`](Self::with_actions).
+    pub fn actions(&self) -> &dyn ActionSink {
+        self.actions.as_ref()
+    }
+
+    /// Substitute the write/action sink (e.g. a configured simulation in tests,
+    /// or a real binding later). Returns `self` for chaining.
+    #[must_use]
+    pub fn with_actions(mut self, actions: Arc<dyn ActionSink>) -> Self {
+        self.actions = actions;
+        self
+    }
+
+    /// A detached state with `actions` as its write sink.
+    pub fn detached_with_actions(view: Arc<MergedView>, actions: Arc<dyn ActionSink>) -> Self {
+        Self::detached(view).with_actions(actions)
     }
 }
 
@@ -225,6 +246,7 @@ impl ServerState {
             events,
             ring: Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_RING))),
             locks: Arc::new(LockRegistry::system()),
+            actions: Arc::new(SimActionSink::new()),
         }
     }
 }

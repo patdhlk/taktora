@@ -115,7 +115,7 @@ async fn root_capabilities_are_honest() {
     assert_eq!(caps["locking"], true);
     assert_eq!(caps["triggers"], true);
     assert_eq!(caps["vendor_extensions"], true);
-    assert_eq!(caps["operations"], false);
+    assert_eq!(caps["operations"], true);
     assert_eq!(caps["bulk_data"], false);
 
     let endpoints: Vec<&str> = root["endpoints"]
