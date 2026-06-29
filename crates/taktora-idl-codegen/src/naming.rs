@@ -2,7 +2,7 @@
 //!
 //! The IR carries source names verbatim; turning `EngineData_Gear` into a type
 //! `EngineDataGear` and `CoolantTemp` into a field `coolant_temp` is policy,
-//! and it lives here so backends stay policy-free (`REQ_0863`) — exactly the
+//! and it lives here so backends stay policy-free (`REQ_0938`) — exactly the
 //! split the device-plane toolchain draws with its own `naming.rs`.
 
 use proc_macro2::Ident;

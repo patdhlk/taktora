@@ -42,6 +42,11 @@ top-level features:
   DTC/fault model served over a drop-in-compatible REST surface, sourced
   from taktora's runtime through off-control-path hooks. See
   :doc:`medkit/index`.
+* :need:`FEAT_0110` "Message-plane interface-description codegen" —
+  build-time layered crates that translate interface descriptions (CAN
+  ``.dbc`` today) into strongly-typed Rust message (de)serializers, with
+  a ``no_std``, ``serde``-free wire runtime. The message-plane twin of
+  the device-plane ESI/EDS toolchains. See :doc:`idl/index`.
 
 Each ``req`` directive ``:satisfies:`` one ``feat`` parent; each
 capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
@@ -58,6 +63,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    ethercat-netcfg/index
    motion/index
    medkit/index
+   idl/index
 
 Requirements at a glance
 ------------------------

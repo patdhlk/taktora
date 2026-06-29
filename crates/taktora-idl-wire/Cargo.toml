@@ -13,7 +13,7 @@ categories   = { workspace = true }
 description  = "Serde-free, no_std, no-heap runtime support for generated message (de)serializers: the WireType trait and CAN signal bit-packing primitives."
 
 # Intentionally dependency-free: the safety-relevant (de)serialization path must
-# never reach for serde or an allocator (REQ_0861), keeping it Kani/Miri-clean.
+# never reach for serde or an allocator (REQ_0934), keeping it Kani/Miri-clean.
 
 [lints.rust]
 unsafe_code  = "forbid"

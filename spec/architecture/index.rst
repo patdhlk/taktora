@@ -20,6 +20,7 @@ detailed-design notes that predate the arc42 adoption.
    ethercat-netcfg/index
    motion/index
    medkit/index
+   idl/index
    safety
 
 Building blocks

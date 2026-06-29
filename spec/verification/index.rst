@@ -16,6 +16,7 @@ Test cases verifying requirements. Each ``test`` directive
    logging/index
    ethercat-netcfg/index
    medkit/index
+   idl/index
 
 .. needtable::
    :types: test
