@@ -662,7 +662,7 @@ pub fn root_document() -> Value {
             "locking": true,
             "logs": false,
             "operations": true,
-            "scripts": false,
+            "scripts": true,
             "tls": false,
             "triggers": true,
             "updates": false,
@@ -736,6 +736,13 @@ fn endpoint_catalogue() -> Vec<String> {
         endpoints.push(format!(
             "POST {API_BASE}/{collection}/{{id}}/bulk-data/{{category_id}}"
         ));
+    }
+    // Scripts (storage + executions) are exposed on apps and components only
+    // (`REQ_0973`).
+    for kind in [EntityKind::App, EntityKind::Component] {
+        let collection = collection_segment(kind);
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/scripts"));
+        endpoints.push(format!("POST {API_BASE}/{collection}/{{id}}/scripts"));
     }
     endpoints
 }
@@ -850,6 +857,7 @@ mod tests {
             "operations",
             "configurations",
             "bulk_data",
+            "scripts",
             "vendor_extensions",
         ] {
             assert_eq!(
@@ -857,7 +865,7 @@ mod tests {
                 "{served} is served, must advertise true"
             );
         }
-        for deferred in ["scripts", "logs", "updates"] {
+        for deferred in ["logs", "updates"] {
             assert_eq!(
                 caps[deferred], false,
                 "{deferred} is deferred, must advertise false"

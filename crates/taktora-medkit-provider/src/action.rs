@@ -128,6 +128,16 @@ pub struct BulkDescriptor {
     pub size: usize,
 }
 
+/// One stored script on a target — the metadata served under `…/scripts` and
+/// `…/scripts/{script_id}` (`REQ_0973`).
+#[derive(Clone, Debug, Serialize)]
+pub struct ScriptDef {
+    /// The server-assigned script id (URL path component).
+    pub id: String,
+    /// The stored script size in bytes.
+    pub size: usize,
+}
+
 /// A write/action failure, mapped to a contract-shaped error by the gateway.
 ///
 /// Reserves no `Forbidden` variant yet: the safety gate is deferred (`ADR_0126`),
@@ -297,6 +307,77 @@ pub trait ActionSink: Send + Sync {
         category: &str,
         file_id: &str,
     ) -> Result<(), ActionError>;
+
+    /// The scripts stored on `target`, ordered by id (empty if none) —
+    /// `REQ_0973`.
+    fn scripts(&self, target: &ResourceRef) -> Vec<ScriptDef>;
+
+    /// Upload `content` as a new script on `target`, returning its metadata
+    /// (`REQ_0973`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::BadRequest`] if a real binding rejects the upload; the
+    /// in-memory simulation always succeeds.
+    fn upload_script(
+        &self,
+        target: &ResourceRef,
+        content: Vec<u8>,
+    ) -> Result<ScriptDef, ActionError>;
+
+    /// One script by id (`REQ_0973`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if `script_id` is not stored on `target`.
+    fn script(&self, target: &ResourceRef, script_id: &str) -> Result<ScriptDef, ActionError>;
+
+    /// Delete `script_id` from `target` (`REQ_0973`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if `script_id` is not stored on `target`.
+    fn delete_script(&self, target: &ResourceRef, script_id: &str) -> Result<(), ActionError>;
+
+    /// Start an execution of `script_id` on `target` (`REQ_0973`).
+    ///
+    /// Reuses the operations [`Execution`] type: the simulation completes
+    /// synchronously with a result echoing the script id.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if `script_id` is not stored on `target`.
+    fn start_script(&self, target: &ResourceRef, script_id: &str)
+    -> Result<Execution, ActionError>;
+
+    /// One script execution by id (`REQ_0973`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if no such execution exists for `script_id` on
+    /// `target`.
+    fn script_execution(
+        &self,
+        target: &ResourceRef,
+        script_id: &str,
+        exec_id: &str,
+    ) -> Result<Execution, ActionError>;
+
+    /// Cancel (if running) or remove (if terminal) a script execution
+    /// (`REQ_0973`).
+    ///
+    /// Idempotent cancel-or-remove: either way the execution is gone afterwards.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if no such execution exists for `script_id` on
+    /// `target`.
+    fn cancel_script_execution(
+        &self,
+        target: &ResourceRef,
+        script_id: &str,
+        exec_id: &str,
+    ) -> Result<(), ActionError>;
 }
 
 /// The resource a catalogue/execution is keyed by.
@@ -309,6 +390,16 @@ type BulkStore = HashMap<ResourceKey, BTreeMap<String, BTreeMap<String, Vec<u8>>
 #[derive(Clone, Debug)]
 struct ExecRecord {
     key: ResourceKey,
+    execution: Execution,
+}
+
+/// One tracked script execution plus the resource/script it belongs to (for
+/// filtering), kept separate from operation executions so the two surfaces never
+/// collide on exec id.
+#[derive(Clone, Debug)]
+struct ScriptExecRecord {
+    key: ResourceKey,
+    script_id: String,
     execution: Execution,
 }
 
@@ -327,6 +418,10 @@ pub struct SimActionSink {
     configs: Mutex<HashMap<ResourceKey, BTreeMap<String, Value>>>,
     /// Per-resource bulk-data store: category → file id → stored bytes.
     bulk: Mutex<BulkStore>,
+    /// Per-resource script store: script id → stored size in bytes.
+    scripts: Mutex<HashMap<ResourceKey, BTreeMap<String, usize>>>,
+    /// Script executions keyed by exec id (separate from operation executions).
+    script_execs: Mutex<HashMap<String, ScriptExecRecord>>,
     next: AtomicU64,
 }
 
@@ -370,6 +465,14 @@ impl SimActionSink {
             .expect("action catalogue poisoned")
             .get(&(target.kind, target.id.clone()))
             .is_some_and(|ops| ops.iter().any(|d| d.id == op))
+    }
+
+    fn has_script(&self, target: &ResourceRef, script_id: &str) -> bool {
+        self.scripts
+            .lock()
+            .expect("script store poisoned")
+            .get(&(target.kind, target.id.clone()))
+            .is_some_and(|m| m.contains_key(script_id))
     }
 }
 
@@ -625,6 +728,130 @@ impl ActionSink for SimActionSink {
         drop(map);
         Ok(())
     }
+
+    fn scripts(&self, target: &ResourceRef) -> Vec<ScriptDef> {
+        self.scripts
+            .lock()
+            .expect("script store poisoned")
+            .get(&(target.kind, target.id.clone()))
+            .map(|m| {
+                m.iter()
+                    .map(|(id, &size)| ScriptDef {
+                        id: id.clone(),
+                        size,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn upload_script(
+        &self,
+        target: &ResourceRef,
+        content: Vec<u8>,
+    ) -> Result<ScriptDef, ActionError> {
+        let id = format!("script-{}", self.next.fetch_add(1, Ordering::SeqCst));
+        let size = content.len();
+        let mut map = self.scripts.lock().expect("script store poisoned");
+        map.entry((target.kind, target.id.clone()))
+            .or_default()
+            .insert(id.clone(), size);
+        drop(map);
+        Ok(ScriptDef { id, size })
+    }
+
+    fn script(&self, target: &ResourceRef, script_id: &str) -> Result<ScriptDef, ActionError> {
+        self.scripts
+            .lock()
+            .expect("script store poisoned")
+            .get(&(target.kind, target.id.clone()))
+            .and_then(|m| m.get(script_id))
+            .map(|&size| ScriptDef {
+                id: script_id.to_owned(),
+                size,
+            })
+            .ok_or(ActionError::NotFound)
+    }
+
+    fn delete_script(&self, target: &ResourceRef, script_id: &str) -> Result<(), ActionError> {
+        let key = (target.kind, target.id.clone());
+        let mut map = self.scripts.lock().expect("script store poisoned");
+        let removed = map
+            .get_mut(&key)
+            .is_some_and(|m| m.remove(script_id).is_some());
+        if !removed {
+            return Err(ActionError::NotFound);
+        }
+        drop(map);
+        Ok(())
+    }
+
+    fn start_script(
+        &self,
+        target: &ResourceRef,
+        script_id: &str,
+    ) -> Result<Execution, ActionError> {
+        if !self.has_script(target, script_id) {
+            return Err(ActionError::NotFound);
+        }
+        let id = format!("sexec-{}", self.next.fetch_add(1, Ordering::SeqCst));
+        // The simulation completes synchronously, like `start_operation`: a real
+        // binding would return `Pending` and drive the transition off the path.
+        let execution = Execution {
+            id: id.clone(),
+            operation_id: script_id.to_owned(),
+            status: ExecutionStatus::Completed,
+            result: Some(serde_json::json!({ "script": script_id })),
+        };
+        self.script_execs
+            .lock()
+            .expect("script execution registry poisoned")
+            .insert(
+                id,
+                ScriptExecRecord {
+                    key: (target.kind, target.id.clone()),
+                    script_id: script_id.to_owned(),
+                    execution: execution.clone(),
+                },
+            );
+        Ok(execution)
+    }
+
+    fn script_execution(
+        &self,
+        target: &ResourceRef,
+        script_id: &str,
+        exec_id: &str,
+    ) -> Result<Execution, ActionError> {
+        let key = (target.kind, target.id.clone());
+        self.script_execs
+            .lock()
+            .expect("script execution registry poisoned")
+            .get(exec_id)
+            .filter(|r| r.key == key && r.script_id == script_id)
+            .map(|r| r.execution.clone())
+            .ok_or(ActionError::NotFound)
+    }
+
+    fn cancel_script_execution(
+        &self,
+        target: &ResourceRef,
+        script_id: &str,
+        exec_id: &str,
+    ) -> Result<(), ActionError> {
+        let key = (target.kind, target.id.clone());
+        let mut map = self
+            .script_execs
+            .lock()
+            .expect("script execution registry poisoned");
+        match map.get(exec_id) {
+            Some(r) if r.key == key && r.script_id == script_id => {}
+            _ => return Err(ActionError::NotFound),
+        }
+        map.remove(exec_id);
+        drop(map);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -802,5 +1029,85 @@ mod tests {
             ActionError::NotFound
         );
         assert_eq!(sink.bulk_categories(&target()).len(), 0);
+    }
+
+    /// `REQ_0973` — upload → get/list → start execution → poll → cancel → 404,
+    /// then delete the script → 404; an unknown script never starts.
+    #[test]
+    fn script_upload_and_execute() {
+        let sink = SimActionSink::new();
+
+        // A fresh resource has no scripts; an unknown script is NotFound and
+        // never starts an execution.
+        assert_eq!(sink.scripts(&target()).len(), 0);
+        assert_eq!(
+            sink.script(&target(), "script-1").unwrap_err(),
+            ActionError::NotFound
+        );
+        assert_eq!(
+            sink.start_script(&target(), "script-1").unwrap_err(),
+            ActionError::NotFound
+        );
+
+        // Upload stores the bytes and returns metadata with the size.
+        let payload = b"#!/bin/sh\necho hi".to_vec();
+        let script = sink
+            .upload_script(&target(), payload.clone())
+            .expect("upload");
+        assert_eq!(script.size, payload.len());
+        assert!(script.id.starts_with("script-"));
+
+        // Get finds it; the list shows it.
+        assert_eq!(
+            sink.script(&target(), &script.id).unwrap().size,
+            payload.len()
+        );
+        assert_eq!(sink.scripts(&target()).len(), 1);
+
+        // Start an execution -> synchronously completed, echoing the script id.
+        let started = sink.start_script(&target(), &script.id).expect("start");
+        assert_eq!(started.status, ExecutionStatus::Completed);
+        assert!(started.id.starts_with("sexec-"));
+        assert_eq!(
+            started.result,
+            Some(serde_json::json!({"script": script.id}))
+        );
+
+        // Poll finds it; a different script never sees this execution.
+        assert!(
+            sink.script_execution(&target(), &script.id, &started.id)
+                .is_ok()
+        );
+        assert_eq!(
+            sink.script_execution(&target(), "script-other", &started.id)
+                .unwrap_err(),
+            ActionError::NotFound
+        );
+
+        // Cancel removes it; a subsequent poll/cancel is NotFound.
+        sink.cancel_script_execution(&target(), &script.id, &started.id)
+            .expect("cancel");
+        assert_eq!(
+            sink.script_execution(&target(), &script.id, &started.id)
+                .unwrap_err(),
+            ActionError::NotFound
+        );
+        assert_eq!(
+            sink.cancel_script_execution(&target(), &script.id, &started.id)
+                .unwrap_err(),
+            ActionError::NotFound
+        );
+
+        // Delete the script; a second delete and a get are NotFound.
+        sink.delete_script(&target(), &script.id).expect("delete");
+        assert_eq!(
+            sink.delete_script(&target(), &script.id).unwrap_err(),
+            ActionError::NotFound
+        );
+        assert_eq!(
+            sink.script(&target(), &script.id).unwrap_err(),
+            ActionError::NotFound
+        );
+        assert_eq!(sink.scripts(&target()).len(), 0);
     }
 }

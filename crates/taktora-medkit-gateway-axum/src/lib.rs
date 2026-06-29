@@ -31,6 +31,7 @@ pub mod demo;
 mod error;
 mod locks;
 mod ratelimit;
+mod scripts;
 mod triggers;
 
 use std::net::SocketAddr;
@@ -350,6 +351,16 @@ fn api_router() -> Router<ServerState> {
         // (`ADR_0126`).
         .merge(bulkdata::bulk_data_routes(EntityKind::App))
         .merge(bulkdata::bulk_data_routes(EntityKind::Component))
+        // Scripts: SOVD per-entity script storage plus async executions
+        // (`REQ_0973`), a hybrid of the bulk-data upload surface and the
+        // operations execution surface, served through the same `ActionSink` seam
+        // and carved out from under the `deferred` `501` fallback for the two
+        // kinds the contract exposes scripts on (apps, components). v1 is an
+        // in-memory simulation (the body is stored opaquely as bytes, executions
+        // complete synchronously, no real effect); the write-surface safety gate
+        // (`ADR_0119`) re-enters at the seam when a real binding lands (`ADR_0126`).
+        .merge(scripts::script_routes(EntityKind::App))
+        .merge(scripts::script_routes(EntityKind::Component))
         .fallback(deferred)
 }
 

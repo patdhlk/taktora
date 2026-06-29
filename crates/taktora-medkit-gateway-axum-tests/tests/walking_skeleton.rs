@@ -244,7 +244,9 @@ async fn deferred_families_return_501() {
         // `…/{id}/bulk-data` is no longer a wholesale-deferred path.
         // `locks` is a live family now (#149): `…/{id}/locks` is a real
         // POST/PUT/DELETE surface, so it is no longer a wholesale-deferred path.
-        "/api/v1/components/spark-6723/scripts",
+        // `scripts` is a live family now (`REQ_0973`): apps/components expose a
+        // real storage + executions surface through the `ActionSink` seam, so
+        // `…/{id}/scripts` is no longer a wholesale-deferred path.
         "/api/v1/components/spark-6723/logs",
         "/api/v1/components/spark-6723/status",
         // `triggers` is a live family now (`REQ_0962`): entity-scoped triggers are
