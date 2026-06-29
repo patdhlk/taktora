@@ -238,7 +238,8 @@ async fn deferred_families_return_501() {
         "/api/v1/components/spark-6723/operations",
         "/api/v1/components/spark-6723/configurations",
         "/api/v1/components/spark-6723/bulk-data",
-        "/api/v1/components/spark-6723/locks",
+        // `locks` is a live family now (#149): `…/{id}/locks` is a real
+        // POST/PUT/DELETE surface, so it is no longer a wholesale-deferred path.
         "/api/v1/components/spark-6723/scripts",
         "/api/v1/components/spark-6723/logs",
         "/api/v1/components/spark-6723/status",

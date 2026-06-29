@@ -26,6 +26,7 @@ mod auth;
 mod config;
 pub mod demo;
 mod error;
+mod locks;
 mod ratelimit;
 mod triggers;
 
@@ -276,6 +277,13 @@ fn api_router() -> Router<ServerState> {
             &format!("{API_BASE}/triggers/{{id}}"),
             get(triggers::get_trigger).delete(triggers::delete_trigger),
         )
+        // SOVD diagnostic-scoped exclusive access (`REQ_0940`–`REQ_0944`, issue
+        // #149), carved out from under the `deferred` fallback for the two entity
+        // kinds the contract exposes `/locks` on (apps, components). Guards no SC
+        // resource — strictly QM coordination between diagnostic clients
+        // (`ADR_0120`).
+        .merge(locks::lock_routes(EntityKind::App))
+        .merge(locks::lock_routes(EntityKind::Component))
         .fallback(deferred)
 }
 

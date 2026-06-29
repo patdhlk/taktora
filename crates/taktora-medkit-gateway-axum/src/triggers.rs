@@ -57,6 +57,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::error::ApiError;
+use crate::locks::LockRegistry;
 
 /// How many change events the broadcast channel buffers for a slow subscriber.
 const EVENT_BUFFER: usize = 256;
@@ -162,6 +163,15 @@ pub struct ServerState {
     view: watch::Receiver<Arc<MergedView>>,
     triggers: Arc<Mutex<TriggerStore>>,
     events: broadcast::Sender<StreamEvent>,
+    locks: Arc<LockRegistry>,
+}
+
+impl ServerState {
+    /// The diagnostic-coordination lock registry behind the `…/{id}/locks`
+    /// routes (`BB_0113`, issue #149).
+    pub fn locks(&self) -> &LockRegistry {
+        &self.locks
+    }
 }
 
 impl ServerState {
@@ -179,6 +189,7 @@ impl ServerState {
             view,
             triggers: Arc::new(Mutex::new(TriggerStore::default())),
             events,
+            locks: Arc::new(LockRegistry::system()),
         }
     }
 }
