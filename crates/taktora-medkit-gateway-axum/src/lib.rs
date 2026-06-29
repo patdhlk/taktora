@@ -27,6 +27,7 @@ mod auth;
 mod bulkdata;
 mod config;
 mod configurations;
+mod cyclic;
 pub mod demo;
 mod error;
 mod lifecycle;
@@ -318,6 +319,15 @@ fn api_router() -> Router<ServerState> {
         .merge(triggers::trigger_routes(EntityKind::Component))
         .merge(triggers::trigger_routes(EntityKind::App))
         .merge(triggers::trigger_routes(EntityKind::Function))
+        // Cyclic subscriptions (`REQ_0977`): periodic data-sampling subscriptions
+        // with a per-resource SSE sample stream, mounted per entity on the three
+        // kinds the contract exposes them on (apps, components, functions) and
+        // carved out from under the `deferred` `501` fallback. Each subscription's
+        // `…/events` stream samples the entity's data on its own cadence — a
+        // self-contained periodic stream, distinct from the trigger broadcast.
+        .merge(cyclic::cyclic_routes(EntityKind::Component))
+        .merge(cyclic::cyclic_routes(EntityKind::App))
+        .merge(cyclic::cyclic_routes(EntityKind::Function))
         // SOVD diagnostic-scoped exclusive access (`REQ_0940`–`REQ_0944`, issue
         // #149), carved out from under the `deferred` fallback for the two entity
         // kinds the contract exposes `/locks` on (apps, components). Guards no SC

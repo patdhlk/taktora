@@ -691,7 +691,7 @@ pub fn root_document() -> Value {
             "authentication": true,
             "bulk_data": true,
             "configurations": true,
-            "cyclic_subscriptions": false,
+            "cyclic_subscriptions": true,
             "data_access": true,
             "discovery": true,
             "faults": true,
@@ -765,6 +765,17 @@ fn endpoint_catalogue() -> Vec<String> {
         // Logs (read entries + a config GET/PUT) are exposed on every kind
         // (`REQ_0976`).
         endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/logs"));
+    }
+    // Cyclic subscriptions are exposed on apps, components, and functions only
+    // (`REQ_0977`).
+    for kind in [EntityKind::Component, EntityKind::App, EntityKind::Function] {
+        let collection = collection_segment(kind);
+        endpoints.push(format!(
+            "GET {API_BASE}/{collection}/{{id}}/cyclic-subscriptions"
+        ));
+        endpoints.push(format!(
+            "POST {API_BASE}/{collection}/{{id}}/cyclic-subscriptions"
+        ));
     }
     // Diagnostic-scoped locks are exposed on apps and components only (`REQ_0963`).
     for kind in [EntityKind::App, EntityKind::Component] {
@@ -910,6 +921,7 @@ mod tests {
             "scripts",
             "updates",
             "logs",
+            "cyclic_subscriptions",
             "vendor_extensions",
         ] {
             assert_eq!(
