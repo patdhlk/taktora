@@ -95,9 +95,9 @@ taktora-ethercat-esi-rt                  = { path = "crates/taktora-ethercat-esi
 taktora-fieldbus-od-core                 = { path = "crates/taktora-fieldbus-od-core", version = "0.1.5" }
 taktora-idl-core                         = { path = "crates/taktora-idl-core", version = "0.1.1" }
 taktora-idl-dbc                          = { path = "crates/taktora-idl-dbc", version = "0.1.1" }
-taktora-idl-wire                         = { path = "crates/taktora-idl-wire", version = "0.1.1" }
-taktora-idl-codegen                      = { path = "crates/taktora-idl-codegen", version = "0.1.1" }
-taktora-idl-codegen-can                  = { path = "crates/taktora-idl-codegen-can", version = "0.1.1" }
+taktora-idl-wire                         = { path = "crates/taktora-idl-wire", version = "0.1.2" }
+taktora-idl-codegen                      = { path = "crates/taktora-idl-codegen", version = "0.1.2" }
+taktora-idl-codegen-can                  = { path = "crates/taktora-idl-codegen-can", version = "0.1.2" }
 taktora-ethercat-netcfg                  = { path = "crates/taktora-ethercat-netcfg", version = "0.4.1" }
 taktora-ethercat-netcfg-build            = { path = "crates/taktora-ethercat-netcfg-build", version = "0.1.9" }
 taktora-ethercat-netcfg-cli              = { path = "crates/taktora-ethercat-netcfg-cli", version = "0.1.9" }
@@ -128,11 +128,11 @@ taktora-stats                    = { path = "crates/taktora-stats", version = "0
 taktora-telemetry-export         = { path = "crates/taktora-telemetry-export", version = "0.1.0" }
 taktora-medkit-model             = { path = "crates/taktora-medkit-model", version = "0.2.0" }
 taktora-medkit-manifest          = { path = "crates/taktora-medkit-manifest", version = "0.1.0" }
-taktora-medkit-provider          = { path = "crates/taktora-medkit-provider", version = "0.1.1" }
-taktora-medkit-gateway           = { path = "crates/taktora-medkit-gateway", version = "0.1.1" }
-taktora-medkit-gateway-axum      = { path = "crates/taktora-medkit-gateway-axum", version = "0.1.1" }
-taktora-medkit-binding-executor  = { path = "crates/taktora-medkit-binding-executor", version = "0.1.1" }
-taktora-medkit-binding-connector = { path = "crates/taktora-medkit-binding-connector", version = "0.1.1" }
+taktora-medkit-provider          = { path = "crates/taktora-medkit-provider", version = "0.1.2" }
+taktora-medkit-gateway           = { path = "crates/taktora-medkit-gateway", version = "0.1.2" }
+taktora-medkit-gateway-axum      = { path = "crates/taktora-medkit-gateway-axum", version = "0.2.0" }
+taktora-medkit-binding-executor  = { path = "crates/taktora-medkit-binding-executor", version = "0.2.0" }
+taktora-medkit-binding-connector = { path = "crates/taktora-medkit-binding-connector", version = "0.2.0" }
 
 # External crates
 iceoryx2          = "0.8"
