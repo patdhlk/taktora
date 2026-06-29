@@ -473,3 +473,49 @@ they verify to ``implemented`` and link these tests.
    ``PUT …/status/start`` returns ``202`` and transitions back to ``running``. A
    provider unit test confirms the transition mapping and that an unknown
    transition is a ``BadRequest``.
+
+.. test:: Logs read and configuration over HTTP
+   :id: TEST_0951
+   :status: implemented
+   :verifies: REQ_0976
+
+   Over a live server backed by a ``MockProvider`` carrying log entries of
+   differing severities/contexts, ``GET …/logs`` returns all entries,
+   ``?severity=error`` narrows to error entries, and ``?context=<substr>`` narrows
+   by substring; ``GET …/logs/configuration`` returns a default config and a
+   ``PUT`` round-trips a new one. A provider unit test confirms the configuration
+   default-and-upsert at the sink level.
+
+.. test:: Cyclic-subscriptions CRUD and sampling SSE
+   :id: TEST_0952
+   :status: implemented
+   :verifies: REQ_0977
+
+   Over a live server, a cyclic subscription round-trips (POST pinned to the
+   entity → ``201``, GET, list, PUT, cross-entity GET → ``404``, DELETE → ``204``
+   then GET → ``404``), and opening ``…/{sub_id}/events`` yields at least one
+   ``data`` sample frame carrying the sampled entity data within a short window.
+   Store unit tests confirm entity-scoped listing and pinning.
+
+.. test:: Health telemetry overlay
+   :id: TEST_0953
+   :status: implemented
+   :verifies: REQ_0978
+
+   Over a live server backed by a ``MockProvider::with_telemetry(...)``,
+   ``GET /health`` surfaces the provider's override values (e.g. ``pool_cap``,
+   ``worker_alive``, ``generation``) while the live entity-cache ``apps`` count
+   stays authoritative; a server over a plain provider still returns the zero
+   baseline. View unit tests confirm the overlay and the back-compatible default.
+
+.. test:: Single-entity capability catalogue
+   :id: TEST_0954
+   :status: implemented
+   :verifies: REQ_0979
+
+   Over a live server, ``GET /apps/{id}`` carries a ``capabilities`` array whose
+   names include the app's sub-resources (data, operations, configurations,
+   faults, logs, bulk-data, cyclic-subscriptions, triggers) each with an
+   entity-scoped ``href``, the flat per-sub-resource href keys, and the
+   ``_links`` self/collection; ``GET /functions/{id}`` exposes the narrower
+   function set (no ``locks``/``status``).

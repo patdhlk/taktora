@@ -27,10 +27,12 @@ mod auth;
 mod bulkdata;
 mod config;
 mod configurations;
+mod cyclic;
 pub mod demo;
 mod error;
 mod lifecycle;
 mod locks;
+mod logs;
 mod ratelimit;
 mod scripts;
 mod triggers;
@@ -75,23 +77,139 @@ fn ok<T: Serialize>(value: &T) -> Json<Value> {
 
 // ---- Read-core handlers (thin adapters over the pure resolvers) ------------
 
+/// Serve the verbose single-entity detail document for `GET /{collection}/{id}`
+/// (`REQ_0979`).
+///
+/// Beyond the entity's own fields the document carries the SOVD capability
+/// catalogue: an `_links` block (`self`, `collection`, plus the kind's relation
+/// sub-resources), a flat top-level href key per advertised sub-resource, and a
+/// `capabilities` array of `{ "name", "href" }` entries — one per sub-resource
+/// and relation the kind exposes. The per-kind segment set comes from
+/// [`entity_capabilities`]; the doc-building is pushed into helpers to keep this
+/// adapter flat.
 fn entity_detail(view: &MergedView, kind: EntityKind, id: &str) -> ApiResult {
     let entity = view
         .entity(id)
         .filter(|e| e.kind == kind)
         .ok_or_else(|| ApiError::NotFound(not_found_entity(id)))?;
     let collection = collection_segment(kind);
+    let base = format!("{API_BASE}/{collection}/{id}");
     let mut doc = serde_json::to_value(entity).unwrap_or(Value::Null);
     if let Value::Object(map) = &mut doc {
-        map.insert(
-            "_links".to_owned(),
-            json!({
-                "self": format!("{API_BASE}/{collection}/{id}"),
-                "collection": format!("{API_BASE}/{collection}")
-            }),
-        );
+        map.insert("_links".to_owned(), entity_links(kind, collection, &base));
+        for &segment in entity_capabilities(kind) {
+            // The flat top-level href keys mirror the catalogue, save `locks`,
+            // which the contract surfaces only inside `capabilities`.
+            if segment != "locks" {
+                map.insert(segment.to_owned(), json!(format!("{base}/{segment}")));
+            }
+        }
+        map.insert("capabilities".to_owned(), capability_catalogue(kind, &base));
     }
     Ok(Json(doc))
+}
+
+/// The ordered capability segments a single-entity detail document advertises
+/// for `kind` — every sub-resource and relation the entity exposes — mirroring
+/// the captured golden (`REQ_0979`). Drives both the flat top-level href keys
+/// and the `capabilities` catalogue array.
+const fn entity_capabilities(kind: EntityKind) -> &'static [&'static str] {
+    match kind {
+        EntityKind::App => &[
+            "status",
+            "data",
+            "operations",
+            "configurations",
+            "faults",
+            "logs",
+            "bulk-data",
+            "cyclic-subscriptions",
+            "triggers",
+            "is-located-on",
+            "belongs-to",
+            "locks",
+        ],
+        EntityKind::Component => &[
+            "status",
+            "data",
+            "operations",
+            "configurations",
+            "faults",
+            "logs",
+            "subcomponents",
+            "hosts",
+            "bulk-data",
+            "cyclic-subscriptions",
+            "triggers",
+            "locks",
+        ],
+        EntityKind::Function => &[
+            "hosts",
+            "data",
+            "operations",
+            "configurations",
+            "faults",
+            "logs",
+            "bulk-data",
+            "cyclic-subscriptions",
+            "triggers",
+        ],
+        EntityKind::Area => &[
+            "data",
+            "operations",
+            "configurations",
+            "faults",
+            "logs",
+            "triggers",
+            "contains",
+            "components",
+        ],
+    }
+}
+
+/// The relations registered for `kind`'s sub-resource routes — the single source
+/// of truth shared by [`api_router`] and the detail document's `_links`.
+const fn kind_relations(kind: EntityKind) -> &'static [Relation] {
+    match kind {
+        EntityKind::Area => &[Relation::Contains, Relation::Components],
+        EntityKind::Component => &[
+            Relation::Subcomponents,
+            Relation::Hosts,
+            Relation::DependsOn,
+        ],
+        EntityKind::App => &[
+            Relation::IsLocatedOn,
+            Relation::BelongsTo,
+            Relation::DependsOn,
+        ],
+        EntityKind::Function => &[Relation::Hosts],
+    }
+}
+
+/// Build the detail document's `_links`: `self`, `collection`, and a href for
+/// each of the kind's relation sub-resources (`REQ_0979`).
+fn entity_links(kind: EntityKind, collection: &str, base: &str) -> Value {
+    let mut links = serde_json::Map::new();
+    links.insert("self".to_owned(), json!(base));
+    links.insert(
+        "collection".to_owned(),
+        json!(format!("{API_BASE}/{collection}")),
+    );
+    for relation in kind_relations(kind) {
+        let segment = relation.segment();
+        links.insert(segment.to_owned(), json!(format!("{base}/{segment}")));
+    }
+    Value::Object(links)
+}
+
+/// Build the `capabilities` catalogue: a `{ "name", "href" }` entry per segment
+/// the kind exposes, in [`entity_capabilities`] order (`REQ_0979`).
+fn capability_catalogue(kind: EntityKind, base: &str) -> Value {
+    let entries: Vec<Value> = entity_capabilities(kind)
+        .iter()
+        .map(|&segment| json!({ "name": segment, "href": format!("{base}/{segment}") }))
+        .collect();
+    Value::Array(entries)
 }
 
 fn not_found_entity(id: &str) -> taktora_medkit_model::GenericError {
@@ -274,25 +392,20 @@ fn api_router() -> Router<ServerState> {
         )
         .merge(kind_routes(
             EntityKind::Area,
-            &[Relation::Contains, Relation::Components],
+            kind_relations(EntityKind::Area),
         ))
         .merge(kind_routes(
             EntityKind::Component,
-            &[
-                Relation::Subcomponents,
-                Relation::Hosts,
-                Relation::DependsOn,
-            ],
+            kind_relations(EntityKind::Component),
         ))
         .merge(kind_routes(
             EntityKind::App,
-            &[
-                Relation::IsLocatedOn,
-                Relation::BelongsTo,
-                Relation::DependsOn,
-            ],
+            kind_relations(EntityKind::App),
         ))
-        .merge(kind_routes(EntityKind::Function, &[Relation::Hosts]))
+        .merge(kind_routes(
+            EntityKind::Function,
+            kind_relations(EntityKind::Function),
+        ))
         // Triggers + the SSE event stream (`REQ_0930`–`REQ_0934`), carved out
         // from under the `deferred` fallback that still `501`s the entity-scoped
         // `…/{id}/triggers` path. The static `/triggers/events` route binds ahead
@@ -317,6 +430,15 @@ fn api_router() -> Router<ServerState> {
         .merge(triggers::trigger_routes(EntityKind::Component))
         .merge(triggers::trigger_routes(EntityKind::App))
         .merge(triggers::trigger_routes(EntityKind::Function))
+        // Cyclic subscriptions (`REQ_0977`): periodic data-sampling subscriptions
+        // with a per-resource SSE sample stream, mounted per entity on the three
+        // kinds the contract exposes them on (apps, components, functions) and
+        // carved out from under the `deferred` `501` fallback. Each subscription's
+        // `…/events` stream samples the entity's data on its own cadence — a
+        // self-contained periodic stream, distinct from the trigger broadcast.
+        .merge(cyclic::cyclic_routes(EntityKind::Component))
+        .merge(cyclic::cyclic_routes(EntityKind::App))
+        .merge(cyclic::cyclic_routes(EntityKind::Function))
         // SOVD diagnostic-scoped exclusive access (`REQ_0940`–`REQ_0944`, issue
         // #149), carved out from under the `deferred` fallback for the two entity
         // kinds the contract exposes `/locks` on (apps, components). Guards no SC
@@ -380,6 +502,15 @@ fn api_router() -> Router<ServerState> {
         // (`ADR_0126`).
         .merge(lifecycle::lifecycle_routes(EntityKind::App))
         .merge(lifecycle::lifecycle_routes(EntityKind::Component))
+        // Logs: SOVD per-entity diagnostic logs (`REQ_0976`). The `…/logs` entry
+        // list rides the **read** seam (the `MergedView` snapshot, like `…/data`);
+        // the `…/logs/configuration` GET/PUT rides the `ActionSink` write seam.
+        // Mounted on all four entity kinds and carved out from under the
+        // `deferred` `501` fallback.
+        .merge(logs::log_routes(EntityKind::Area))
+        .merge(logs::log_routes(EntityKind::Component))
+        .merge(logs::log_routes(EntityKind::App))
+        .merge(logs::log_routes(EntityKind::Function))
         .fallback(deferred)
 }
 

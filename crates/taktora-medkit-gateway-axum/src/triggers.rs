@@ -195,6 +195,7 @@ impl TriggerStore {
 pub struct ServerState {
     view: watch::Receiver<Arc<MergedView>>,
     triggers: Arc<Mutex<TriggerStore>>,
+    cyclic: Arc<Mutex<crate::cyclic::CyclicStore>>,
     events: broadcast::Sender<StreamEvent>,
     ring: EventRing,
     locks: Arc<LockRegistry>,
@@ -206,6 +207,12 @@ impl ServerState {
     /// routes (`BB_0113`, issue #149).
     pub fn locks(&self) -> &LockRegistry {
         &self.locks
+    }
+
+    /// The cyclic-subscription registry behind the
+    /// `…/{id}/cyclic-subscriptions` routes (`REQ_0977`).
+    pub const fn cyclic(&self) -> &Arc<Mutex<crate::cyclic::CyclicStore>> {
+        &self.cyclic
     }
 
     /// The write/action seam behind the `…/{id}/operations` routes (`BB_0121`,
@@ -243,6 +250,7 @@ impl ServerState {
         Self {
             view,
             triggers: Arc::new(Mutex::new(TriggerStore::default())),
+            cyclic: Arc::new(Mutex::new(crate::cyclic::CyclicStore::default())),
             events,
             ring: Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_RING))),
             locks: Arc::new(LockRegistry::system()),

@@ -478,6 +478,18 @@ pub trait ActionSink: Send + Sync {
         target: &ResourceRef,
         transition: &str,
     ) -> Result<LifecycleStatus, ActionError>;
+
+    /// The current log configuration stored on `target` (`REQ_0976`).
+    ///
+    /// Returns a sensible default (`{ "default_level": "info" }`) when `target`
+    /// has never had a configuration set.
+    fn log_configuration(&self, target: &ResourceRef) -> Value;
+
+    /// Upsert the log configuration on `target` to `config`, returning the stored
+    /// value (`REQ_0976`).
+    ///
+    /// Idempotent set: creating or overwriting either way yields `config`.
+    fn set_log_configuration(&self, target: &ResourceRef, config: Value) -> Value;
 }
 
 /// The resource a catalogue/execution is keyed by.
@@ -526,6 +538,8 @@ pub struct SimActionSink {
     updates: Mutex<BTreeMap<String, UpdateRecord>>,
     /// Per-resource lifecycle status (`REQ_0975`); absent means `"running"`.
     lifecycle: Mutex<HashMap<ResourceKey, String>>,
+    /// Per-resource log configuration (`REQ_0976`); absent means the default.
+    log_configs: Mutex<HashMap<ResourceKey, Value>>,
     next: AtomicU64,
 }
 
@@ -1061,6 +1075,22 @@ impl ActionSink for SimActionSink {
             status: state.to_owned(),
         })
     }
+
+    fn log_configuration(&self, target: &ResourceRef) -> Value {
+        self.log_configs
+            .lock()
+            .expect("log config store poisoned")
+            .get(&(target.kind, target.id.clone()))
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({ "default_level": "info" }))
+    }
+
+    fn set_log_configuration(&self, target: &ResourceRef, config: Value) -> Value {
+        let mut map = self.log_configs.lock().expect("log config store poisoned");
+        map.insert((target.kind, target.id.clone()), config.clone());
+        drop(map);
+        config
+    }
 }
 
 #[cfg(test)]
@@ -1359,6 +1389,28 @@ mod tests {
             ActionError::NotFound
         );
         assert_eq!(sink.update(&record.id).unwrap_err(), ActionError::NotFound);
+    }
+
+    /// `REQ_0976` — log configuration defaults to `default_level: info`, and an
+    /// upsert stores and reads back the new value.
+    #[test]
+    fn log_configuration_defaults_and_upserts() {
+        let sink = SimActionSink::new();
+
+        // A fresh target reads the default configuration.
+        assert_eq!(
+            sink.log_configuration(&target()),
+            serde_json::json!({ "default_level": "info" })
+        );
+
+        // Upsert stores and echoes the new value, and a read reflects it.
+        let stored =
+            sink.set_log_configuration(&target(), serde_json::json!({ "default_level": "debug" }));
+        assert_eq!(stored, serde_json::json!({ "default_level": "debug" }));
+        assert_eq!(
+            sink.log_configuration(&target()),
+            serde_json::json!({ "default_level": "debug" })
+        );
     }
 
     /// `REQ_0975` — lifecycle defaults to `running`, transitions drive the state

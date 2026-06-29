@@ -497,6 +497,37 @@ arc42 §4.
    The advertised ``operations: true`` capability now means "the surface exists",
    not "effects occur" — documented here and in :need:`REQ_0969`.
 
+.. arch-decision:: Read-family completion — seam choices
+   :id: ADR_0127
+   :status: accepted
+   :links: REQ_0976, REQ_0977, REQ_0978, REQ_0979
+
+   **Context.** After the read core, Tier-A parity, and the write plane, four
+   read thin spots remained: the deferred ``logs`` and ``cyclic-subscriptions``
+   families, the best-effort (zero-filled) ``/health`` telemetry, and the thin
+   single-entity detail (missing the golden's ``capabilities`` catalogue). Each
+   needs a data source, and the question is which existing seam to reuse.
+
+   **Decision.** Reuse the established seams rather than invent new ones:
+   **logs** entries flow through the read ``Provider`` snapshot (a ``logs`` map,
+   folded like ``data``) while the small logs **configuration** read/write rides
+   the ``ActionSink`` write seam — splitting read data from write-state along the
+   existing read/write seam boundary. **Cyclic-subscriptions** is a self-contained
+   per-connection periodic sampler (an interval stream over the read view),
+   simpler than the triggers broadcast/diff loop because it pushes current data,
+   not diffs. **Health telemetry** is an additive ``Telemetry`` overlay on the
+   snapshot: the gateway overlays provider-supplied keys over the default blocks
+   and keeps the live entity-cache counts authoritative, so absent telemetry is
+   byte-for-byte back-compatible. The **single-entity catalogue** is built from a
+   single per-kind relation/segment source shared with the router, so the
+   advertised links cannot drift from the mounted routes.
+
+   **Consequences.** ✅ The SOVD read surface is contract-complete (only the
+   genuinely-out-of-scope families remain ``501``). ✅ No new seam types; the
+   read/write boundary stays clean. ❌ Cyclic sampling captures the view snapshot
+   at connect (live-refresh is a future refinement). ❌ Telemetry/log values are
+   still simulation-sourced until a real binding lands (:need:`ADR_0126`).
+
 Building block view
 -------------------
 
@@ -720,6 +751,22 @@ provider seam.
    injectable via ``router_with_actions`` / ``serve_listener_with_actions``). The
    safety gate decorator slots in at the trait when a real binding lands
    (:need:`ADR_0126`).
+
+.. building-block:: Read-family completion
+   :id: BB_0122
+   :status: open
+   :implements: REQ_0976, REQ_0977, REQ_0978, REQ_0979
+
+   The surfaces that bring the read side to contract fidelity (:need:`ADR_0127`).
+   In ``taktora-medkit-provider``: a ``logs`` map and a ``Telemetry`` overlay on
+   ``ProviderSnapshot`` (plus ``MockProvider`` builders) and the logs-configuration
+   methods on ``ActionSink``/``SimActionSink``. In ``taktora-medkit-gateway``: the
+   ``MergedView::logs`` resolver and the ``health_document`` telemetry overlay. In
+   ``taktora-medkit-gateway-axum``: ``logs.rs`` (log routes), ``cyclic.rs``
+   (subscription registry + periodic-sampling SSE, reusing the keep-alive
+   infrastructure), and the enriched ``entity_detail`` catalogue driven by a
+   per-kind relation/segment source shared with the router. Off the control path;
+   no taktora-runtime edge.
 
 .. architecture:: medkit crate decomposition
    :id: ARCH_0080

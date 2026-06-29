@@ -714,6 +714,67 @@ seam when a real-effect binding lands (:need:`ADR_0126`).
    ``stopped``; an unrecognised transition is ``400``. The simulation tracks
    state in memory and performs no real effect (:need:`ADR_0126`).
 
+Read-family completion
+----------------------
+
+The remaining read thin spots: the two deferred read families (logs,
+cyclic-subscriptions) and two best-effort served surfaces (health telemetry,
+single-entity catalogue), brought to contract fidelity (:need:`ADR_0127`).
+
+.. req:: Logs family
+   :id: REQ_0976
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0122, ADR_0127, TEST_0951
+
+   The gateway shall serve the SOVD logs family on every entity kind:
+   ``GET …/logs`` with optional ``?severity=`` (exact) and ``?context=``
+   (substring) filters returning the matching log entries, plus
+   ``GET`` / ``PUT …/logs/configuration``. Log entries are sourced from the read
+   ``Provider`` snapshot; the configuration is held through the ``ActionSink``
+   write seam. The family is carved out of the ``501`` fallback and advertised
+   honestly (:need:`REQ_0965`).
+
+.. req:: Cyclic-subscriptions family
+   :id: REQ_0977
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0122, ADR_0127, TEST_0952
+
+   The gateway shall serve the SOVD cyclic-subscriptions family on apps,
+   components, and functions: CRUD over a subscription (entity-scoped, pinned to
+   the path entity, cross-entity access ``404``) plus a
+   ``…/{sub_id}/events`` SSE stream that periodically samples the entity's data
+   (at the subscription's interval) and pushes it in the golden SSE frame shape.
+   Carved out of the ``501`` fallback and advertised honestly.
+
+.. req:: Provider-sourced health telemetry
+   :id: REQ_0978
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0122, ADR_0127, TEST_0953
+
+   The ``GET /health`` document shall overlay provider-supplied telemetry over
+   the default ``x-medkit-{data-provider,subscription-executor,entity-cache}``
+   blocks, so a provider that reports real pool/executor counters surfaces them
+   while one that does not yields the prior zero baseline (back-compatible). The
+   live entity-cache counts shall remain authoritative and never be shadowed by
+   an override (resolving the best-effort gap noted in :need:`REQ_0967`).
+
+.. req:: Single-entity capability catalogue
+   :id: REQ_0979
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0122, ADR_0127, TEST_0954
+
+   The single-entity detail (``GET /{collection}/{id}``) shall carry, per kind,
+   the golden's richer shape: a ``_links`` including the entity's relations, flat
+   per-sub-resource href keys, and a ``capabilities`` array of
+   ``{ name, href }`` for every sub-resource the entity exposes. The per-kind set
+   shall match the captured ``*_get.json`` goldens for apps/components/functions
+   and be derived from the mounted surface for areas, driven by a single per-kind
+   relation/segment source so routes and links cannot drift.
+
 Requirements at a glance
 ------------------------
 

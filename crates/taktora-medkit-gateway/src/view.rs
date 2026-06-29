@@ -15,7 +15,7 @@ use taktora_medkit_model::{
     Collection, CollectionMeta, DtcStatus, EntityKind, EnvironmentData, ExtendedDataRecords,
     FaultDetail, FaultDetailMeta, FaultItem, FaultList, FaultListMeta, FaultSummary, GenericError,
 };
-use taktora_medkit_provider::{ProviderSnapshot, Relation, RelationshipEdge};
+use taktora_medkit_provider::{LogEntry, ProviderSnapshot, Relation, RelationshipEdge, Telemetry};
 
 /// The API path prefix every served resource hangs off.
 pub const API_BASE: &str = "/api/v1";
@@ -174,6 +174,8 @@ impl MergePipeline {
         let mut fault_environments: BTreeMap<String, BTreeMap<String, EnvironmentData<Value>>> =
             BTreeMap::new();
         let mut data: BTreeMap<String, Value> = BTreeMap::new();
+        let mut logs: BTreeMap<String, Vec<LogEntry>> = BTreeMap::new();
+        let mut telemetry = Telemetry::default();
 
         for snapshot in self.snapshots {
             for entity in snapshot.entities {
@@ -193,6 +195,10 @@ impl MergePipeline {
                     .extend(envs);
             }
             data.extend(snapshot.data);
+            logs.extend(snapshot.logs);
+            // Fold provider telemetry, later snapshot wins per override key
+            // (`REQ_0978`), like `data` above.
+            telemetry.extend(snapshot.telemetry);
         }
 
         if let Some(manifest) = self.manifest.filter(|m| !m.is_empty()) {
@@ -206,6 +212,8 @@ impl MergePipeline {
             faults,
             fault_environments,
             data,
+            logs,
+            telemetry,
         }
     }
 }
@@ -301,6 +309,8 @@ pub struct MergedView {
     faults: BTreeMap<String, Vec<FaultSummary>>,
     fault_environments: BTreeMap<String, BTreeMap<String, EnvironmentData<Value>>>,
     data: BTreeMap<String, Value>,
+    logs: BTreeMap<String, Vec<LogEntry>>,
+    telemetry: Telemetry,
 }
 
 impl MergedView {
@@ -563,6 +573,38 @@ impl MergedView {
         }
     }
 
+    /// Diagnostic log entries under an entity (`…/{id}/logs`), filtered by an
+    /// optional exact `severity` match and an optional `context` substring match
+    /// (`REQ_0976`).
+    ///
+    /// Lenient like [`data`](Self::data) is about an absent data tree: an entity
+    /// with no log entries — known or unknown — yields an empty list rather than a
+    /// `404`, so a polling client distinguishes "no logs" from "bad path" by the
+    /// status code, not by guessing. Pure and clock-free.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolveError`] for symmetry with the other resolvers; the current
+    /// lenient implementation never produces one.
+    pub fn logs(
+        &self,
+        _kind: EntityKind,
+        id: &str,
+        severity: Option<&str>,
+        context: Option<&str>,
+    ) -> Result<Vec<LogEntry>, ResolveError> {
+        let items = self
+            .logs
+            .get(id)
+            .into_iter()
+            .flatten()
+            .filter(|entry| severity.is_none_or(|want| entry.severity == want))
+            .filter(|entry| context.is_none_or(|want| entry.context.contains(want)))
+            .cloned()
+            .collect();
+        Ok(items)
+    }
+
     /// The ros2 node FQNs of the apps a component hosts, for fault aggregation.
     fn aggregation_sources(&self, component_id: &str) -> Vec<String> {
         self.relationships
@@ -583,55 +625,95 @@ impl MergedView {
     /// it unchanged (`REQ_0967`).
     ///
     /// The `x-medkit-entity-cache` counts are real (the view knows them). The
-    /// `x-medkit-data-provider` and `x-medkit-subscription-executor` blocks are
-    /// **best-effort placeholders**: this skeleton has no pool/executor internals
-    /// to report, so every counter is a benign zero (`worker_alive`/`degraded`
-    /// reflect the "nothing wrong" baseline). The blocks are present — and
-    /// field-complete — so a client never hits a missing key; the values fill in
-    /// when a richer provider lands. The wall-clock `timestamp` is injected at
-    /// the HTTP edge (this resolver stays clock-free and snapshot-testable).
+    /// `x-medkit-data-provider` and `x-medkit-subscription-executor` blocks start
+    /// from a **best-effort placeholder** baseline — every counter a benign zero
+    /// (`worker_alive`/`degraded` reflect the "nothing wrong" state) — over which
+    /// any provider-sourced [`Telemetry`] is overlaid (`REQ_0978`): a provider
+    /// that reports real pool/executor internals fills these in, while a provider
+    /// without telemetry yields exactly the zero-filled blocks as before. The
+    /// blocks stay present and field-complete either way, so a client never hits a
+    /// missing key. The live entity-cache counts stay authoritative — an
+    /// `entity_cache` override may add `generation`/`grew`/etc. but never
+    /// overrides the four computed counts. The wall-clock `timestamp` is injected
+    /// at the HTTP edge (this resolver stays clock-free and snapshot-testable).
+    ///
+    /// [`Telemetry`]: taktora_medkit_provider::Telemetry
     #[must_use]
     pub fn health_document(&self) -> Value {
         let count_kind = |kind: EntityKind| self.entities.iter().filter(|e| e.kind == kind).count();
+
+        let mut entity_cache = json!({
+            "capacity": 256,
+            "generation": 0,
+            "grew": false
+        });
+        overlay(&mut entity_cache, &self.telemetry.entity_cache);
+        // The four live counts are authoritative — set them last so no telemetry
+        // override can shadow them (`REQ_0978`).
+        if let Some(obj) = entity_cache.as_object_mut() {
+            obj.insert("areas".to_owned(), json!(count_kind(EntityKind::Area)));
+            obj.insert(
+                "components".to_owned(),
+                json!(count_kind(EntityKind::Component)),
+            );
+            obj.insert("apps".to_owned(), json!(count_kind(EntityKind::App)));
+            obj.insert(
+                "functions".to_owned(),
+                json!(count_kind(EntityKind::Function)),
+            );
+        }
+
+        let mut data_provider = json!({
+            "cold_wait_cap": 0,
+            "concurrent_cold_waits": 0,
+            "evictions_total": 0,
+            "graph_events_received": 0,
+            "pool_cap": 0,
+            "pool_hits": 0,
+            "pool_misses": 0,
+            "pool_size": 0,
+            "type_change_events": 0,
+            "unsupported_type_count": 0
+        });
+        overlay(&mut data_provider, &self.telemetry.data_provider);
+
+        let mut subscription_executor = json!({
+            "current_task_age_ms": 0,
+            "degraded": false,
+            "graph_events_received": 0,
+            "last_task_latency_us": 0,
+            "max_task_latency_us": 0,
+            "queue_depth": 0,
+            "queue_dropped": 0,
+            "queue_max_depth_observed": 0,
+            "tasks_completed": 0,
+            "tasks_failed": 0,
+            "watchdog_trips": 0,
+            "worker_alive": true
+        });
+        overlay(
+            &mut subscription_executor,
+            &self.telemetry.subscription_executor,
+        );
+
         json!({
             "status": "healthy",
             "discovery": { "mode": "runtime_only", "strategy": "runtime" },
-            "x-medkit-entity-cache": {
-                "areas": count_kind(EntityKind::Area),
-                "components": count_kind(EntityKind::Component),
-                "apps": count_kind(EntityKind::App),
-                "functions": count_kind(EntityKind::Function),
-                "capacity": 256,
-                "generation": 0,
-                "grew": false
-            },
-            "x-medkit-data-provider": {
-                "cold_wait_cap": 0,
-                "concurrent_cold_waits": 0,
-                "evictions_total": 0,
-                "graph_events_received": 0,
-                "pool_cap": 0,
-                "pool_hits": 0,
-                "pool_misses": 0,
-                "pool_size": 0,
-                "type_change_events": 0,
-                "unsupported_type_count": 0
-            },
-            "x-medkit-subscription-executor": {
-                "current_task_age_ms": 0,
-                "degraded": false,
-                "graph_events_received": 0,
-                "last_task_latency_us": 0,
-                "max_task_latency_us": 0,
-                "queue_depth": 0,
-                "queue_dropped": 0,
-                "queue_max_depth_observed": 0,
-                "tasks_completed": 0,
-                "tasks_failed": 0,
-                "watchdog_trips": 0,
-                "worker_alive": true
-            }
+            "x-medkit-entity-cache": entity_cache,
+            "x-medkit-data-provider": data_provider,
+            "x-medkit-subscription-executor": subscription_executor
         })
+    }
+}
+
+/// Overlay provider override `overrides` onto a default block `base` in place:
+/// insert/overwrite each key (`REQ_0978`). A no-op when `overrides` is empty,
+/// preserving the back-compat baseline.
+fn overlay(base: &mut Value, overrides: &BTreeMap<String, Value>) {
+    if let Some(obj) = base.as_object_mut() {
+        for (key, value) in overrides {
+            obj.insert(key.clone(), value.clone());
+        }
     }
 }
 
@@ -655,12 +737,12 @@ pub fn root_document() -> Value {
             "authentication": true,
             "bulk_data": true,
             "configurations": true,
-            "cyclic_subscriptions": false,
+            "cyclic_subscriptions": true,
             "data_access": true,
             "discovery": true,
             "faults": true,
             "locking": true,
-            "logs": false,
+            "logs": true,
             "operations": true,
             "scripts": true,
             "tls": false,
@@ -725,6 +807,20 @@ fn endpoint_catalogue() -> Vec<String> {
         endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/configurations"));
         endpoints.push(format!(
             "PUT {API_BASE}/{collection}/{{id}}/configurations/{{config_id}}"
+        ));
+        // Logs (read entries + a config GET/PUT) are exposed on every kind
+        // (`REQ_0976`).
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/logs"));
+    }
+    // Cyclic subscriptions are exposed on apps, components, and functions only
+    // (`REQ_0977`).
+    for kind in [EntityKind::Component, EntityKind::App, EntityKind::Function] {
+        let collection = collection_segment(kind);
+        endpoints.push(format!(
+            "GET {API_BASE}/{collection}/{{id}}/cyclic-subscriptions"
+        ));
+        endpoints.push(format!(
+            "POST {API_BASE}/{collection}/{{id}}/cyclic-subscriptions"
         ));
     }
     // Diagnostic-scoped locks are exposed on apps and components only (`REQ_0963`).
@@ -870,6 +966,8 @@ mod tests {
             "bulk_data",
             "scripts",
             "updates",
+            "logs",
+            "cyclic_subscriptions",
             "vendor_extensions",
         ] {
             assert_eq!(
@@ -877,11 +975,6 @@ mod tests {
                 "{served} is served, must advertise true"
             );
         }
-        // `logs` is the last deferred family on the read/write surface.
-        assert_eq!(
-            caps["logs"], false,
-            "logs is deferred, must advertise false"
-        );
         let endpoints: Vec<&str> = root["endpoints"]
             .as_array()
             .unwrap()
@@ -906,6 +999,46 @@ mod tests {
             health["x-medkit-subscription-executor"]["worker_alive"],
             true
         );
+    }
+
+    /// `REQ_0978` — provider-sourced telemetry overlays the `x-medkit-*` blocks:
+    /// supplied override keys surface as real values, while the live entity-cache
+    /// counts stay authoritative and un-overridable.
+    #[test]
+    fn health_document_overlays_provider_telemetry() {
+        let telemetry = Telemetry {
+            data_provider: BTreeMap::from([("pool_cap".to_owned(), json!(256))]),
+            subscription_executor: BTreeMap::from([("worker_alive".to_owned(), json!(false))]),
+            // generation is overlaid; an `apps` override must NOT win over the count.
+            entity_cache: BTreeMap::from([
+                ("generation".to_owned(), json!(7)),
+                ("apps".to_owned(), json!(999)),
+            ]),
+        };
+        let provider = MockProvider::new()
+            .with_entity(app("gw"))
+            .with_telemetry(telemetry);
+        let health = MergedView::from_snapshot(provider.snapshot()).health_document();
+
+        assert_eq!(health["x-medkit-data-provider"]["pool_cap"], 256);
+        assert_eq!(
+            health["x-medkit-subscription-executor"]["worker_alive"],
+            false
+        );
+        assert_eq!(health["x-medkit-entity-cache"]["generation"], 7);
+        // The live count wins over the override.
+        assert_eq!(health["x-medkit-entity-cache"]["apps"], 1);
+    }
+
+    /// `REQ_0978` — a provider with no telemetry yields exactly today's zero-filled
+    /// blocks (back-compat), with the real counts intact.
+    #[test]
+    fn health_document_without_telemetry_keeps_zero_baseline() {
+        let view = MergedView::from_snapshot(MockProvider::new().with_entity(app("gw")).snapshot());
+        let health = view.health_document();
+        assert_eq!(health["x-medkit-data-provider"]["pool_cap"], 0);
+        assert_eq!(health["x-medkit-entity-cache"]["generation"], 0);
+        assert_eq!(health["x-medkit-entity-cache"]["apps"], 1);
     }
 
     fn app(id: &str) -> Entity {

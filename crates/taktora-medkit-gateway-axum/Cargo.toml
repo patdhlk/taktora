@@ -20,7 +20,10 @@ taktora-medkit-model    = { workspace = true }
 
 axum         = { workspace = true, features = ["json"] }
 tokio        = { workspace = true, features = ["net"] }
-tokio-stream = { workspace = true }
+# `time` adds the `IntervalStream` wrapper the cyclic-subscription sampler drives
+# its periodic SSE off (`REQ_0977`); `sync` (the workspace default) backs the
+# trigger broadcast stream.
+tokio-stream = { workspace = true, features = ["time"] }
 tower-http = { workspace = true, features = ["cors"] }
 serde      = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
