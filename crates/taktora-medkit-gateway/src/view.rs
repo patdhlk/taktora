@@ -653,7 +653,7 @@ pub fn root_document() -> Value {
             "aggregation": false,
             "async_actions": false,
             "authentication": true,
-            "bulk_data": false,
+            "bulk_data": true,
             "configurations": true,
             "cyclic_subscriptions": false,
             "data_access": true,
@@ -728,6 +728,14 @@ fn endpoint_catalogue() -> Vec<String> {
         let collection = collection_segment(kind);
         endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/locks"));
         endpoints.push(format!("POST {API_BASE}/{collection}/{{id}}/locks"));
+    }
+    // Writable bulk-data is exposed on apps and components only (`REQ_0972`).
+    for kind in [EntityKind::App, EntityKind::Component] {
+        let collection = collection_segment(kind);
+        endpoints.push(format!("GET {API_BASE}/{collection}/{{id}}/bulk-data"));
+        endpoints.push(format!(
+            "POST {API_BASE}/{collection}/{{id}}/bulk-data/{{category_id}}"
+        ));
     }
     endpoints
 }
@@ -841,6 +849,7 @@ mod tests {
             "triggers",
             "operations",
             "configurations",
+            "bulk_data",
             "vendor_extensions",
         ] {
             assert_eq!(
@@ -848,7 +857,7 @@ mod tests {
                 "{served} is served, must advertise true"
             );
         }
-        for deferred in ["bulk_data", "scripts", "logs", "updates"] {
+        for deferred in ["scripts", "logs", "updates"] {
             assert_eq!(
                 caps[deferred], false,
                 "{deferred} is deferred, must advertise false"

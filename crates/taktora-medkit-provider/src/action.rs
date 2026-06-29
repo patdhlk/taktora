@@ -108,6 +108,26 @@ pub struct ConfigEntry {
     pub value: Value,
 }
 
+/// One bulk-data category on a target — the entry served under `…/bulk-data`
+/// (`REQ_0972`).
+#[derive(Clone, Debug, Serialize)]
+pub struct BulkCategory {
+    /// The category id (URL path component).
+    pub id: String,
+    /// The number of stored file descriptors in the category.
+    pub count: usize,
+}
+
+/// One stored bulk-data file descriptor — the entry served under
+/// `…/bulk-data/{category_id}/{file_id}` (`REQ_0972`).
+#[derive(Clone, Debug, Serialize)]
+pub struct BulkDescriptor {
+    /// The server-assigned file id (URL path component).
+    pub id: String,
+    /// The stored payload size in bytes.
+    pub size: usize,
+}
+
 /// A write/action failure, mapped to a contract-shaped error by the gateway.
 ///
 /// Reserves no `Forbidden` variant yet: the safety gate is deferred (`ADR_0126`),
@@ -230,10 +250,60 @@ pub trait ActionSink: Send + Sync {
     /// [`ActionError::BadRequest`] if a real binding rejects the clear; the
     /// in-memory simulation always succeeds.
     fn delete_configurations(&self, target: &ResourceRef) -> Result<(), ActionError>;
+
+    /// The bulk-data categories on `target` that hold at least one file, each
+    /// with its file count (empty if none) — `REQ_0972`.
+    fn bulk_categories(&self, target: &ResourceRef) -> Vec<BulkCategory>;
+
+    /// The file descriptors stored in `category` on `target` (empty if the
+    /// category is unknown or holds none) — `REQ_0972`.
+    fn bulk_descriptors(&self, target: &ResourceRef, category: &str) -> Vec<BulkDescriptor>;
+
+    /// Upload `content` into `category` on `target`, returning the descriptor of
+    /// the newly stored file (`REQ_0972`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::BadRequest`] if a real binding rejects the upload; the
+    /// in-memory simulation always succeeds.
+    fn upload_bulk(
+        &self,
+        target: &ResourceRef,
+        category: &str,
+        content: Vec<u8>,
+    ) -> Result<BulkDescriptor, ActionError>;
+
+    /// Download the stored bytes of `file_id` in `category` on `target`
+    /// (`REQ_0972`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if the category or file is unknown.
+    fn download_bulk(
+        &self,
+        target: &ResourceRef,
+        category: &str,
+        file_id: &str,
+    ) -> Result<Vec<u8>, ActionError>;
+
+    /// Delete `file_id` from `category` on `target` (`REQ_0972`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if the category or file is unknown.
+    fn delete_bulk(
+        &self,
+        target: &ResourceRef,
+        category: &str,
+        file_id: &str,
+    ) -> Result<(), ActionError>;
 }
 
 /// The resource a catalogue/execution is keyed by.
 type ResourceKey = (EntityKind, String);
+
+/// The per-resource bulk-data store: category → file id → stored bytes.
+type BulkStore = HashMap<ResourceKey, BTreeMap<String, BTreeMap<String, Vec<u8>>>>;
 
 /// One tracked execution plus the resource/op it belongs to (for filtering).
 #[derive(Clone, Debug)]
@@ -255,6 +325,8 @@ pub struct SimActionSink {
     catalogue: Mutex<HashMap<ResourceKey, Vec<OperationDef>>>,
     executions: Mutex<HashMap<String, ExecRecord>>,
     configs: Mutex<HashMap<ResourceKey, BTreeMap<String, Value>>>,
+    /// Per-resource bulk-data store: category → file id → stored bytes.
+    bulk: Mutex<BulkStore>,
     next: AtomicU64,
 }
 
@@ -465,6 +537,94 @@ impl ActionSink for SimActionSink {
         drop(map);
         Ok(())
     }
+
+    fn bulk_categories(&self, target: &ResourceRef) -> Vec<BulkCategory> {
+        self.bulk
+            .lock()
+            .expect("bulk store poisoned")
+            .get(&(target.kind, target.id.clone()))
+            .map(|cats| {
+                cats.iter()
+                    .filter(|(_, files)| !files.is_empty())
+                    .map(|(id, files)| BulkCategory {
+                        id: id.clone(),
+                        count: files.len(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn bulk_descriptors(&self, target: &ResourceRef, category: &str) -> Vec<BulkDescriptor> {
+        self.bulk
+            .lock()
+            .expect("bulk store poisoned")
+            .get(&(target.kind, target.id.clone()))
+            .and_then(|cats| cats.get(category))
+            .map(|files| {
+                files
+                    .iter()
+                    .map(|(id, bytes)| BulkDescriptor {
+                        id: id.clone(),
+                        size: bytes.len(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn upload_bulk(
+        &self,
+        target: &ResourceRef,
+        category: &str,
+        content: Vec<u8>,
+    ) -> Result<BulkDescriptor, ActionError> {
+        let id = format!("file-{}", self.next.fetch_add(1, Ordering::SeqCst));
+        let size = content.len();
+        let mut map = self.bulk.lock().expect("bulk store poisoned");
+        map.entry((target.kind, target.id.clone()))
+            .or_default()
+            .entry(category.to_owned())
+            .or_default()
+            .insert(id.clone(), content);
+        drop(map);
+        Ok(BulkDescriptor { id, size })
+    }
+
+    fn download_bulk(
+        &self,
+        target: &ResourceRef,
+        category: &str,
+        file_id: &str,
+    ) -> Result<Vec<u8>, ActionError> {
+        self.bulk
+            .lock()
+            .expect("bulk store poisoned")
+            .get(&(target.kind, target.id.clone()))
+            .and_then(|cats| cats.get(category))
+            .and_then(|files| files.get(file_id))
+            .cloned()
+            .ok_or(ActionError::NotFound)
+    }
+
+    fn delete_bulk(
+        &self,
+        target: &ResourceRef,
+        category: &str,
+        file_id: &str,
+    ) -> Result<(), ActionError> {
+        let key = (target.kind, target.id.clone());
+        let mut map = self.bulk.lock().expect("bulk store poisoned");
+        let removed = map
+            .get_mut(&key)
+            .and_then(|cats| cats.get_mut(category))
+            .is_some_and(|files| files.remove(file_id).is_some());
+        if !removed {
+            return Err(ActionError::NotFound);
+        }
+        drop(map);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -590,5 +750,57 @@ mod tests {
 
         // Idempotent: clearing an already-empty resource still succeeds.
         sink.delete_configurations(&target()).expect("clear again");
+    }
+
+    /// `REQ_0972` — upload → list/download round-trip → delete → 404.
+    #[test]
+    fn bulk_upload_download_delete() {
+        let sink = SimActionSink::new();
+
+        // No categories and no descriptors on a fresh resource; an unknown file
+        // is NotFound.
+        assert_eq!(sink.bulk_categories(&target()).len(), 0);
+        assert_eq!(sink.bulk_descriptors(&target(), "logs").len(), 0);
+        assert_eq!(
+            sink.download_bulk(&target(), "logs", "file-1").unwrap_err(),
+            ActionError::NotFound
+        );
+
+        // Upload stores the bytes and returns a descriptor with the size.
+        let payload = b"hello bulk".to_vec();
+        let desc = sink
+            .upload_bulk(&target(), "logs", payload.clone())
+            .expect("upload");
+        assert_eq!(desc.size, payload.len());
+        assert!(desc.id.starts_with("file-"));
+
+        // The category lists with a count of 1; the descriptor shows up.
+        let cats = sink.bulk_categories(&target());
+        assert_eq!(cats.len(), 1);
+        assert_eq!(cats[0].id, "logs");
+        assert_eq!(cats[0].count, 1);
+        let descs = sink.bulk_descriptors(&target(), "logs");
+        assert_eq!(descs.len(), 1);
+        assert_eq!(descs[0].id, desc.id);
+
+        // Download round-trips the exact bytes.
+        assert_eq!(
+            sink.download_bulk(&target(), "logs", &desc.id).unwrap(),
+            payload
+        );
+
+        // Delete removes it; a second delete and a download are NotFound, and the
+        // (now empty) category drops out of the listing.
+        sink.delete_bulk(&target(), "logs", &desc.id)
+            .expect("delete");
+        assert_eq!(
+            sink.delete_bulk(&target(), "logs", &desc.id).unwrap_err(),
+            ActionError::NotFound
+        );
+        assert_eq!(
+            sink.download_bulk(&target(), "logs", &desc.id).unwrap_err(),
+            ActionError::NotFound
+        );
+        assert_eq!(sink.bulk_categories(&target()).len(), 0);
     }
 }

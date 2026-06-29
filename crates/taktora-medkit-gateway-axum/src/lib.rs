@@ -24,6 +24,7 @@
 
 mod actions;
 mod auth;
+mod bulkdata;
 mod config;
 mod configurations;
 pub mod demo;
@@ -340,6 +341,15 @@ fn api_router() -> Router<ServerState> {
         .merge(configurations::configuration_routes(EntityKind::Component))
         .merge(configurations::configuration_routes(EntityKind::App))
         .merge(configurations::configuration_routes(EntityKind::Function))
+        // Bulk-data: SOVD per-entity opaque file storage (`REQ_0972`), served
+        // through the same `ActionSink` seam and carved out from under the
+        // `deferred` `501` fallback for the two kinds the contract exposes
+        // writable bulk-data on (apps, components). v1 is an in-memory simulation
+        // (the body is stored opaquely as bytes, no real effect); the write-surface
+        // safety gate (`ADR_0119`) re-enters at the seam when a real binding lands
+        // (`ADR_0126`).
+        .merge(bulkdata::bulk_data_routes(EntityKind::App))
+        .merge(bulkdata::bulk_data_routes(EntityKind::Component))
         .fallback(deferred)
 }
 

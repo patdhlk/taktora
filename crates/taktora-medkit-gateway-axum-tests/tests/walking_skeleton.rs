@@ -239,7 +239,9 @@ async fn deferred_families_return_501() {
         // are mounted per kind through the `ActionSink` seam, not deferred.
         // `configurations` is a live family now (`REQ_0971`): per-entity config
         // storage is mounted per kind through the same seam, not deferred.
-        "/api/v1/components/spark-6723/bulk-data",
+        // `bulk-data` is a live family now (`REQ_0972`): apps/components expose a
+        // real GET/POST/DELETE file surface through the `ActionSink` seam, so
+        // `…/{id}/bulk-data` is no longer a wholesale-deferred path.
         // `locks` is a live family now (#149): `…/{id}/locks` is a real
         // POST/PUT/DELETE surface, so it is no longer a wholesale-deferred path.
         "/api/v1/components/spark-6723/scripts",

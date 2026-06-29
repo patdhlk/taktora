@@ -17,8 +17,8 @@ use taktora_medkit_model::{Entity, EnvironmentData, FaultSummary, Health, Severi
 pub mod action;
 
 pub use action::{
-    ActionError, ActionSink, ConfigEntry, Execution, ExecutionStatus, OperationDef, ResourceRef,
-    SimActionSink,
+    ActionError, ActionSink, BulkCategory, BulkDescriptor, ConfigEntry, Execution, ExecutionStatus,
+    OperationDef, ResourceRef, SimActionSink,
 };
 
 /// A typed relationship between two SOVD entities, as the contract exposes them

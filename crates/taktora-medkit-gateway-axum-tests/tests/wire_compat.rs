@@ -116,7 +116,8 @@ async fn root_capabilities_are_honest() {
     assert_eq!(caps["triggers"], true);
     assert_eq!(caps["vendor_extensions"], true);
     assert_eq!(caps["operations"], true);
-    assert_eq!(caps["bulk_data"], false);
+    // Bulk-data is a served family now (`REQ_0972`).
+    assert_eq!(caps["bulk_data"], true);
 
     let endpoints: Vec<&str> = root["endpoints"]
         .as_array()
