@@ -17,6 +17,9 @@ pub enum ApiError {
     NotFound(GenericError),
     /// The request was malformed, e.g. an unknown `?status=` value (`400`).
     BadRequest(GenericError),
+    /// The request conflicts with current state, e.g. a lock held by another
+    /// client acquired without `break_lock` (`409`).
+    Conflict(GenericError),
     /// A deferred family: a recognised SOVD endpoint this skeleton does not yet
     /// implement (`501`). Carries the family and the path for the body.
     NotImplemented {
@@ -61,6 +64,7 @@ impl IntoResponse for ApiError {
         let (status, body) = match self {
             Self::NotFound(generic) => (StatusCode::NOT_FOUND, generic),
             Self::BadRequest(generic) => (StatusCode::BAD_REQUEST, generic),
+            Self::Conflict(generic) => (StatusCode::CONFLICT, generic),
             Self::NotImplemented { family, path } => (
                 StatusCode::NOT_IMPLEMENTED,
                 GenericError {

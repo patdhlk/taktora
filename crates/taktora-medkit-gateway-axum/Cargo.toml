@@ -24,6 +24,10 @@ tokio-stream = { workspace = true }
 tower-http = { workspace = true, features = ["cors"] }
 serde      = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
+# Minimal, zero-dependency RFC3339 formatter for the absolute `lock_expiration`
+# field in the SOVD Lock response (issue #149); no broader date/time crate exists
+# in the workspace and none is otherwise needed.
+humantime  = { workspace = true }
 
 # Optional TLS: enabling the `tls` feature serves over rustls via axum-server.
 axum-server = { workspace = true, optional = true, features = ["tls-rustls"] }
