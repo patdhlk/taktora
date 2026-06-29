@@ -33,6 +33,7 @@ mod locks;
 mod ratelimit;
 mod scripts;
 mod triggers;
+mod updates;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -361,6 +362,14 @@ fn api_router() -> Router<ServerState> {
         // (`ADR_0119`) re-enters at the seam when a real binding lands (`ADR_0126`).
         .merge(scripts::script_routes(EntityKind::App))
         .merge(scripts::script_routes(EntityKind::Component))
+        // Updates: the SOVD software-update surface (`REQ_0974`), served through
+        // the same `ActionSink` seam. Unlike the per-entity write families this is
+        // a **global** family — the contract mounts it at the top level
+        // (`/api/v1/updates…`), so it is mounted once, not per kind. v1 is an
+        // in-memory simulation (lifecycle transitions in memory, no real effect);
+        // the write-surface safety gate (`ADR_0119`) re-enters at the seam when a
+        // real binding lands (`ADR_0126`).
+        .merge(updates::update_routes())
         .fallback(deferred)
 }
 

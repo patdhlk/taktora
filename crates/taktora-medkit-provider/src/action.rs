@@ -138,6 +138,20 @@ pub struct ScriptDef {
     pub size: usize,
 }
 
+/// One software-update record on the global updates surface — the entry served
+/// under `…/updates` and `…/updates/{update_id}` (`REQ_0974`).
+///
+/// Unlike the other write families, updates are **global** (not per-entity): the
+/// contract mounts them at the top level (`/api/v1/updates…`), so an
+/// [`UpdateRecord`] carries no [`ResourceRef`].
+#[derive(Clone, Debug, Serialize)]
+pub struct UpdateRecord {
+    /// The server-assigned update id (URL path component).
+    pub id: String,
+    /// The lifecycle state (`registered` → `prepared` → `executed`).
+    pub status: String,
+}
+
 /// A write/action failure, mapped to a contract-shaped error by the gateway.
 ///
 /// Reserves no `Forbidden` variant yet: the safety gate is deferred (`ADR_0126`),
@@ -378,6 +392,58 @@ pub trait ActionSink: Send + Sync {
         script_id: &str,
         exec_id: &str,
     ) -> Result<(), ActionError>;
+
+    /// The software-update records currently registered, ordered by id (empty if
+    /// none) — `REQ_0974`.
+    ///
+    /// Updates are a **global** family: this method takes no [`ResourceRef`].
+    fn updates(&self) -> Vec<UpdateRecord>;
+
+    /// Register a new software update from `spec` (the request body), returning
+    /// its freshly-assigned record in the `registered` state (`REQ_0974`).
+    ///
+    /// `spec` is the opaque update descriptor; the in-memory simulation may ignore
+    /// or echo it. Always succeeds.
+    fn register_update(&self, spec: Value) -> UpdateRecord;
+
+    /// One software-update record by id (`REQ_0974`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if `update_id` is not registered.
+    fn update(&self, update_id: &str) -> Result<UpdateRecord, ActionError>;
+
+    /// Transition update `update_id` to the `prepared` state (`REQ_0974`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if `update_id` is not registered.
+    fn prepare_update(&self, update_id: &str) -> Result<UpdateRecord, ActionError>;
+
+    /// Transition update `update_id` to the `executed` state (`REQ_0974`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if `update_id` is not registered.
+    fn execute_update(&self, update_id: &str) -> Result<UpdateRecord, ActionError>;
+
+    /// Drive update `update_id` through automated execution to the `executed`
+    /// state (`REQ_0974`).
+    ///
+    /// The simulation treats automated execution as a synchronous transition to
+    /// `executed`, like [`execute_update`](Self::execute_update).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if `update_id` is not registered.
+    fn automated_update(&self, update_id: &str) -> Result<UpdateRecord, ActionError>;
+
+    /// Delete update `update_id` (`REQ_0974`).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::NotFound`] if `update_id` is not registered.
+    fn delete_update(&self, update_id: &str) -> Result<(), ActionError>;
 }
 
 /// The resource a catalogue/execution is keyed by.
@@ -422,6 +488,8 @@ pub struct SimActionSink {
     scripts: Mutex<HashMap<ResourceKey, BTreeMap<String, usize>>>,
     /// Script executions keyed by exec id (separate from operation executions).
     script_execs: Mutex<HashMap<String, ScriptExecRecord>>,
+    /// The global software-update store, keyed by update id (`REQ_0974`).
+    updates: Mutex<BTreeMap<String, UpdateRecord>>,
     next: AtomicU64,
 }
 
@@ -473,6 +541,23 @@ impl SimActionSink {
             .expect("script store poisoned")
             .get(&(target.kind, target.id.clone()))
             .is_some_and(|m| m.contains_key(script_id))
+    }
+
+    /// Set update `update_id`'s status to `status`, returning the updated record;
+    /// [`ActionError::NotFound`] if it is not registered (`REQ_0974`).
+    fn transition_update(
+        &self,
+        update_id: &str,
+        status: &str,
+    ) -> Result<UpdateRecord, ActionError> {
+        let mut map = self.updates.lock().expect("update store poisoned");
+        let Some(record) = map.get_mut(update_id) else {
+            return Err(ActionError::NotFound);
+        };
+        status.clone_into(&mut record.status);
+        let updated = record.clone();
+        drop(map);
+        Ok(updated)
     }
 }
 
@@ -852,6 +937,60 @@ impl ActionSink for SimActionSink {
         drop(map);
         Ok(())
     }
+
+    fn updates(&self) -> Vec<UpdateRecord> {
+        self.updates
+            .lock()
+            .expect("update store poisoned")
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    fn register_update(&self, _spec: Value) -> UpdateRecord {
+        let id = format!("update-{}", self.next.fetch_add(1, Ordering::SeqCst));
+        let record = UpdateRecord {
+            id: id.clone(),
+            status: "registered".to_owned(),
+        };
+        self.updates
+            .lock()
+            .expect("update store poisoned")
+            .insert(id, record.clone());
+        record
+    }
+
+    fn update(&self, update_id: &str) -> Result<UpdateRecord, ActionError> {
+        self.updates
+            .lock()
+            .expect("update store poisoned")
+            .get(update_id)
+            .cloned()
+            .ok_or(ActionError::NotFound)
+    }
+
+    fn prepare_update(&self, update_id: &str) -> Result<UpdateRecord, ActionError> {
+        self.transition_update(update_id, "prepared")
+    }
+
+    fn execute_update(&self, update_id: &str) -> Result<UpdateRecord, ActionError> {
+        self.transition_update(update_id, "executed")
+    }
+
+    fn automated_update(&self, update_id: &str) -> Result<UpdateRecord, ActionError> {
+        self.transition_update(update_id, "executed")
+    }
+
+    fn delete_update(&self, update_id: &str) -> Result<(), ActionError> {
+        let mut map = self.updates.lock().expect("update store poisoned");
+        let removed = map.remove(update_id).is_some();
+        drop(map);
+        if removed {
+            Ok(())
+        } else {
+            Err(ActionError::NotFound)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1109,5 +1248,46 @@ mod tests {
             ActionError::NotFound
         );
         assert_eq!(sink.scripts(&target()).len(), 0);
+    }
+
+    /// `REQ_0974` — register → prepare → execute drives the status; the record
+    /// lists and reads back; delete removes it and a subsequent read/transition is
+    /// `NotFound`. Updates are global (no `ResourceRef`).
+    #[test]
+    fn update_register_prepare_execute() {
+        let sink = SimActionSink::new();
+
+        // A fresh sink has no updates; an unknown id is NotFound on every verb.
+        assert_eq!(sink.updates().len(), 0);
+        assert_eq!(sink.update("update-1").unwrap_err(), ActionError::NotFound);
+        assert_eq!(
+            sink.prepare_update("update-1").unwrap_err(),
+            ActionError::NotFound
+        );
+
+        // Register starts in the `registered` state and lists/reads back.
+        let record = sink.register_update(serde_json::json!({"package": "fw-1.2.3"}));
+        assert!(record.id.starts_with("update-"));
+        assert_eq!(record.status, "registered");
+        assert_eq!(sink.updates().len(), 1);
+        assert_eq!(sink.update(&record.id).unwrap().status, "registered");
+
+        // Prepare → `prepared`; execute → `executed`.
+        assert_eq!(sink.prepare_update(&record.id).unwrap().status, "prepared");
+        assert_eq!(sink.update(&record.id).unwrap().status, "prepared");
+        assert_eq!(sink.execute_update(&record.id).unwrap().status, "executed");
+        assert_eq!(sink.update(&record.id).unwrap().status, "executed");
+
+        // Automated execution also lands in `executed`.
+        let auto = sink.register_update(Value::Null);
+        assert_eq!(sink.automated_update(&auto.id).unwrap().status, "executed");
+
+        // Delete removes it; a second delete and a read/transition are NotFound.
+        sink.delete_update(&record.id).expect("delete");
+        assert_eq!(
+            sink.delete_update(&record.id).unwrap_err(),
+            ActionError::NotFound
+        );
+        assert_eq!(sink.update(&record.id).unwrap_err(), ActionError::NotFound);
     }
 }

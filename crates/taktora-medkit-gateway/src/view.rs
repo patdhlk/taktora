@@ -665,7 +665,7 @@ pub fn root_document() -> Value {
             "scripts": true,
             "tls": false,
             "triggers": true,
-            "updates": false,
+            "updates": true,
             "vendor_extensions": true
         },
         "endpoints": endpoint_catalogue(),
@@ -692,6 +692,10 @@ fn endpoint_catalogue() -> Vec<String> {
         format!("GET {API_BASE}/triggers"),
         format!("POST {API_BASE}/triggers"),
         format!("GET {API_BASE}/triggers/events"),
+        // Updates are a global family (`REQ_0974`): mounted at the top level, not
+        // per entity, like `/faults` and `/triggers`.
+        format!("GET {API_BASE}/updates"),
+        format!("POST {API_BASE}/updates"),
         format!("POST {API_BASE}/auth/token"),
         format!("POST {API_BASE}/auth/authorize"),
         format!("POST {API_BASE}/auth/revoke"),
@@ -858,6 +862,7 @@ mod tests {
             "configurations",
             "bulk_data",
             "scripts",
+            "updates",
             "vendor_extensions",
         ] {
             assert_eq!(
@@ -865,12 +870,11 @@ mod tests {
                 "{served} is served, must advertise true"
             );
         }
-        for deferred in ["logs", "updates"] {
-            assert_eq!(
-                caps[deferred], false,
-                "{deferred} is deferred, must advertise false"
-            );
-        }
+        // `logs` is the last deferred family on the read/write surface.
+        assert_eq!(
+            caps["logs"], false,
+            "logs is deferred, must advertise false"
+        );
         let endpoints: Vec<&str> = root["endpoints"]
             .as_array()
             .unwrap()

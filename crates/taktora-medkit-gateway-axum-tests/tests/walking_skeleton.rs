@@ -252,7 +252,8 @@ async fn deferred_families_return_501() {
         // `triggers` is a live family now (`REQ_0962`): entity-scoped triggers are
         // mounted per kind, so `…/{id}/triggers` is a real surface, not deferred.
         "/api/v1/components/spark-6723/cyclic-subscriptions",
-        "/api/v1/updates",
+        // `updates` is a live family now (`REQ_0974`): the global software-update
+        // surface is mounted at `/api/v1/updates`, so it is no longer deferred.
         // `/auth/token` is a real POST route now (#86); a bare `/auth` path with
         // no handler still declines via the deferred-family fallback.
         "/api/v1/auth",
