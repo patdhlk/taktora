@@ -62,6 +62,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
+dependencies = [
+ "serde",
+ "unty",
+]
+
+[[package]]
 name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -828,10 +838,11 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-codec"
-version = "0.1.9"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66d269867944c21a6eb517ac92c80cc6cfac56a4144ef22b3a749f806d4fcb48"
+checksum = "22865a7d13df09d75c6fb831f913b75dfaab0ff1ccdefb6964922306fdf632aa"
 dependencies = [
+ "bincode",
  "serde",
  "serde_json",
  "taktora-connector-core",
@@ -839,9 +850,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-core"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a973c22be38d85910fb8db398d7a256c8b73446efdf905f9a4a5b1950fe21725"
+checksum = "61a95e380af4476de114c59a436898b98d9c858f34a1d60caa93de05bcca634d"
 dependencies = [
  "rand",
  "serde",
@@ -1004,6 +1015,12 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unty"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
 
 [[package]]
 name = "utf8parse"
