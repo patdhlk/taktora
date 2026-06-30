@@ -36,7 +36,7 @@ the cycle time or use a wider routing slice with chunked payloads.
 
 ## What this shows
 
-- `EthercatConnector::new(state, MockBusDriver, JsonCodec)` — no
+- `EthercatConnector::new(state, MockBusDriver, BinaryCodec)` — no
   `bus-integration` feature, no hardware.
 - Paired bit-slice routings on the same SubDevice (`PdoDirection::Rx`
   for the writer, `PdoDirection::Tx` for the reader) at the same bit
@@ -48,16 +48,13 @@ the cycle time or use a wider routing slice with chunked payloads.
 
 ## Payload encoding note
 
-`JsonCodec` serializes a `u16` as variable-length ASCII, but
 `pdi::write_routing` rejects payloads shorter than `bit_length / 8`
-bytes. This example serializes the counter as a 5-character
-zero-padded `String` (e.g. `"00042"`), which JSON-encodes to a constant
-7 bytes (`"\"00042\""`). The matching routing's `bit_length = 56`.
-
-For a real control loop you'd typically pick a fixed-width binary
-codec (e.g. a hand-rolled big-endian `u16` codec) — this example uses
-`JsonCodec` only because it's the codec shipped with
-`taktora-connector-codec` today.
+bytes, so the wire form needs a fixed width. This example uses
+`BinaryCodec` (big-endian — the network / EtherCAT-PDI byte order) from
+`taktora-connector-codec`, behind its opt-in `binary` cargo feature.
+Fixed-width primitives encode to a constant length, so a `u16` is
+always exactly 2 bytes regardless of value: the counter goes onto the
+wire as a real integer and the routing's `bit_length` is a static 16.
 
 ## What to tweak
 

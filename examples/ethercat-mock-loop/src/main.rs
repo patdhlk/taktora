@@ -14,20 +14,20 @@
 //! `PdoDirection` (`Rx` vs `Tx`) is what makes one a writer and the
 //! other a reader.
 //!
-//! Encoding note: `JsonCodec` serializes a `u16` as variable-length
-//! ASCII (e.g. `5` → `"5"` = 1 byte, `42` → `"42"` = 2 bytes), but
-//! `pdi::write_routing` rejects a payload shorter than `bit_length /
-//! 8` bytes. To get a fixed-length payload we serialize the counter
-//! as a 5-character zero-padded `String` (e.g. `"00042"`), which
-//! JSON-encodes to exactly 7 bytes (`"\"00042\""`). The matching
-//! routing has `bit_length = 56`.
+//! Encoding note: this example uses `BinaryCodec` (big-endian, the
+//! network / EtherCAT-PDI byte order), which gives fixed-width
+//! primitives a constant wire length. A `u16` is always exactly 2
+//! bytes — independent of value — so the counter can be sent as a real
+//! integer and the routing's `bit_length` is a static constant of 16.
+//! (`pdi::write_routing` rejects a payload shorter than `bit_length /
+//! 8` bytes; a constant-width codec satisfies that without padding.)
 
 use core::time::Duration;
 use std::sync::{Arc, Mutex};
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use taktora_connector_codec::JsonCodec;
+use taktora_connector_codec::BinaryCodec;
 use taktora_connector_core::ChannelDescriptor;
 use taktora_connector_ethercat::{
     EthercatConnector, EthercatConnectorOptions, EthercatRouting, MockBusDriver, PdoDirection,
@@ -43,19 +43,12 @@ const N: usize = 256;
 const SUBDEV: u16 = 0x0001;
 
 /// PDI buffer size in bytes for both outputs and inputs. Must be
-/// at least `(bit_offset + bit_length).div_ceil(8)` = 7 bytes.
+/// at least `(bit_offset + bit_length).div_ceil(8)` = 2 bytes.
 const PDI_BYTES: usize = 16;
 
-/// Bit length of the routing slice. Fits the JSON encoding of a
-/// 5-character zero-padded `String` (`"\"00042\""` = 7 bytes = 56
-/// bits).
-const ROUTING_BITS: u16 = 7 * 8;
-
-/// Format a `u16` as a 5-character zero-padded string (`0..=65535`).
-/// JSON-encodes to a constant 7 bytes.
-fn fmt_counter(v: u16) -> String {
-    format!("{v:05}")
-}
+/// Bit length of the routing slice: a `BinaryCodec`-encoded `u16` is a
+/// constant 2 bytes = 16 bits, regardless of the counter value.
+const ROUTING_BITS: u16 = 2 * 8;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -93,10 +86,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .cycle_time(Duration::from_millis(1))
         .build();
     let state = Arc::new(EthercatState::new(opts));
-    let mut connector = EthercatConnector::new(state, driver, JsonCodec::new())?;
+    let mut connector = EthercatConnector::new(state, driver, BinaryCodec::big_endian())?;
 
     // 3. Paired routings on the same SubDevice, same bit offset, both
-    //    sized to the fixed 7-byte JSON payload.
+    //    sized to the fixed 2-byte big-endian `u16` payload.
     let routing_rx = EthercatRouting::new(SUBDEV, PdoDirection::Rx, 0, ROUTING_BITS);
     let routing_tx = EthercatRouting::new(SUBDEV, PdoDirection::Tx, 0, ROUTING_BITS);
     let desc_out =
@@ -105,8 +98,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ChannelDescriptor::<EthercatRouting, N>::new("taktora.examples.ecat.in", routing_tx)?;
     // Reader created before writer so the gateway-side raw publisher
     // attaches before the first cycle drives inbound bytes onto it.
-    let reader = connector.create_reader::<String, N>(&desc_in)?;
-    let writer = connector.create_writer::<String, N>(&desc_out)?;
+    let reader = connector.create_reader::<u16, N>(&desc_in)?;
+    let writer = connector.create_writer::<u16, N>(&desc_out)?;
 
     // 4. Build the executor and register the connector (spawns the
     //    gateway dispatcher loop on its tokio runtime).
@@ -154,18 +147,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             #[allow(clippy::cast_possible_truncation)]
             let seq = s.sent as u16;
-            let payload = fmt_counter(seq);
+            // Send the counter as a real `u16`: `BinaryCodec` encodes it
+            // to a constant 2 bytes big-endian onto the wire.
             writer
-                .send(&payload)
+                .send(&seq)
                 .map_err(|e| -> taktora_executor::ItemError { Box::new(e) })?;
             s.sent += 1;
 
             while let Ok(Some(env)) = reader.try_recv() {
-                let recv_value: u16 = env.value.parse().map_err(
-                    |e: core::num::ParseIntError| -> taktora_executor::ItemError {
-                        Box::new(e)
-                    },
-                )?;
+                // The inbound slice decodes straight back to the `u16`
+                // counter — no string parsing.
+                let recv_value: u16 = env.value;
                 // Lag is `sent` (the count of writes issued, including
                 // this tick's) minus `recv_value` (the most recent
                 // observed counter) minus 1 (for the just-incremented
