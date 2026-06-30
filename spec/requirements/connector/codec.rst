@@ -59,3 +59,20 @@ How typed values become payload bytes, and back. This cluster
    When ``PayloadCodec::decode`` fails on a received envelope,
    ``ChannelReader::try_recv`` shall return ``ConnectorError::Codec`` and
    shall not silently drop the envelope.
+
+.. req:: Fixed-width binary codec
+   :id: REQ_0215
+   :status: implemented
+   :satisfies: FEAT_0032
+   :links: BB_0003, TEST_0195
+
+   The framework shall ship a ``BinaryCodec`` in ``taktora-connector-codec``
+   behind an opt-in ``binary`` cargo feature (not default-on), providing a
+   fixed-width binary encoding with **selectable endianness** (default
+   big-endian, for network / EtherCAT-PDI byte order) and a **constant-length
+   contract**: each fixed-width primitive encodes to a constant number of bytes
+   independent of value (``u16`` → 2, ``u32`` → 4, …), so a cyclic-fieldbus
+   routing slice can use a static ``bit_length`` rather than the
+   variable-length-text workarounds a JSON codec forces. Variable-length types
+   (``String`` / ``Vec`` / enums) carry no constant-length guarantee and shall be
+   documented as such.

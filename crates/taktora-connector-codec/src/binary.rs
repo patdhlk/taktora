@@ -1,5 +1,5 @@
 //! [`BinaryCodec`] — fixed-width binary `PayloadCodec` backed by
-//! `bincode`. ``REQ_0212``, ``BB_0003``.
+//! `bincode`. ``REQ_0215``, ``BB_0003``.
 //!
 //! Uses `bincode`'s serde integration with **fixed-int encoding** and a
 //! **selectable byte order** so that fixed-width primitives encode to a
@@ -34,7 +34,7 @@ pub enum Endian {
 }
 
 /// Fixed-width binary codec built on `bincode`'s serde integration with
-/// fixed-int encoding and a selectable byte order. ``REQ_0212``,
+/// fixed-int encoding and a selectable byte order. ``REQ_0215``,
 /// ``BB_0003``.
 ///
 /// # Length contract
