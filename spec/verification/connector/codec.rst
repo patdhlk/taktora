@@ -38,3 +38,15 @@ Codec tests
    wrong shape) surfaces as ``ConnectorError::Codec`` from
    ``ChannelReader::try_recv`` rather than silently dropping the
    envelope.
+
+.. test:: BinaryCodec round-trip and constant-length contract
+   :id: TEST_0195
+   :status: implemented
+   :verifies: REQ_0215
+
+   A ``proptest``-driven round-trip over fixed-width values, plus assertions that
+   a ``u16`` encodes to exactly 2 bytes for every value, that big-endian and
+   little-endian produce the expected byte order, and that a multi-field
+   fixed-width struct encodes to the summed width. An undersized buffer returns
+   ``ConnectorError::PayloadOverflow`` and a truncated decode returns
+   ``ConnectorError::Codec``.

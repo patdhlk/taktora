@@ -17,11 +17,16 @@ default = ["json"]
 # JsonCodec via serde_json — REQ_0212. Default-on so the typical
 # build pulls a working codec without extra wiring.
 json    = ["dep:serde_json"]
+# BinaryCodec via bincode (fixed-int + selectable endianness) — REQ_0212.
+# Opt-in (NOT in default) so default builds do not pull bincode; the
+# fixed-width wire format is the point (see `binary` module docs).
+binary  = ["dep:bincode"]
 
 [dependencies]
 taktora-connector-core = { workspace = true }
 serde                = { workspace = true, features = ["std"] }
 serde_json           = { workspace = true, optional = true, features = ["std"] }
+bincode              = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde      = { workspace = true, features = ["std", "derive"] }
