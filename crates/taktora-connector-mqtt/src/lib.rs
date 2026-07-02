@@ -65,7 +65,7 @@ pub use health::{MqttHealthError, MqttHealthMonitor};
 pub use inbound::{InboundTable, route_inbound};
 pub use matcher::topic_matches;
 pub use mock::{MockMqttSession, PublishRecord, RecordedPublish};
-pub use options::{Credentials, MqttConnectorOptions, MqttConnectorOptionsBuilder};
+pub use options::{Credentials, MqttConnectorOptions, MqttConnectorOptionsBuilder, TlsOptions};
 pub use registry::{
     ChannelBinding, ChannelDirection, ChannelRegistry, InboundPublish, OutboundDrain,
     RegisteredChannel,
