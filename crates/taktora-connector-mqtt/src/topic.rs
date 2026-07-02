@@ -82,23 +82,24 @@ impl MqttTopic {
     /// See [`TopicError`].
     pub fn new(topic: impl Into<String>) -> Result<Self, TopicError> {
         let topic = topic.into();
-        if topic.is_empty() {
-            return Err(TopicError::Empty);
+        // Single exit point: find the first violation, then return once. Keeps
+        // the function within the repo's `nexits <= 5` complexity gate.
+        let violation = if topic.is_empty() {
+            Some(TopicError::Empty)
+        } else if topic.len() > MAX_TOPIC_BYTES {
+            Some(TopicError::TooLong)
+        } else {
+            topic.chars().find_map(|ch| match ch {
+                '\0' => Some(TopicError::ContainsNull),
+                ' ' => Some(TopicError::ContainsSpace),
+                SINGLE_LEVEL_WILDCARD | MULTI_LEVEL_WILDCARD => Some(TopicError::ContainsWildcard),
+                _ => None,
+            })
+        };
+        match violation {
+            Some(err) => Err(err),
+            None => Ok(Self(topic)),
         }
-        if topic.len() > MAX_TOPIC_BYTES {
-            return Err(TopicError::TooLong);
-        }
-        for ch in topic.chars() {
-            match ch {
-                '\0' => return Err(TopicError::ContainsNull),
-                ' ' => return Err(TopicError::ContainsSpace),
-                SINGLE_LEVEL_WILDCARD | MULTI_LEVEL_WILDCARD => {
-                    return Err(TopicError::ContainsWildcard);
-                }
-                _ => {}
-            }
-        }
-        Ok(Self(topic))
     }
 
     /// Borrow the validated topic string.
@@ -125,34 +126,45 @@ impl MqttTopicFilter {
     /// See [`TopicFilterError`].
     pub fn new(filter: impl Into<String>) -> Result<Self, TopicFilterError> {
         let filter = filter.into();
-        if filter.is_empty() {
-            return Err(TopicFilterError::Empty);
+        // Single exit point (repo `nexits <= 5` gate): resolve the first
+        // violation into an `Option`, then return once. Level-wildcard rules
+        // live in `wildcard_violation` to keep both functions under the limit.
+        let violation = if filter.is_empty() {
+            Some(TopicFilterError::Empty)
+        } else if filter.len() > MAX_TOPIC_BYTES {
+            Some(TopicFilterError::TooLong)
+        } else if filter.contains('\0') {
+            Some(TopicFilterError::ContainsNull)
+        } else if filter.contains(' ') {
+            Some(TopicFilterError::ContainsSpace)
+        } else {
+            Self::wildcard_violation(&filter)
+        };
+        match violation {
+            Some(err) => Err(err),
+            None => Ok(Self(filter)),
         }
-        if filter.len() > MAX_TOPIC_BYTES {
-            return Err(TopicFilterError::TooLong);
-        }
-        if filter.contains('\0') {
-            return Err(TopicFilterError::ContainsNull);
-        }
-        if filter.contains(' ') {
-            return Err(TopicFilterError::ContainsSpace);
-        }
+    }
+
+    /// The first level-wildcard rule a filter breaks, if any: `+` must occupy a
+    /// whole level, `#` must occupy a whole level and only the final one.
+    fn wildcard_violation(filter: &str) -> Option<TopicFilterError> {
         let levels: Vec<&str> = filter.split(LEVEL_SEPARATOR).collect();
         let last = levels.len() - 1;
         for (i, level) in levels.iter().enumerate() {
             if level.contains(MULTI_LEVEL_WILDCARD) {
                 if *level != "#" {
-                    return Err(TopicFilterError::MultiLevelWildcardNotAlone);
+                    return Some(TopicFilterError::MultiLevelWildcardNotAlone);
                 }
                 if i != last {
-                    return Err(TopicFilterError::MultiLevelWildcardNotLast);
+                    return Some(TopicFilterError::MultiLevelWildcardNotLast);
                 }
             }
             if level.contains(SINGLE_LEVEL_WILDCARD) && *level != "+" {
-                return Err(TopicFilterError::SingleLevelWildcardNotAlone);
+                return Some(TopicFilterError::SingleLevelWildcardNotAlone);
             }
         }
-        Ok(Self(filter))
+        None
     }
 
     /// Borrow the validated filter string.
@@ -177,7 +189,10 @@ mod tests {
     #[test]
     fn accepts_plain_and_leading_slash_topics() {
         assert!(MqttTopic::new("taktora/examples/pubsub").is_ok());
-        assert!(MqttTopic::new("/leading/slash").is_ok(), "leading '/' allowed");
+        assert!(
+            MqttTopic::new("/leading/slash").is_ok(),
+            "leading '/' allowed"
+        );
         assert!(MqttTopic::new("a").is_ok());
     }
 

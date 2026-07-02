@@ -213,7 +213,10 @@ mod tests {
             other => panic!("expected Degraded, got {other:?}"),
         }
         assert!(m.degraded_due_to_drops());
-        assert_eq!(sub.try_recv().unwrap().to.kind(), ConnectorHealthKind::Degraded);
+        assert_eq!(
+            sub.try_recv().unwrap().to.kind(),
+            ConnectorHealthKind::Degraded
+        );
 
         // Latched: subsequent drops emit nothing.
         assert!(m.record_inbound_drop(2, 1).is_none());
