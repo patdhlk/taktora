@@ -40,5 +40,6 @@ cachable = "cachable"  # Project prefers `cachable` over `cacheable`.
 # Prose vocabulary typos flags overzealously.
 mis      = "mis"       # Used as a prefix in hyphenated compounds like "mis-model".
 
-# MQTT vocabulary.
+# MQTT / J1939 connector vocabulary.
 mosquitto = "mosquitto"  # Eclipse Mosquitto, the MQTT broker; not a typo of "mosquito".
+NAM       = "NAM"        # Case-split fragment of J1939 "NAMEs" (device NAME, plural): typos splits NAMEs -> NAM + Es.
