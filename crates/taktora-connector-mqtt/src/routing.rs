@@ -3,6 +3,8 @@
 
 use taktora_connector_core::Routing;
 
+use crate::topic::MqttTopic;
+
 /// MQTT Quality-of-Service level. Only QoS 0 and 1 are supported; QoS 2 is
 /// deferred to a follow-on spec (`REQ_0252`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -73,25 +75,6 @@ impl MqttRouting {
 
 impl Routing for MqttRouting {}
 
-/// A validated MQTT **publish** topic name. Placeholder for slice 2 — the
-/// full validator lands there.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MqttTopic(String);
-
-impl MqttTopic {
-    /// Construct without validation (temporary — slice 2 replaces this).
-    #[must_use]
-    pub fn new_unchecked(topic: impl Into<String>) -> Self {
-        Self(topic.into())
-    }
-
-    /// Borrow the topic string.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,7 +93,7 @@ mod tests {
     #[test]
     fn mqtt_routing_carries_topic_qos_retained() {
         // REQ_0251: carries topic + qos + retained; REQ_0252: QoS 0 and 1.
-        let topic = MqttTopic::new_unchecked("taktora/examples/pubsub");
+        let topic = MqttTopic::new("taktora/examples/pubsub").unwrap();
         let r = MqttRouting::new(topic.clone(), MqttQos::AtLeastOnce);
         assert_eq!(r.topic(), &topic);
         assert_eq!(r.qos(), MqttQos::AtLeastOnce);

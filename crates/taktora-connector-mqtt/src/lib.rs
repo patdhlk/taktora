@@ -6,11 +6,14 @@
 //!
 //! M1 modules:
 //!
-//! * [`routing`] — typed `MqttRouting`, `MqttTopic`, `MqttTopicFilter`,
-//!   `MqttQos`; publish/filter validation (`REQ_0251`, `REQ_0252`).
+//! * [`topic`] — `MqttTopic` / `MqttTopicFilter` with publish/filter
+//!   validation (`REQ_0251`, `REQ_0254`).
+//! * [`routing`] — typed `MqttRouting`, `MqttQos` (`REQ_0251`, `REQ_0252`).
 
 #![warn(missing_docs)]
 
 pub mod routing;
+pub mod topic;
 
-pub use routing::{MqttQos, MqttRouting, MqttTopic};
+pub use routing::{MqttQos, MqttRouting};
+pub use topic::{MqttTopic, MqttTopicFilter, TopicError, TopicFilterError};
