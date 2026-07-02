@@ -33,12 +33,14 @@ two crates that carry the most logic.
 .. building-block:: taktora-connector-codec
    :id: BB_0003
    :status: open
-   :implements: REQ_0210, REQ_0212, REQ_0215
+   :implements: REQ_0210, REQ_0212, REQ_0215, REQ_0989
 
    Concrete ``PayloadCodec`` implementations. ``JsonCodec`` ships
    default-on; ``BinaryCodec`` (fixed-width, selectable-endianness,
    ``bincode``-backed) ships behind the opt-in ``binary`` feature;
-   ``MsgPackCodec`` and ``ProtoCodec`` are deferred behind cargo features.
+   ``MsgPackCodec`` (``rmp-serde``-backed MessagePack) ships behind the
+   opt-in ``msgpack`` feature; ``ProtoCodec`` is deferred behind a cargo
+   feature.
 
 .. building-block:: taktora-connector-mqtt
    :id: BB_0004

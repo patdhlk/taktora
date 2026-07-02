@@ -21,11 +21,16 @@ json    = ["dep:serde_json"]
 # Opt-in (NOT in default) so default builds do not pull bincode; the
 # fixed-width wire format is the point (see `binary` module docs).
 binary  = ["dep:bincode"]
+# MsgPackCodec via rmp-serde (MessagePack) — REQ_0989. Opt-in (NOT in
+# default) so default builds do not pull rmp-serde; compact binary wire
+# for consumers that want smaller-than-JSON payloads.
+msgpack = ["dep:rmp-serde"]
 
 [dependencies]
 taktora-connector-core = { workspace = true }
 serde                = { workspace = true, features = ["std"] }
 serde_json           = { workspace = true, optional = true, features = ["std"] }
+rmp-serde            = { workspace = true, optional = true }
 bincode              = { workspace = true, optional = true }
 
 [dev-dependencies]

@@ -9,8 +9,8 @@ Codec tests
    ``proptest``-driven round-trip for a representative struct:
    ``encode(value, &mut buf)`` followed by ``decode(&buf[..len])``
    yields a value equal to the original under every shrunken input.
-   Runs against ``JsonCodec``; will be parameterised over
-   ``MsgPackCodec`` and ``ProtoCodec`` once those land.
+   Runs against ``JsonCodec``; ``MsgPackCodec`` has its own round-trip
+   test (:need:`TEST_0955`) and ``ProtoCodec`` will be added once it lands.
 
 .. test:: Codec encode error on undersized buffer
    :id: TEST_0111
@@ -50,3 +50,16 @@ Codec tests
    fixed-width struct encodes to the summed width. An undersized buffer returns
    ``ConnectorError::PayloadOverflow`` and a truncated decode returns
    ``ConnectorError::Codec``.
+
+.. test:: MsgPackCodec round-trip and error contract
+   :id: TEST_0955
+   :status: implemented
+   :verifies: REQ_0989
+
+   A ``proptest``-driven round-trip over a representative struct
+   (primitives, ``String``, ``Vec``), plus assertions that the
+   ``MessagePack`` encoding is smaller than the JSON encoding of the same
+   value, that ``format_name()`` is ``"msgpack"``, that an undersized
+   buffer returns ``ConnectorError::PayloadOverflow``, and that a
+   truncated payload decodes to ``ConnectorError::Codec`` rather than
+   being silently dropped.
