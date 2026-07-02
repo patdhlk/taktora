@@ -18,9 +18,13 @@ publish      = false
 # `tests/`. A `src/lib.rs` is required so Cargo treats this as a package.
 
 [dev-dependencies]
-taktora-connector-mqtt  = { workspace = true }
-taktora-connector-codec = { workspace = true }
-taktora-connector-core  = { workspace = true }
+taktora-connector-mqtt           = { workspace = true }
+taktora-connector-codec          = { workspace = true }
+taktora-connector-core           = { workspace = true }
+taktora-connector-host           = { workspace = true }
+taktora-connector-transport-iox  = { workspace = true }
+taktora-executor                 = { workspace = true }
+iceoryx2                         = { workspace = true }
 
 serde = { workspace = true, features = ["std", "derive"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }

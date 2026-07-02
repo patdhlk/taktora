@@ -10,12 +10,19 @@ homepage     = { workspace = true }
 readme       = { workspace = true }
 keywords     = { workspace = true }
 categories   = { workspace = true }
-description  = "MQTT reference connector for the taktora-connector framework (M1 core: routing, options, session seam + mock, bounded bridges). Implements BB_0004 (FEAT_0036)."
+description  = "MQTT reference connector for the taktora-connector framework. Implements BB_0004 (FEAT_0036)."
 
 [dependencies]
-taktora-connector-core = { workspace = true }
-crossbeam-channel      = { workspace = true }
-thiserror              = { workspace = true }
+taktora-connector-core           = { workspace = true }
+taktora-connector-transport-iox  = { workspace = true }
+taktora-connector-host           = { workspace = true }
+taktora-executor                 = { workspace = true }
+iceoryx2                         = { workspace = true }
+crossbeam-channel                = { workspace = true }
+tokio                            = { workspace = true }
+serde                            = { workspace = true, features = ["std"] }
+thiserror                        = { workspace = true }
+tracing                          = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

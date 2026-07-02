@@ -28,6 +28,7 @@ pub struct MqttHealthMonitor {
     /// (dropped receivers) are pruned on each broadcast.
     subscribers: Mutex<Vec<Sender<HealthEvent>>>,
     degraded_due_to_drops: AtomicBool,
+    degraded_due_to_backpressure: AtomicBool,
 }
 
 impl MqttHealthMonitor {
@@ -39,6 +40,7 @@ impl MqttHealthMonitor {
             inner: Mutex::new(HealthMonitor::new()),
             subscribers: Mutex::new(Vec::new()),
             degraded_due_to_drops: AtomicBool::new(false),
+            degraded_due_to_backpressure: AtomicBool::new(false),
         }
     }
 
@@ -103,6 +105,8 @@ impl MqttHealthMonitor {
         };
         if event.to.kind() == ConnectorHealthKind::Up {
             self.degraded_due_to_drops.store(false, Ordering::Release);
+            self.degraded_due_to_backpressure
+                .store(false, Ordering::Release);
         }
         self.broadcast(&event);
         Ok(event)
@@ -143,10 +147,58 @@ impl MqttHealthMonitor {
         Some(event)
     }
 
+    /// Record an outbound-bridge saturation event (`REQ_0260`). When the
+    /// latch is unset and the monitor is currently `Up` or `Connecting`,
+    /// emit a single `→ Degraded { reason: "outbound backpressure" }`
+    /// transition and set the latch. The latch re-arms on the next `→ Up`
+    /// transition, so a burst of back-pressure yields at most one
+    /// `Degraded` event until the connector recovers.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal mutex was poisoned by a prior panic.
+    pub fn record_outbound_backpressure(&self) -> Option<HealthEvent> {
+        if self.degraded_due_to_backpressure.load(Ordering::Acquire) {
+            return None;
+        }
+        let event = {
+            let mut guard = self
+                .inner
+                .lock()
+                .expect("mqtt health monitor lock not poisoned");
+            let kind = guard.current().kind();
+            let recoverable = matches!(
+                kind,
+                ConnectorHealthKind::Up | ConnectorHealthKind::Connecting
+            );
+            if !recoverable {
+                // Already Degraded/Down for another reason — latch so we
+                // stop re-checking, and skip emitting.
+                self.degraded_due_to_backpressure
+                    .store(true, Ordering::Release);
+                return None;
+            }
+            let target = ConnectorHealth::Degraded {
+                reason: "outbound backpressure".to_string(),
+            };
+            guard.try_transition_to(target).ok()?
+        };
+        self.degraded_due_to_backpressure
+            .store(true, Ordering::Release);
+        self.broadcast(&event);
+        Some(event)
+    }
+
     /// Test/inspection helper: snapshot the drops-latch state.
     #[must_use]
     pub fn degraded_due_to_drops(&self) -> bool {
         self.degraded_due_to_drops.load(Ordering::Acquire)
+    }
+
+    /// Test/inspection helper: snapshot the backpressure-latch state.
+    #[must_use]
+    pub fn degraded_due_to_backpressure(&self) -> bool {
+        self.degraded_due_to_backpressure.load(Ordering::Acquire)
     }
 }
 
