@@ -748,3 +748,141 @@ that ``:refines:`` the requirement or feature it answers.
    NAME configuration, an arbitration state machine, and a TX interlock,
    each needing mock-backed tests — accepted over deferring claim to a
    follow-on.
+
+.. arch-decision:: rumqttc EventLoop owns MQTT reconnection
+   :id: ADR_0128
+   :status: draft
+   :refines: FEAT_0036
+   :links: REQ_0260
+
+   **Context.** An MQTT connection drops and must be re-established. The
+   Zenoh reference connector (:need:`ADR_0040` cluster) does not repair
+   connections at all — it surfaces liveness as ``ConnectorHealth`` and
+   delegates recovery to the underlying runtime. ``rumqttc`` already ships
+   a reconnecting poll loop: its ``EventLoop`` re-establishes the TCP+MQTT
+   session on its own schedule when polled, with configurable backoff.
+
+   **Decision.** The gateway task pumps ``rumqttc::EventLoop`` and does not
+   implement its own reconnect. Poll outcomes map onto the
+   ``ConnectorHealth`` state machine (connection error → ``Connecting``,
+   ``ConnAck`` → ``Up``). Reconnect/backoff knobs are surfaced through
+   ``MqttConnectorOptions`` rather than a bespoke loop. Considered and
+   rejected: driving reconnection ourselves via the core
+   ``ReconnectPolicy`` / ``ExponentialBackoff`` seam — it duplicates logic
+   ``rumqttc`` already owns and adds a second, separately-tested recovery
+   path for no behavioural gain.
+
+   **Open end.** ``rumqttc`` retries indefinitely, even on an
+   auth-rejected ``ConnAck``, so it never surfaces a terminal failure on
+   its own. What drives the ``Down`` transition — a reconnect-attempt
+   threshold versus mapping a rejected ``ConnAck`` directly to ``Down`` —
+   is left unresolved here and must be settled when the reconnect
+   requirements are authored. ``Down`` is contractually load-bearing:
+   outbound sends return ``ConnectorError::Down`` and the framework
+   persists no envelopes while down.
+
+   **Consequences.** ✅ Least code on the recovery path, reusing the
+   library's battle-tested reconnect. ✅ Mirrors the connector framework's
+   "observe liveness as health, don't repair in the connector" stance
+   (:need:`ADR_0040`). ❌ Backoff policy is bounded by what ``rumqttc``
+   exposes, not the core ``ReconnectPolicy`` seam — unified cross-connector
+   backoff is forgone. ❌ The terminal-``Down`` trigger is unspecified
+   until the open end above is closed.
+
+.. arch-decision:: Wildcard inbound demux via a gateway-local matcher
+   :id: ADR_0129
+   :status: draft
+   :refines: FEAT_0036
+   :links: REQ_0254
+
+   **Context.** MQTT subscriptions may use wildcards (``+`` single-level,
+   ``#`` multi-level). ``rumqttc`` delivers each inbound PUBLISH tagged
+   with the *concrete* topic, not with the subscription that matched, so
+   the connector must decide for itself which ``ChannelReader`` instances a
+   message belongs to. :need:`REQ_0254` requires delivery to the matching
+   instance(s) — plural — so one PUBLISH can fan out to several channels.
+   The Zenoh connector offers no template: its inbound path is one callback
+   per subscription, with no local topic matching.
+
+   **Decision.** The gateway keeps a subscription table (filter →
+   gateway-side writer) and registers each *distinct* filter with the
+   broker exactly once (deduplicating overlapping filters so the broker
+   never multi-delivers). On each inbound PUBLISH the gateway runs MQTT
+   topic-matching locally against every registered filter and fans the
+   message out to all matching channels. The table is reference-counted:
+   an ``UNSUBSCRIBE`` is sent only when the last channel using a filter is
+   dropped. Considered and rejected: (a) subscribing every channel's filter
+   verbatim and relying on the broker's under-specified multi-delivery
+   behaviour — risks duplicate wire deliveries that then fan out again,
+   undedupable for QoS 0 which has no packet identity; (b) first-match-only
+   delivery — violates :need:`REQ_0254`'s plural contract and silently
+   drops messages for overlapping subscribers.
+
+   **Consequences.** ✅ A single source of truth for fan-out that does not
+   depend on broker-specific behaviour. ✅ Ref-counting keeps broker
+   subscription state minimal and correct across channel teardown. ❌ The
+   connector carries its own MQTT topic-matcher and a rewritten filter
+   validator (``+``/``#`` position legality, ``#`` terminal-only,
+   leading-``/`` permitted) — the Zenoh ``KeyExprOwned`` validator does not
+   transfer. ❌ A wildcard filter matching a high-traffic topic space fans
+   out to every matching channel (see :need:`RISK_0005`).
+
+.. arch-decision:: Clean session with SUBSCRIBE replay on reconnect
+   :id: ADR_0130
+   :status: draft
+   :refines: FEAT_0036
+
+   **Context.** MQTT ``CONNECT`` carries a clean-session flag. With a
+   clean session the broker holds no state across a disconnect; with a
+   persistent session (``clean_session=false`` + a stable client-id) the
+   broker retains subscriptions and queues QoS-1 messages across
+   reconnects. This choice interacts directly with :need:`ADR_0128`: under
+   a clean session ``rumqttc`` will not restore subscriptions after a
+   reconnect, so something must replay them.
+
+   **Decision.** v1 connects with ``clean_session=true`` (configurable via
+   ``MqttConnectorOptions``). On every reconnect ``ConnAck`` the gateway
+   replays all active ``SUBSCRIBE``\ s from its reference-counted
+   subscription table (:need:`ADR_0129`). QoS-1 messages arriving while
+   disconnected are lost — accepted for v1. Considered and rejected: a
+   persistent session — it removes the replay step and reduces message
+   loss, but makes correctness depend on client-id uniqueness/stability
+   and broker session-expiry configuration, adding failure modes that are
+   hard to test deterministically with the mock session.
+
+   **Consequences.** ✅ Deterministic, self-contained recovery with no
+   dependence on broker-side session storage or client-id stability. ✅
+   The replay loop is straightforward to test against the mock session. ❌
+   Messages published to subscribed topics during a disconnect window are
+   not recovered — persistent-session semantics are deferred to a
+   follow-on. ❌ Every reconnect pays a re-subscribe round-trip.
+
+.. arch-decision:: JSON default codec; MsgPackCodec built as a prerequisite
+   :id: ADR_0131
+   :status: draft
+   :refines: FEAT_0036
+   :links: REQ_0250
+
+   **Context.** ``MqttConnector<C: PayloadCodec>`` is generic over the
+   codec (:need:`ADR_0005`), so any ``PayloadCodec`` works without
+   changing the connector. Today ``taktora-connector-codec`` ships
+   ``JsonCodec`` and ``BinaryCodec``; the original FEAT_0036 prose
+   name-drops a ``MsgPackCodec`` that does not exist.
+
+   **Decision.** ``JsonCodec`` is the documented default for MQTT examples
+   and tests — human-readable, the MQTT-ecosystem norm, debuggable with
+   ``mosquitto_sub``. ``BinaryCodec`` remains available. A real
+   ``MsgPackCodec`` (``rmp-serde``) is built behind a feature in
+   ``taktora-connector-codec`` so the reference becomes true, sequenced as
+   its own change that must land *and publish* before the MQTT connector
+   cites it (the release-ordering rule that has bitten examples before).
+   Considered and rejected: dropping the ``MsgPack`` mention entirely and
+   leaving only JSON/Binary — simplest and matches current reality, but the
+   maintainer chose to make the spec reference real rather than delete it.
+
+   **Consequences.** ✅ The MQTT connector documents a sensible default and
+   the ``MsgPack`` reference stops being a dangling promise. ✅ The new
+   codec benefits every connector, not just MQTT, since codecs are generic.
+   ❌ A prerequisite codec-crate change plus an ``rmp-serde`` dependency
+   must be released ahead of MQTT — extra sequencing before the connector
+   can land. ❌ Three codecs to keep working instead of two.
