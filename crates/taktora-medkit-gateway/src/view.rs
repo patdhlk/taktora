@@ -12,8 +12,9 @@ use serde_json::{Value, json};
 use taktora_medkit_manifest::Manifest;
 use taktora_medkit_model::Entity;
 use taktora_medkit_model::{
-    Collection, CollectionMeta, DtcStatus, EntityKind, EnvironmentData, ExtendedDataRecords,
-    FaultDetail, FaultDetailMeta, FaultItem, FaultList, FaultListMeta, FaultSummary, GenericError,
+    BuildInfo, Collection, CollectionMeta, DtcStatus, EntityKind, EnvironmentData,
+    ExtendedDataRecords, FaultDetail, FaultDetailMeta, FaultItem, FaultList, FaultListMeta,
+    FaultSummary, GenericError,
 };
 use taktora_medkit_provider::{LogEntry, ProviderSnapshot, Relation, RelationshipEdge, Telemetry};
 
@@ -855,15 +856,27 @@ fn endpoint_catalogue() -> Vec<String> {
 }
 
 /// The version catalogue (`GET /version-info`).
+///
+/// `build` is the injected source identity of the running binary (`REQ_0980`),
+/// rendered additively under `vendor_info` alongside the existing crate
+/// `version`, so a client written against the `ros2_medkit` contract reads the
+/// document unchanged (`REQ_0911`). A binary that injects nothing passes
+/// [`BuildInfo::default`], which reports `"unknown"`.
 #[must_use]
-pub fn version_info_document() -> Value {
+pub fn version_info_document(build: &BuildInfo) -> Value {
     json!({
         "items": [
             {
                 "base_uri": API_BASE,
                 "vendor_info": {
                     "name": "taktora-medkit",
-                    "version": env!("CARGO_PKG_VERSION")
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "git_sha": build.git_sha,
+                    "git_short": build.git_short,
+                    "git_describe": build.git_describe,
+                    "git_dirty": build.git_dirty,
+                    "build_timestamp": build.build_timestamp,
+                    "rustc_version": build.rustc_version
                 },
                 "version": SOVD_VERSION
             }
@@ -1372,5 +1385,44 @@ mod tests {
         // The parentless app surfaces under no synthesized relationship.
         assert_eq!(view.list(EntityKind::App).items.len(), 1);
         assert!(view.list(EntityKind::Area).items.is_empty());
+    }
+
+    /// `REQ_0980` — the version catalogue carries the injected build identity
+    /// under `vendor_info`, additively and with the specified types.
+    #[test]
+    fn version_info_renders_injected_build_identity() {
+        let build = BuildInfo {
+            git_sha: "d74603ddeadbeef".to_owned(),
+            git_short: "d74603d".to_owned(),
+            git_describe: "v0.3.0-2-gd74603d".to_owned(),
+            git_dirty: true,
+            build_timestamp: "2026-07-03T09:15:00Z".to_owned(),
+            rustc_version: "rustc 1.86.0".to_owned(),
+        };
+        let doc = version_info_document(&build);
+        let vendor = &doc["items"][0]["vendor_info"];
+
+        // Existing fields untouched (drop-in compat, `REQ_0911`).
+        assert_eq!(vendor["name"], "taktora-medkit");
+        assert_eq!(doc["items"][0]["version"], SOVD_VERSION);
+        // Build identity, typed: strings for the git/timestamp/rustc fields, a
+        // JSON boolean for the dirty flag.
+        assert_eq!(vendor["git_sha"], "d74603ddeadbeef");
+        assert_eq!(vendor["git_short"], "d74603d");
+        assert_eq!(vendor["git_describe"], "v0.3.0-2-gd74603d");
+        assert_eq!(vendor["build_timestamp"], "2026-07-03T09:15:00Z");
+        assert_eq!(vendor["rustc_version"], "rustc 1.86.0");
+        assert_eq!(vendor["git_dirty"], serde_json::Value::Bool(true));
+    }
+
+    /// `REQ_0980` — with no injected identity the document is still well-formed:
+    /// the git fields report `"unknown"` and the tree reads clean.
+    #[test]
+    fn version_info_defaults_to_unknown() {
+        let doc = version_info_document(&BuildInfo::default());
+        let vendor = &doc["items"][0]["vendor_info"];
+        assert_eq!(vendor["git_sha"], "unknown");
+        assert_eq!(vendor["build_timestamp"], "unknown");
+        assert_eq!(vendor["git_dirty"], serde_json::Value::Bool(false));
     }
 }

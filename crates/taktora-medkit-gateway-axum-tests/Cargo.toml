@@ -23,6 +23,10 @@ taktora-medkit-gateway      = { workspace = true }
 taktora-medkit-manifest     = { workspace = true }
 taktora-medkit-provider     = { workspace = true }
 taktora-medkit-model        = { workspace = true }
+# Compile-time build identity, exercised end-to-end through the version-info
+# injection seam (`TEST_0955`). Safe here — this crate is `publish = false`, so
+# it never trips the release-plz dev-dep ordering guard.
+taktora-build-info          = { workspace = true }
 
 axum       = { workspace = true, features = ["http1", "tokio"] }
 tokio      = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "io-util"] }

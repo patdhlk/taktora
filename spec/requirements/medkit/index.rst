@@ -791,8 +791,9 @@ stays dependency-clean (:need:`ADR_0128`).
 
 .. req:: Build identity in the version catalogue
    :id: REQ_0980
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0100
+   :links: BB_0123, ADR_0128, TEST_0955
 
    The ``GET /api/v1/version-info`` document shall report, under ``vendor_info``,
    the identity of the source the binary was built from: the full and short git

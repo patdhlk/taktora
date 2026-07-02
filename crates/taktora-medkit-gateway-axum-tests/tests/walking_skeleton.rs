@@ -20,6 +20,7 @@ use taktora_medkit_gateway::Gateway;
 use taktora_medkit_gateway_axum::{
     CorsConfig, GatewayConfig, RateLimit, demo, ephemeral_listener, serve_listener,
 };
+use taktora_medkit_model::BuildInfo;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -308,4 +309,63 @@ async fn transport_hardening() {
     assert_eq!(first.status, 200);
     let second = get(addr, "/api/v1/").await;
     assert_eq!(second.status, 429, "second request should be rate-limited");
+}
+
+/// Map the compile-time capture into the wire DTO — the wiring a real
+/// deployment binary performs to inject build identity (`ADR_0128`).
+fn captured_build_info() -> BuildInfo {
+    let c = taktora_build_info::CAPTURED;
+    BuildInfo {
+        git_sha: c.git_sha.to_owned(),
+        git_short: c.git_short.to_owned(),
+        git_describe: c.git_describe.to_owned(),
+        git_dirty: c.git_dirty,
+        build_timestamp: c.build_timestamp.to_owned(),
+        rustc_version: c.rustc_version.to_owned(),
+    }
+}
+
+/// `TEST_0955` — build identity captured at compile time and injected through
+/// the `with_build_info` seam surfaces under `vendor_info` at `/version-info`,
+/// typed and additive.
+#[tokio::test]
+async fn version_info_reports_injected_build_identity() {
+    let build = captured_build_info();
+    let config = GatewayConfig::default().with_build_info(build.clone());
+    let addr = spawn(config).await;
+
+    let (status, value) = get_json(addr, "/api/v1/version-info").await;
+    assert_eq!(status, 200);
+    let vendor = &value["items"][0]["vendor_info"];
+
+    // Existing fields intact — the additive change keeps a drop-in `ros2_medkit`
+    // client working (`REQ_0911`); `TEST_0906`'s golden shape-match also passes.
+    assert_eq!(vendor["name"], "taktora-medkit");
+    // The injected identity is served verbatim.
+    assert_eq!(vendor["git_sha"], build.git_sha);
+    assert_eq!(vendor["git_short"], build.git_short);
+    assert_eq!(vendor["git_describe"], build.git_describe);
+    assert_eq!(vendor["build_timestamp"], build.build_timestamp);
+    assert_eq!(vendor["rustc_version"], build.rustc_version);
+    assert_eq!(vendor["git_dirty"], Value::Bool(build.git_dirty));
+    // Types on the wire: git/timestamp/rustc are JSON strings, dirty is a bool.
+    assert!(vendor["git_sha"].is_string());
+    assert!(vendor["git_dirty"].is_boolean());
+    // The capture actually ran against this repo — a real hash, not empty.
+    assert!(!build.git_sha.is_empty());
+}
+
+/// `TEST_0955` — with no injected identity the document stays well-formed: git
+/// fields report `"unknown"` and the tree reads clean (the no-`.git` fallback
+/// shape, `REQ_0980`).
+#[tokio::test]
+async fn version_info_defaults_to_unknown_without_injection() {
+    let addr = spawn(GatewayConfig::default()).await;
+    let (status, value) = get_json(addr, "/api/v1/version-info").await;
+    assert_eq!(status, 200);
+    let vendor = &value["items"][0]["vendor_info"];
+    assert_eq!(vendor["git_sha"], "unknown");
+    assert_eq!(vendor["git_describe"], "unknown");
+    assert_eq!(vendor["build_timestamp"], "unknown");
+    assert_eq!(vendor["git_dirty"], Value::Bool(false));
 }

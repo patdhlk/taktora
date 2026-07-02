@@ -6,6 +6,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
 use taktora_medkit_manifest::Manifest;
+use taktora_medkit_model::BuildInfo;
 
 /// The documented default bind: loopback, port 8080.
 ///
@@ -94,6 +95,14 @@ pub struct GatewayConfig {
     /// (`REQ_0922`). Load one with [`Manifest::from_toml`] so ops can edit the
     /// topology in a `medkit.toml` without recompiling.
     pub manifest: Option<Manifest>,
+    /// Source identity of the running binary, reported under `vendor_info` in
+    /// `GET /api/v1/version-info` (`REQ_0980`).
+    ///
+    /// The default is all-`"unknown"`. A deployment binary captures the real
+    /// identity with the `taktora-build-info` crate and injects it here (see
+    /// [`GatewayConfig::with_build_info`]); the extractable core never depends on
+    /// that crate — build identity arrives as data (`ADR_0128`).
+    pub build_info: BuildInfo,
 }
 
 impl Default for GatewayConfig {
@@ -105,6 +114,20 @@ impl Default for GatewayConfig {
             tls: None,
             auth_enabled: true,
             manifest: None,
+            build_info: BuildInfo::default(),
         }
+    }
+}
+
+impl GatewayConfig {
+    /// Set the build identity reported at `/version-info` (`REQ_0980`).
+    ///
+    /// A deployment binary calls this with a [`BuildInfo`] mapped from
+    /// `taktora_build_info::CAPTURED`, so the served document names the exact
+    /// commit the binary was built from.
+    #[must_use]
+    pub fn with_build_info(mut self, build_info: BuildInfo) -> Self {
+        self.build_info = build_info;
+        self
     }
 }

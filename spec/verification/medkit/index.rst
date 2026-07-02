@@ -533,7 +533,7 @@ they verify to ``implemented`` and link these tests.
 
 .. test:: Build identity in the version catalogue
    :id: TEST_0955
-   :status: open
+   :status: implemented
    :verifies: REQ_0980
 
    Two checks. (1) Over a live gateway with an injected ``BuildInfo``,
