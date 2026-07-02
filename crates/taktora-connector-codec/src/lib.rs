@@ -9,6 +9,8 @@
 //!   `json` cargo feature (`REQ_0212`).
 //! * `BinaryCodec` — `bincode`-backed fixed-width binary codec behind
 //!   the opt-in `binary` cargo feature (`REQ_0212`).
+//! * `MsgPackCodec` — `rmp-serde`-backed `MessagePack` codec behind the
+//!   opt-in `msgpack` cargo feature (`REQ_0989`).
 //!
 //! The [`PayloadCodec`] trait itself is defined in
 //! [`taktora_connector_core::codec`] and re-exported here for callers
@@ -20,10 +22,14 @@
 pub mod binary;
 #[cfg(feature = "json")]
 pub mod json;
+#[cfg(feature = "msgpack")]
+pub mod msgpack;
 
 #[cfg(feature = "binary")]
 pub use binary::{BinaryCodec, Endian};
 #[cfg(feature = "json")]
 pub use json::JsonCodec;
+#[cfg(feature = "msgpack")]
+pub use msgpack::MsgPackCodec;
 
 pub use taktora_connector_core::PayloadCodec;

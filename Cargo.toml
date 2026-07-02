@@ -148,6 +148,7 @@ dlt-core          = { version = "0.20" }
 core_affinity     = "0.8"
 serde             = { version = "1", default-features = false }
 serde_json        = { version = "1", default-features = false }
+rmp-serde         = { version = "1" }
 bincode           = { version = "2", default-features = false, features = ["std", "serde"] }
 rand              = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
 sha2              = "0.10"

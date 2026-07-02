@@ -76,3 +76,20 @@ How typed values become payload bytes, and back. This cluster
    variable-length-text workarounds a JSON codec forces. Variable-length types
    (``String`` / ``Vec`` / enums) carry no constant-length guarantee and shall be
    documented as such.
+
+.. req:: MessagePack codec
+   :id: REQ_0989
+   :status: implemented
+   :satisfies: FEAT_0032
+   :links: BB_0003, TEST_0955
+
+   The framework shall ship a ``MsgPackCodec`` in ``taktora-connector-codec``
+   behind an opt-in ``msgpack`` cargo feature (not default-on), backed by
+   ``rmp-serde``. It provides a compact binary encoding smaller than JSON
+   for the same value. Like the ``JsonCodec`` it makes no constant-length
+   guarantee — MessagePack integers are variable-length and structs encode
+   as positional arrays, so encoder and decoder must share the Rust type.
+   A successful encode into the caller's buffer shall not allocate; buffer
+   exhaustion surfaces as ``ConnectorError::PayloadOverflow`` and other
+   serializer or decoder faults as ``ConnectorError::Codec``, consistent
+   with :need:`REQ_0213` and :need:`REQ_0214`.
