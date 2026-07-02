@@ -1,0 +1,40 @@
+[package]
+name         = "taktora-connector-mqtt"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "MQTT reference connector for the taktora-connector framework (M1 core: routing, options, session seam + mock, bounded bridges). Implements BB_0036 (FEAT_0036)."
+
+[dependencies]
+taktora-connector-core = { workspace = true }
+crossbeam-channel      = { workspace = true }
+thiserror              = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints.rust]
+unsafe_code  = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+module_name_repetitions        = "allow"
+must_use_candidate             = "allow"
+missing_errors_doc             = "allow"
+missing_panics_doc             = "allow"   # poisoned-mutex `expect` is the project convention
+significant_drop_tightening    = "allow"   # registry guard intentionally held across iter
+manual_async_fn                = "allow"   # `impl Future` is intentional in MqttSessionLike
+similar_names                  = "allow"
+option_if_let_else             = "allow"   # readability preference
+missing_const_for_fn           = "allow"
+items_after_statements         = "allow"
+too_long_first_doc_paragraph   = "allow"
