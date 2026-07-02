@@ -45,6 +45,7 @@ pub mod connector;
 pub mod dispatcher;
 pub mod gateway;
 pub mod health;
+pub mod inbound;
 pub mod matcher;
 pub mod mock;
 pub mod options;
@@ -56,11 +57,12 @@ pub mod topic;
 pub use bridge::{InboundBridge, InboundOutcome, OutboundBridge, OutboundError};
 pub use connector::{MqttConnector, MqttState};
 pub use dispatcher::{
-    BridgedOutbound, DEFAULT_DISPATCHER_TICK, IoxInboundPublish, IoxOutboundDrain,
-    dispatch_outbound_once, dispatcher_loop,
+    BridgedInboundPublish, BridgedOutbound, DEFAULT_DISPATCHER_TICK, IoxInboundPublish,
+    IoxOutboundDrain, dispatch_outbound_once, dispatcher_loop,
 };
 pub use gateway::MqttGateway;
 pub use health::{MqttHealthError, MqttHealthMonitor};
+pub use inbound::{InboundTable, route_inbound};
 pub use matcher::topic_matches;
 pub use mock::{MockMqttSession, PublishRecord, RecordedPublish};
 pub use options::{Credentials, MqttConnectorOptions, MqttConnectorOptionsBuilder};
@@ -70,6 +72,7 @@ pub use registry::{
 };
 pub use routing::{MqttQos, MqttRouting};
 pub use session::{
-    MqttConnectionState, MqttSessionLike, PayloadSink, SessionError, SubscriptionHandle,
+    InboundRouter, MqttConnectionState, MqttSessionLike, PayloadSink, SessionError,
+    SubscriptionHandle,
 };
 pub use topic::{MqttTopic, MqttTopicFilter, TopicError, TopicFilterError};

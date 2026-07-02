@@ -8,13 +8,14 @@
 //! feature-gated — it ships always so downstream test crates need no
 //! protocol backend.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::matcher::topic_matches;
 use crate::routing::{MqttQos, MqttRouting};
 use crate::session::{
-    MqttConnectionState, MqttSessionLike, PayloadSink, SessionError, SubscriptionHandle,
+    InboundRouter, MqttConnectionState, MqttSessionLike, PayloadSink, SessionError,
+    SubscriptionHandle,
 };
 use crate::topic::{MqttTopic, MqttTopicFilter};
 
@@ -49,13 +50,31 @@ pub struct PublishRecord {
     pub retained: bool,
 }
 
+/// Shared record of broker UNSUBSCRIBE calls. Cloned into each
+/// [`SubscriptionGuard`] so a dropped handle (the gateway sending
+/// UNSUBSCRIBE when a filter's last channel is released, `REQ_0986`) is
+/// observable via [`MockMqttSession::unsubscribe_calls`].
+type CallLog = Arc<Mutex<Vec<String>>>;
+
 /// In-process mock MQTT session. Round-trips publish → matching
 /// subscription callbacks and records every publish.
+///
+/// M2b additions drive the inbound path deterministically: an installed
+/// [`InboundRouter`] receives simulated inbound PUBLISHes via
+/// [`Self::deliver_inbound`]; SUBSCRIBE / UNSUBSCRIBE calls are logged for
+/// dedup / ref-count assertions (`REQ_0986`); and reconnect / CONNACK /
+/// auth-reject transitions are simulated for the health mapping and
+/// SUBSCRIBE-replay paths (`REQ_0980`–`REQ_0985`).
 pub struct MockMqttSession {
     state: RwLock<MqttConnectionState>,
     subscribers: SubscriberList,
     next_sub_id: AtomicU64,
     published: Mutex<Vec<PublishRecord>>,
+    inbound_router: Mutex<Option<InboundRouter>>,
+    subscribe_log: Mutex<Vec<String>>,
+    unsubscribe_log: CallLog,
+    reconnect_attempts: AtomicU32,
+    connack_generation: AtomicU64,
 }
 
 impl std::fmt::Debug for MockMqttSession {
@@ -84,6 +103,11 @@ impl MockMqttSession {
             subscribers: Arc::new(Mutex::new(Vec::new())),
             next_sub_id: AtomicU64::new(1),
             published: Mutex::new(Vec::new()),
+            inbound_router: Mutex::new(None),
+            subscribe_log: Mutex::new(Vec::new()),
+            unsubscribe_log: Arc::new(Mutex::new(Vec::new())),
+            reconnect_attempts: AtomicU32::new(0),
+            connack_generation: AtomicU64::new(0),
         }
     }
 
@@ -140,19 +164,121 @@ impl MockMqttSession {
             .expect("mock published lock not poisoned")
             .clone()
     }
+
+    /// Simulate a broker-delivered inbound PUBLISH on the concrete
+    /// `topic`. Invokes the installed [`InboundRouter`] exactly once so
+    /// the gateway can run its local wildcard demux (`ADR_0129`,
+    /// `REQ_0987`). A no-op if no router is installed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the router lock is poisoned.
+    pub fn deliver_inbound(&self, topic: &MqttTopic, payload: &[u8]) {
+        let router = self
+            .inbound_router
+            .lock()
+            .expect("mock inbound router lock not poisoned")
+            .clone();
+        if let Some(router) = router {
+            router(topic, payload);
+        }
+    }
+
+    /// Snapshot the ordered log of SUBSCRIBE calls (one filter string per
+    /// `subscribe`). Used to assert dedup + replay (`REQ_0986`,
+    /// `REQ_0985`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the subscribe-log lock is poisoned.
+    #[must_use]
+    pub fn subscribe_calls(&self) -> Vec<String> {
+        self.subscribe_log
+            .lock()
+            .expect("mock subscribe log lock not poisoned")
+            .clone()
+    }
+
+    /// Snapshot the ordered log of UNSUBSCRIBE calls (one filter string
+    /// per dropped subscription handle). Used to assert ref-counted
+    /// teardown (`REQ_0986`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the unsubscribe-log lock is poisoned.
+    #[must_use]
+    pub fn unsubscribe_calls(&self) -> Vec<String> {
+        self.unsubscribe_log
+            .lock()
+            .expect("mock unsubscribe log lock not poisoned")
+            .clone()
+    }
+
+    /// Current count of consecutive failed reconnect attempts (`REQ_0983`).
+    #[must_use]
+    pub fn reconnect_attempts(&self) -> u32 {
+        self.reconnect_attempts.load(Ordering::Acquire)
+    }
+
+    /// Monotonic count of successful CONNACKs. The health watcher replays
+    /// SUBSCRIBEs whenever this advances (`REQ_0985`).
+    #[must_use]
+    pub fn connack_generation(&self) -> u64 {
+        self.connack_generation.load(Ordering::Acquire)
+    }
+
+    /// Simulate the broker dropping the connection. State becomes
+    /// [`MqttConnectionState::Disconnected`]; the reconnect-attempt count
+    /// is unchanged (no attempt has been made yet).
+    pub fn simulate_disconnect(&self, reason: impl Into<String>) {
+        self.set_state(MqttConnectionState::Disconnected {
+            reason: reason.into(),
+        });
+    }
+
+    /// Simulate a failed reconnect attempt: bump the consecutive-attempt
+    /// counter and enter [`MqttConnectionState::Connecting`] (`REQ_0983`).
+    pub fn simulate_failed_reconnect(&self) {
+        self.reconnect_attempts.fetch_add(1, Ordering::AcqRel);
+        self.set_state(MqttConnectionState::Connecting);
+    }
+
+    /// Simulate a successful (re)connect CONNACK: clear the attempt
+    /// counter, advance the CONNACK generation (triggering SUBSCRIBE
+    /// replay in the watcher), and enter
+    /// [`MqttConnectionState::Connected`] (`REQ_0980`, `REQ_0985`).
+    pub fn simulate_connack(&self) {
+        self.reconnect_attempts.store(0, Ordering::Release);
+        self.connack_generation.fetch_add(1, Ordering::AcqRel);
+        self.set_state(MqttConnectionState::Connected);
+    }
+
+    /// Simulate an authentication/authorization-rejected CONNACK. State
+    /// becomes [`MqttConnectionState::AuthRejected`], mapping to a terminal
+    /// `Down` (`REQ_0982`).
+    pub fn simulate_auth_reject(&self, reason: impl Into<String>) {
+        self.set_state(MqttConnectionState::AuthRejected {
+            reason: reason.into(),
+        });
+    }
 }
 
 /// Drop guard inside [`SubscriptionHandle`]: removes the subscription from
-/// the registry on drop.
+/// the registry on drop and records the broker UNSUBSCRIBE (`REQ_0986`).
 struct SubscriptionGuard {
     id: u64,
+    filter: String,
     subscribers: SubscriberList,
+    unsubscribe_log: CallLog,
 }
 
 impl Drop for SubscriptionGuard {
     fn drop(&mut self) {
         if let Ok(mut subs) = self.subscribers.lock() {
             subs.retain(|e| e.id != self.id);
+        }
+        if let Ok(mut log) = self.unsubscribe_log.lock() {
+            log.push(self.filter.clone());
         }
     }
 }
@@ -197,6 +323,10 @@ impl MqttSessionLike for MockMqttSession {
         sink: PayloadSink,
     ) -> Result<SubscriptionHandle, SessionError> {
         let id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
+        self.subscribe_log
+            .lock()
+            .expect("mock subscribe log lock not poisoned")
+            .push(filter.as_str().to_owned());
         let entry = SubscriberEntry {
             id,
             filter: filter.clone(),
@@ -208,9 +338,18 @@ impl MqttSessionLike for MockMqttSession {
             .push(entry);
         let guard = SubscriptionGuard {
             id,
+            filter: filter.as_str().to_owned(),
             subscribers: Arc::clone(&self.subscribers),
+            unsubscribe_log: Arc::clone(&self.unsubscribe_log),
         };
         Ok(SubscriptionHandle(Box::new(guard)))
+    }
+
+    fn set_inbound_router(&self, router: InboundRouter) {
+        *self
+            .inbound_router
+            .lock()
+            .expect("mock inbound router lock not poisoned") = Some(router);
     }
 }
 
