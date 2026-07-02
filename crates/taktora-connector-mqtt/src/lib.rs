@@ -17,9 +17,12 @@
 //!   with subscriber fan-out + inbound-drop latch (`REQ_0261`).
 //! * [`session`] — the async `MqttSessionLike` back-end seam.
 //! * [`mock`] — in-process `MockMqttSession` (always built).
+//! * [`bridge`] — bounded `OutboundBridge` / `InboundBridge` with
+//!   drop-accounting (`REQ_0259`, `REQ_0260`, `REQ_0261`).
 
 #![warn(missing_docs)]
 
+pub mod bridge;
 pub mod health;
 pub mod matcher;
 pub mod mock;
@@ -28,6 +31,7 @@ pub mod routing;
 pub mod session;
 pub mod topic;
 
+pub use bridge::{InboundBridge, InboundOutcome, OutboundBridge, OutboundError};
 pub use health::{MqttHealthError, MqttHealthMonitor};
 pub use matcher::topic_matches;
 pub use mock::MockMqttSession;
