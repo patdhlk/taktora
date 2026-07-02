@@ -54,6 +54,13 @@ pub enum MqttConnectionState {
 /// Errors surfaced from [`MqttSessionLike`] operations.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
+    /// Establishing the session failed (bad options, TLS material, or the
+    /// initial client construction). Surfaced by `RealMqttSession::connect`.
+    #[error("connect failed: {reason}")]
+    ConnectFailed {
+        /// Human-readable reason from the back-end.
+        reason: String,
+    },
     /// The session is not connected, so the operation cannot proceed.
     #[error("session not connected: {reason}")]
     NotConnected {

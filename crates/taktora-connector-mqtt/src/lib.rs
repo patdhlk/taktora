@@ -32,6 +32,14 @@
 //!   `BridgedOutbound` saturation gate (`REQ_0260`).
 //! * [`connector`] — `MqttConnector<C>` implementing `Connector`
 //!   (`REQ_0250`).
+//!
+//! M3 (real backend, feature-gated):
+//!
+//! * [`real`] — `RealMqttSession` over `rumqttc` 0.24 behind the default-off
+//!   `rumqttc-integration` feature: the event-loop pump owns reconnection
+//!   and drives health per `ADR_0128`, credentials ride the CONNECT
+//!   (`REQ_0255`), and TLS is layered via `rustls` under the `tls` feature
+//!   (`REQ_0256`). MQTT 3.1.1 (`REQ_0257`).
 
 #![warn(missing_docs)]
 // Allow MQTT domain identifiers (QoS, MQTT, CONNACK, CONNECT, PUBLISH,
@@ -49,6 +57,11 @@ pub mod inbound;
 pub mod matcher;
 pub mod mock;
 pub mod options;
+/// Real `rumqttc`-backed session (`RealMqttSession`), compiled only under
+/// the `rumqttc-integration` feature (`REQ_0257`). The default build ships
+/// the always-present [`mock`] backend instead.
+#[cfg(feature = "rumqttc-integration")]
+pub mod real;
 pub mod registry;
 pub mod routing;
 pub mod session;
@@ -66,6 +79,8 @@ pub use inbound::{InboundTable, route_inbound};
 pub use matcher::topic_matches;
 pub use mock::{MockMqttSession, PublishRecord, RecordedPublish};
 pub use options::{Credentials, MqttConnectorOptions, MqttConnectorOptionsBuilder, TlsOptions};
+#[cfg(feature = "rumqttc-integration")]
+pub use real::RealMqttSession;
 pub use registry::{
     ChannelBinding, ChannelDirection, ChannelRegistry, InboundPublish, OutboundDrain,
     RegisteredChannel,
