@@ -15,17 +15,25 @@
 //!   bridge capacities (`REQ_0259`).
 //! * [`health`] — `MqttHealthMonitor` reusing the core `HealthMonitor`
 //!   with subscriber fan-out + inbound-drop latch (`REQ_0261`).
+//! * [`session`] — the async `MqttSessionLike` back-end seam.
+//! * [`mock`] — in-process `MockMqttSession` (always built).
 
 #![warn(missing_docs)]
 
 pub mod health;
 pub mod matcher;
+pub mod mock;
 pub mod options;
 pub mod routing;
+pub mod session;
 pub mod topic;
 
 pub use health::{MqttHealthError, MqttHealthMonitor};
 pub use matcher::topic_matches;
+pub use mock::MockMqttSession;
 pub use options::{Credentials, MqttConnectorOptions, MqttConnectorOptionsBuilder};
 pub use routing::{MqttQos, MqttRouting};
+pub use session::{
+    MqttConnectionState, MqttSessionLike, PayloadSink, SessionError, SubscriptionHandle,
+};
 pub use topic::{MqttTopic, MqttTopicFilter, TopicError, TopicFilterError};
