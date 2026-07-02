@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::matcher::topic_matches;
-use crate::routing::MqttRouting;
+use crate::routing::{MqttQos, MqttRouting};
 use crate::session::{
     MqttConnectionState, MqttSessionLike, PayloadSink, SessionError, SubscriptionHandle,
 };
@@ -33,13 +33,29 @@ type SubscriberList = Arc<Mutex<Vec<SubscriberEntry>>>;
 /// A single recorded publish: the topic string and the payload bytes.
 pub type RecordedPublish = (String, Vec<u8>);
 
+/// A single recorded publish with full routing detail — topic, payload,
+/// QoS level, and the retained flag. M2a's outbound-path tests assert on
+/// this to prove the QoS (`REQ_0252`) and retained flag (`REQ_0253`)
+/// survive the dispatcher → `session.publish` boundary intact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishRecord {
+    /// The publish topic string.
+    pub topic: String,
+    /// The payload bytes as delivered to `publish`.
+    pub payload: Vec<u8>,
+    /// The QoS the routing carried (`REQ_0252`).
+    pub qos: MqttQos,
+    /// The retained flag the routing carried (`REQ_0253`).
+    pub retained: bool,
+}
+
 /// In-process mock MQTT session. Round-trips publish → matching
 /// subscription callbacks and records every publish.
 pub struct MockMqttSession {
     state: RwLock<MqttConnectionState>,
     subscribers: SubscriberList,
     next_sub_id: AtomicU64,
-    published: Mutex<Vec<RecordedPublish>>,
+    published: Mutex<Vec<PublishRecord>>,
 }
 
 impl std::fmt::Debug for MockMqttSession {
@@ -94,13 +110,31 @@ impl MockMqttSession {
             .len()
     }
 
-    /// Snapshot of every recorded publish (topic, payload).
+    /// Snapshot of every recorded publish as `(topic, payload)`. Kept for
+    /// M1 callers; M2a code wanting QoS / retained uses
+    /// [`Self::published_detailed`].
     ///
     /// # Panics
     ///
     /// Panics if the published-log lock is poisoned.
     #[must_use]
     pub fn published(&self) -> Vec<RecordedPublish> {
+        self.published
+            .lock()
+            .expect("mock published lock not poisoned")
+            .iter()
+            .map(|r| (r.topic.clone(), r.payload.clone()))
+            .collect()
+    }
+
+    /// Snapshot of every recorded publish with full routing detail
+    /// (topic, payload, QoS, retained). `REQ_0252`, `REQ_0253`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the published-log lock is poisoned.
+    #[must_use]
+    pub fn published_detailed(&self) -> Vec<PublishRecord> {
         self.published
             .lock()
             .expect("mock published lock not poisoned")
@@ -141,7 +175,12 @@ impl MqttSessionLike for MockMqttSession {
         self.published
             .lock()
             .expect("mock published lock not poisoned")
-            .push((topic.as_str().to_owned(), payload.to_vec()));
+            .push(PublishRecord {
+                topic: topic.as_str().to_owned(),
+                payload: payload.to_vec(),
+                qos: routing.qos(),
+                retained: routing.retained(),
+            });
 
         // Snapshot the matching sinks under the lock, then invoke them
         // after releasing it (avoids holding the guard across callbacks).
