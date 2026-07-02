@@ -36,6 +36,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: MqttConnector implements Connector
    :id: REQ_0250
+   :github: 168
    :status: open
    :satisfies: FEAT_0036
 
@@ -45,6 +46,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: MqttRouting carries topic, qos, retained
    :id: REQ_0251
+   :github: 167
    :status: open
    :satisfies: FEAT_0036
 
@@ -54,6 +56,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: QoS 0 and 1 supported
    :id: REQ_0252
+   :github: 168
    :status: open
    :satisfies: FEAT_0036
 
@@ -62,6 +65,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Retained-message publish supported
    :id: REQ_0253
+   :github: 168
    :status: open
    :satisfies: FEAT_0036
 
@@ -70,6 +74,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Wildcard subscriptions supported
    :id: REQ_0254
+   :github: 169
    :status: open
    :satisfies: FEAT_0036
 
@@ -80,6 +85,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Username/password authentication
    :id: REQ_0255
+   :github: 170
    :status: open
    :satisfies: FEAT_0036
 
@@ -88,6 +94,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: TLS is optional via cargo feature
    :id: REQ_0256
+   :github: 170
    :status: open
    :satisfies: FEAT_0036
 
@@ -97,6 +104,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: MQTT 3.1.1 baseline
    :id: REQ_0257
+   :github: 170
    :status: open
    :satisfies: FEAT_0036
 
@@ -106,6 +114,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Tokio sidecar inside the gateway crate
    :id: REQ_0258
+   :github: 168
    :status: open
    :satisfies: FEAT_0036
 
@@ -115,6 +124,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Bridge channels are bounded
    :id: REQ_0259
+   :github: 167
    :status: open
    :satisfies: FEAT_0036
 
@@ -124,6 +134,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Outbound bridge saturation surfaces as BackPressure
    :id: REQ_0260
+   :github: 168
    :status: open
    :satisfies: FEAT_0036
 
@@ -133,6 +144,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Inbound bridge saturation drops frames and signals Degraded
    :id: REQ_0261
+   :github: 169
    :status: open
    :satisfies: FEAT_0036
 
@@ -156,6 +168,7 @@ as health rather than repairing it in the connector (:need:`ADR_0128`).
 
 .. req:: Connection state maps to ConnectorHealth
    :id: REQ_0980
+   :github: 169
    :status: open
    :satisfies: FEAT_0036
 
@@ -165,6 +178,7 @@ as health rather than repairing it in the connector (:need:`ADR_0128`).
 
 .. req:: Reconnect backoff is configurable
    :id: REQ_0981
+   :github: 169
    :status: open
    :satisfies: FEAT_0036
 
@@ -173,6 +187,7 @@ as health rather than repairing it in the connector (:need:`ADR_0128`).
 
 .. req:: Auth-rejected CONNACK transitions to Down
    :id: REQ_0982
+   :github: 169
    :status: open
    :satisfies: FEAT_0036
 
@@ -182,6 +197,7 @@ as health rather than repairing it in the connector (:need:`ADR_0128`).
 
 .. req:: Reconnect-attempt ceiling transitions to Down
    :id: REQ_0983
+   :github: 169
    :status: open
    :satisfies: FEAT_0036
 
@@ -197,6 +213,7 @@ reconnect (:need:`ADR_0130`).
 
 .. req:: Clean session on CONNECT
    :id: REQ_0984
+   :github: 169
    :status: open
    :satisfies: FEAT_0036
 
@@ -205,6 +222,7 @@ reconnect (:need:`ADR_0130`).
 
 .. req:: SUBSCRIBE replay on reconnect
    :id: REQ_0985
+   :github: 169
    :status: open
    :satisfies: FEAT_0036
 
@@ -220,6 +238,7 @@ mechanism (:need:`ADR_0129`).
 
 .. req:: Broker subscriptions are deduplicated and reference-counted
    :id: REQ_0986
+   :github: 169
    :status: open
    :satisfies: FEAT_0036
 
@@ -230,6 +249,7 @@ mechanism (:need:`ADR_0129`).
 
 .. req:: Inbound PUBLISH is matched locally and fanned out
    :id: REQ_0987
+   :github: 169
    :status: open
    :satisfies: FEAT_0036
 
@@ -242,6 +262,7 @@ Codec default
 
 .. req:: JsonCodec is the default codec
    :id: REQ_0988
+   :github: 167
    :status: open
    :satisfies: FEAT_0036
 
