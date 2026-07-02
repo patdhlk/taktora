@@ -96,12 +96,12 @@ pub struct GatewayConfig {
     /// topology in a `medkit.toml` without recompiling.
     pub manifest: Option<Manifest>,
     /// Source identity of the running binary, reported under `vendor_info` in
-    /// `GET /api/v1/version-info` (`REQ_0980`).
+    /// `GET /api/v1/version-info` (`REQ_0990`).
     ///
     /// The default is all-`"unknown"`. A deployment binary captures the real
     /// identity with the `taktora-build-info` crate and injects it here (see
     /// [`GatewayConfig::with_build_info`]); the extractable core never depends on
-    /// that crate — build identity arrives as data (`ADR_0128`).
+    /// that crate — build identity arrives as data (`ADR_0132`).
     pub build_info: BuildInfo,
 }
 
@@ -120,7 +120,7 @@ impl Default for GatewayConfig {
 }
 
 impl GatewayConfig {
-    /// Set the build identity reported at `/version-info` (`REQ_0980`).
+    /// Set the build identity reported at `/version-info` (`REQ_0990`).
     ///
     /// A deployment binary calls this with a [`BuildInfo`] mapped from
     /// `taktora_build_info::CAPTURED`, so the served document names the exact

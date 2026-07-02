@@ -8,7 +8,7 @@ repository   = { workspace = true }
 authors      = { workspace = true }
 homepage     = { workspace = true }
 publish      = false
-description  = "Compile-time build identity (git commit, dirty flag, build timestamp, rustc version) captured with zero dependencies and exposed as constants. Not part of the extractable medkit core; a binary injects it into the gateway as a `BuildInfo` DTO (BB_0123, ADR_0128)."
+description  = "Compile-time build identity (git commit, dirty flag, build timestamp, rustc version) captured with zero dependencies and exposed as constants. Not part of the extractable medkit core; a binary injects it into the gateway as a `BuildInfo` DTO (BB_0123, ADR_0132)."
 
 [lints.rust]
 unsafe_code  = "deny"

@@ -486,15 +486,15 @@ pub struct GenericError {
 }
 
 /// Source identity of the running binary, reported under `vendor_info` in the
-/// version catalogue (`GET /api/v1/version-info`, [`REQ_0980`]).
+/// version catalogue (`GET /api/v1/version-info`, [`REQ_0990`]).
 ///
 /// This is the wire DTO; the values are captured at build time by the
 /// `taktora-build-info` crate and injected into the gateway by the binary, so
 /// the extractable core owns the shape without depending on the capture crate
-/// (`ADR_0128`). [`BuildInfo::default`] is the honest all-`"unknown"` value a
+/// (`ADR_0132`). [`BuildInfo::default`] is the honest all-`"unknown"` value a
 /// binary that injects nothing reports.
 ///
-/// [`REQ_0980`]: https://taktora.dev/requirements/medkit/index.html
+/// [`REQ_0990`]: https://taktora.dev/requirements/medkit/index.html
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BuildInfo {
     /// Full 40-hex git commit hash, or `"unknown"`.
@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn build_info_default_is_all_unknown() {
-        // The honest fallback (`REQ_0980`): a binary that injects no build
+        // The honest fallback (`REQ_0990`): a binary that injects no build
         // identity, or a build with no `.git`, reports `"unknown"` everywhere
         // and a clean tree, never an empty string or a panic.
         let info = BuildInfo::default();

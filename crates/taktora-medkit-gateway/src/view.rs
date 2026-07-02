@@ -857,7 +857,7 @@ fn endpoint_catalogue() -> Vec<String> {
 
 /// The version catalogue (`GET /version-info`).
 ///
-/// `build` is the injected source identity of the running binary (`REQ_0980`),
+/// `build` is the injected source identity of the running binary (`REQ_0990`),
 /// rendered additively under `vendor_info` alongside the existing crate
 /// `version`, so a client written against the `ros2_medkit` contract reads the
 /// document unchanged (`REQ_0911`). A binary that injects nothing passes
@@ -1387,7 +1387,7 @@ mod tests {
         assert!(view.list(EntityKind::Area).items.is_empty());
     }
 
-    /// `REQ_0980` — the version catalogue carries the injected build identity
+    /// `REQ_0990` — the version catalogue carries the injected build identity
     /// under `vendor_info`, additively and with the specified types.
     #[test]
     fn version_info_renders_injected_build_identity() {
@@ -1415,7 +1415,7 @@ mod tests {
         assert_eq!(vendor["git_dirty"], serde_json::Value::Bool(true));
     }
 
-    /// `REQ_0980` — with no injected identity the document is still well-formed:
+    /// `REQ_0990` — with no injected identity the document is still well-formed:
     /// the git fields report `"unknown"` and the tree reads clean.
     #[test]
     fn version_info_defaults_to_unknown() {

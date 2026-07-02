@@ -1,5 +1,5 @@
-//! Compile-time build identity for taktora binaries (`BB_0123`, `REQ_0980`,
-//! `ADR_0128`).
+//! Compile-time build identity for taktora binaries (`BB_0123`, `REQ_0990`,
+//! `ADR_0132`).
 //!
 //! The [`build.rs`](../build.rs) companion captures the git commit, dirty flag,
 //! build timestamp, and `rustc` version at build time and threads them in as

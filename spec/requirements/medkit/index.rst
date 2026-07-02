@@ -787,13 +787,13 @@ The read surface advertised only the crate semver, so a field issue could not be
 tied back to the exact source a binary was built from. This pins the *build* —
 the commit, whether the tree was clean, and when it was built — into the version
 catalogue, captured at compile time and injected as data so the extractable core
-stays dependency-clean (:need:`ADR_0128`).
+stays dependency-clean (:need:`ADR_0132`).
 
 .. req:: Build identity in the version catalogue
-   :id: REQ_0980
+   :id: REQ_0990
    :status: implemented
    :satisfies: FEAT_0100
-   :links: BB_0123, ADR_0128, TEST_0955
+   :links: BB_0123, ADR_0132, TEST_0956
 
    The ``GET /api/v1/version-info`` document shall report, under ``vendor_info``,
    the identity of the source the binary was built from: the full and short git

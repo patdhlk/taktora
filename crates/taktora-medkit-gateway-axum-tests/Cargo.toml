@@ -24,7 +24,7 @@ taktora-medkit-manifest     = { workspace = true }
 taktora-medkit-provider     = { workspace = true }
 taktora-medkit-model        = { workspace = true }
 # Compile-time build identity, exercised end-to-end through the version-info
-# injection seam (`TEST_0955`). Safe here — this crate is `publish = false`, so
+# injection seam (`TEST_0956`). Safe here — this crate is `publish = false`, so
 # it never trips the release-plz dev-dep ordering guard.
 taktora-build-info          = { workspace = true }
 

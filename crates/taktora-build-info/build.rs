@@ -1,5 +1,5 @@
 //! Capture the build's source identity at compile time and expose it to the
-//! crate as `TAKTORA_BUILD_*` env constants (`BB_0123`, `REQ_0980`, `ADR_0128`).
+//! crate as `TAKTORA_BUILD_*` env constants (`BB_0123`, `REQ_0990`, `ADR_0132`).
 //!
 //! Zero dependencies: it shells `git`, `rustc`, and `date` through
 //! [`std::process`]. Any failing command degrades that field to `"unknown"`

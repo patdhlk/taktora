@@ -576,9 +576,9 @@ arc42 §4.
    still simulation-sourced until a real binding lands (:need:`ADR_0126`).
 
 .. arch-decision:: Compile-time build identity, captured in a leaf crate and injected as data
-   :id: ADR_0128
+   :id: ADR_0132
    :status: accepted
-   :links: REQ_0980
+   :links: REQ_0990
 
    **Context.** The version catalogue reported only the crate semver
    (``CARGO_PKG_VERSION`` baked at compile time). A field issue could not be tied
@@ -861,11 +861,11 @@ provider seam.
 .. building-block:: Build identity — capture crate + injection seam
    :id: BB_0123
    :status: open
-   :implements: REQ_0980
+   :implements: REQ_0990
 
    A leaf ``publish = false`` crate ``taktora-build-info`` plus the seam that
    carries its output into the read surface without an edge into the extractable
-   core (:need:`ADR_0128`). ``taktora-build-info``'s hand-rolled ``build.rs``
+   core (:need:`ADR_0132`). ``taktora-build-info``'s hand-rolled ``build.rs``
    (zero dependencies) shells ``git rev-parse HEAD`` / ``--short HEAD``,
    ``git describe --tags --always``, and ``git status --porcelain`` (→ dirty
    flag), records the UTC build timestamp and ``rustc --version``, and emits each

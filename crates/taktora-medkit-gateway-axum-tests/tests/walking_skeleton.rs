@@ -312,7 +312,7 @@ async fn transport_hardening() {
 }
 
 /// Map the compile-time capture into the wire DTO — the wiring a real
-/// deployment binary performs to inject build identity (`ADR_0128`).
+/// deployment binary performs to inject build identity (`ADR_0132`).
 fn captured_build_info() -> BuildInfo {
     let c = taktora_build_info::CAPTURED;
     BuildInfo {
@@ -325,7 +325,7 @@ fn captured_build_info() -> BuildInfo {
     }
 }
 
-/// `TEST_0955` — build identity captured at compile time and injected through
+/// `TEST_0956` — build identity captured at compile time and injected through
 /// the `with_build_info` seam surfaces under `vendor_info` at `/version-info`,
 /// typed and additive.
 #[tokio::test]
@@ -355,9 +355,9 @@ async fn version_info_reports_injected_build_identity() {
     assert!(!build.git_sha.is_empty());
 }
 
-/// `TEST_0955` — with no injected identity the document stays well-formed: git
+/// `TEST_0956` — with no injected identity the document stays well-formed: git
 /// fields report `"unknown"` and the tree reads clean (the no-`.git` fallback
-/// shape, `REQ_0980`).
+/// shape, `REQ_0990`).
 #[tokio::test]
 async fn version_info_defaults_to_unknown_without_injection() {
     let addr = spawn(GatewayConfig::default()).await;

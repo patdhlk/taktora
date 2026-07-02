@@ -344,7 +344,7 @@ fn kind_routes(kind: EntityKind, relations: &'static [Relation]) -> Router<Serve
 
 fn api_router(build_info: &BuildInfo) -> Router<ServerState> {
     let root = get(|| async { Json(root_document()) });
-    // The injected build identity (`REQ_0980`) is static per process; clone it
+    // The injected build identity (`REQ_0990`) is static per process; clone it
     // into the version-info handler so the route can render it without state.
     let build_info = build_info.clone();
     Router::new()
