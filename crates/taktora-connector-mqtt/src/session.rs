@@ -93,6 +93,13 @@ pub trait MqttSessionLike: Send + Sync + 'static {
     /// transition `ConnectorHealth`.
     fn state(&self) -> MqttConnectionState;
 
+    /// Number of consecutive failed reconnect attempts since the last
+    /// successful CONNACK. The health watcher transitions the connector to
+    /// `Down` once this exceeds the configured ceiling (`REQ_0983`). The
+    /// real back-end counts `rumqttc` connection errors; a successful
+    /// CONNACK resets it to zero.
+    fn reconnect_attempts(&self) -> u32;
+
     /// Publish `payload` on the routing's topic at its QoS / retained
     /// setting.
     fn publish(

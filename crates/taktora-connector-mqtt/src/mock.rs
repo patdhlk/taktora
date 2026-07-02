@@ -74,7 +74,6 @@ pub struct MockMqttSession {
     subscribe_log: Mutex<Vec<String>>,
     unsubscribe_log: CallLog,
     reconnect_attempts: AtomicU32,
-    connack_generation: AtomicU64,
 }
 
 impl std::fmt::Debug for MockMqttSession {
@@ -107,7 +106,6 @@ impl MockMqttSession {
             subscribe_log: Mutex::new(Vec::new()),
             unsubscribe_log: Arc::new(Mutex::new(Vec::new())),
             reconnect_attempts: AtomicU32::new(0),
-            connack_generation: AtomicU64::new(0),
         }
     }
 
@@ -214,19 +212,6 @@ impl MockMqttSession {
             .clone()
     }
 
-    /// Current count of consecutive failed reconnect attempts (`REQ_0983`).
-    #[must_use]
-    pub fn reconnect_attempts(&self) -> u32 {
-        self.reconnect_attempts.load(Ordering::Acquire)
-    }
-
-    /// Monotonic count of successful CONNACKs. The health watcher replays
-    /// SUBSCRIBEs whenever this advances (`REQ_0985`).
-    #[must_use]
-    pub fn connack_generation(&self) -> u64 {
-        self.connack_generation.load(Ordering::Acquire)
-    }
-
     /// Simulate the broker dropping the connection. State becomes
     /// [`MqttConnectionState::Disconnected`]; the reconnect-attempt count
     /// is unchanged (no attempt has been made yet).
@@ -244,12 +229,11 @@ impl MockMqttSession {
     }
 
     /// Simulate a successful (re)connect CONNACK: clear the attempt
-    /// counter, advance the CONNACK generation (triggering SUBSCRIBE
-    /// replay in the watcher), and enter
-    /// [`MqttConnectionState::Connected`] (`REQ_0980`, `REQ_0985`).
+    /// counter and enter [`MqttConnectionState::Connected`]. The health
+    /// watcher observes the transition into `Connected` and replays every
+    /// active SUBSCRIBE (`REQ_0980`, `REQ_0985`).
     pub fn simulate_connack(&self) {
         self.reconnect_attempts.store(0, Ordering::Release);
-        self.connack_generation.fetch_add(1, Ordering::AcqRel);
         self.set_state(MqttConnectionState::Connected);
     }
 
@@ -289,6 +273,10 @@ impl MqttSessionLike for MockMqttSession {
             .read()
             .expect("mock state lock not poisoned")
             .clone()
+    }
+
+    fn reconnect_attempts(&self) -> u32 {
+        self.reconnect_attempts.load(Ordering::Acquire)
     }
 
     async fn publish(&self, routing: &MqttRouting, payload: &[u8]) -> Result<(), SessionError> {

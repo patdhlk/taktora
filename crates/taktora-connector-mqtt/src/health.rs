@@ -112,6 +112,47 @@ impl MqttHealthMonitor {
         Ok(event)
     }
 
+    /// Apply a mapped target health from the connection-state watcher
+    /// (`REQ_0980`–`REQ_0983`). Drops a self-transition (`Up → Up`, etc.)
+    /// as a no-op, and silently bridges the illegal direct `Up → Connecting`
+    /// edge — a transient disconnect from `Up` — through `Degraded` per
+    /// `ARCH_0012`, broadcasting only the final `Degraded → Connecting`
+    /// event. A successful `→ Up` re-arms the drop / back-pressure latches.
+    ///
+    /// Returns the broadcast [`HealthEvent`] when a transition fired.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal mutex was poisoned by a prior panic.
+    pub fn apply_target(&self, target: ConnectorHealth) -> Option<HealthEvent> {
+        let event = {
+            let mut guard = self
+                .inner
+                .lock()
+                .expect("mqtt health monitor lock not poisoned");
+            let current = guard.current().kind();
+            let target_kind = target.kind();
+            if current == target_kind {
+                return None;
+            }
+            if current == ConnectorHealthKind::Up && target_kind == ConnectorHealthKind::Connecting {
+                let _ = guard.try_transition_to(ConnectorHealth::Degraded {
+                    reason: "connection lost; reconnecting".to_string(),
+                });
+            }
+            guard.try_transition_to(target).ok()
+        };
+        if let Some(ev) = &event {
+            if ev.to.kind() == ConnectorHealthKind::Up {
+                self.degraded_due_to_drops.store(false, Ordering::Release);
+                self.degraded_due_to_backpressure
+                    .store(false, Ordering::Release);
+            }
+            self.broadcast(ev);
+        }
+        event
+    }
+
     /// Record a cumulative inbound-drop count from an
     /// [`crate::InboundOutcome::Dropped`] return. When `count` crosses
     /// `threshold`, the latch is unset, and the monitor is currently `Up`,

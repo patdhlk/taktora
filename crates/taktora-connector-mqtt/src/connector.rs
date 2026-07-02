@@ -17,7 +17,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use iceoryx2::node::Node;
 use iceoryx2::prelude::{NodeBuilder, ipc};
@@ -232,6 +232,30 @@ where
         let registry = Arc::clone(self.state.registry());
         let stop = self.state.stop_signal();
         let tick = self.tick;
+
+        // Spawn the health watcher BEFORE the dispatcher consumes `session`
+        // (`ADR_0128`). It polls the connection state, maps it onto
+        // `ConnectorHealth` (`REQ_0980`–`REQ_0983`), and replays active
+        // SUBSCRIBEs on each reconnect CONNACK (`REQ_0985`). Clone the Arcs
+        // it needs so the move below can still take ownership of `session`.
+        let session_for_health = Arc::clone(&session);
+        let health = Arc::clone(self.state.health());
+        let inbound = Arc::clone(self.state.inbound());
+        let stop_for_health = Arc::clone(&stop);
+        let ceiling = self.state.options().reconnect_attempt_ceiling();
+        let poll = tick.max(Duration::from_millis(1));
+        handle.spawn(async move {
+            run_health_watcher(
+                session_for_health,
+                health,
+                inbound,
+                stop_for_health,
+                ceiling,
+                poll,
+            )
+            .await;
+        });
+
         handle.spawn(async move {
             let _ = dispatcher_loop(registry, session, stop, tick).await;
         });
@@ -442,6 +466,91 @@ impl ArcInboundPublish {
 impl InboundPublish for ArcInboundPublish {
     fn publish_bytes(&self, bytes: &[u8]) -> Result<(), ConnectorError> {
         self.inner.publish_bytes(bytes)
+    }
+}
+
+/// Health watcher task (`ADR_0128`). Polls the session's connection state,
+/// maps it onto `ConnectorHealth` (`REQ_0980`–`REQ_0983`), and replays all
+/// active SUBSCRIBEs on each reconnect CONNACK (`REQ_0985`). Exits when the
+/// stop flag is set or a terminal `Down` is reached.
+async fn run_health_watcher<S>(
+    session: Arc<S>,
+    health: Arc<MqttHealthMonitor>,
+    inbound: Arc<Mutex<InboundTable>>,
+    stop: Arc<AtomicBool>,
+    ceiling: u32,
+    poll: Duration,
+) where
+    S: MqttSessionLike,
+{
+    let mut last_state = session.state();
+    while !stop.load(Ordering::Acquire) {
+        tokio::time::sleep(poll).await;
+        let state = session.state();
+        // A fresh CONNACK (transition into `Connected`) means the clean
+        // session dropped all broker-side subscriptions — replay them.
+        if is_reconnect(&last_state, &state) {
+            replay_subscriptions(&inbound, &session).await;
+        }
+        let target = map_health(&state, session.reconnect_attempts(), ceiling);
+        let terminal = matches!(target, ConnectorHealth::Down { .. });
+        health.apply_target(target);
+        last_state = state;
+        if terminal {
+            // `Down` is terminal (auth reject / ceiling exceeded); no
+            // further transitions are observable (`REQ_0982`, `REQ_0983`).
+            break;
+        }
+    }
+}
+
+/// A reconnect is a transition *into* `Connected` from any other state.
+fn is_reconnect(last: &MqttConnectionState, now: &MqttConnectionState) -> bool {
+    matches!(now, MqttConnectionState::Connected)
+        && !matches!(last, MqttConnectionState::Connected)
+}
+
+/// Map a connection-state observation onto a target `ConnectorHealth`
+/// (`REQ_0980`–`REQ_0983`). Single-exit.
+fn map_health(state: &MqttConnectionState, attempts: u32, ceiling: u32) -> ConnectorHealth {
+    match state {
+        MqttConnectionState::AuthRejected { reason } => ConnectorHealth::Down {
+            reason: format!("authentication rejected: {reason}"),
+            since: Instant::now(),
+        },
+        _ if attempts > ceiling => ConnectorHealth::Down {
+            reason: format!("reconnect attempts {attempts} exceeded ceiling {ceiling}"),
+            since: Instant::now(),
+        },
+        MqttConnectionState::Connected => ConnectorHealth::Up,
+        MqttConnectionState::Connecting | MqttConnectionState::Disconnected { .. } => {
+            ConnectorHealth::Connecting {
+                since: Instant::now(),
+            }
+        }
+    }
+}
+
+/// Replay every active SUBSCRIBE from the reference-counted table
+/// (`REQ_0985`). The replay handles are held for the connector's lifetime
+/// so the clean-session re-subscribe does not immediately UNSUBSCRIBE.
+async fn replay_subscriptions<S>(inbound: &Arc<Mutex<InboundTable>>, session: &Arc<S>)
+where
+    S: MqttSessionLike,
+{
+    let filters = {
+        inbound
+            .lock()
+            .expect("inbound table mutex not poisoned")
+            .active_filters()
+    };
+    for filter in filters {
+        if let Ok(handle) = session.subscribe(&filter, Box::new(|_: &[u8]| {})).await {
+            inbound
+                .lock()
+                .expect("inbound table mutex not poisoned")
+                .push_replay_handle(handle);
+        }
     }
 }
 
