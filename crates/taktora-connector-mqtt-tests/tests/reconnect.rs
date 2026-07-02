@@ -29,8 +29,11 @@ fn connector_with(
 }
 
 fn reader_routing(filter: &str) -> MqttRouting {
-    MqttRouting::new(MqttTopic::new("placeholder/topic").unwrap(), MqttQos::AtLeastOnce)
-        .with_filter(MqttTopicFilter::new(filter).unwrap())
+    MqttRouting::new(
+        MqttTopic::new("placeholder/topic").unwrap(),
+        MqttQos::AtLeastOnce,
+    )
+    .with_filter(MqttTopicFilter::new(filter).unwrap())
 }
 
 fn encode(value: u32) -> Vec<u8> {
@@ -79,7 +82,11 @@ fn connection_state_maps_to_health() {
 
     // Transient disconnect → Connecting (bridged from Up via ARCH_0012).
     session.simulate_disconnect("broker dropped us");
-    wait_for_health(&connector, ConnectorHealthKind::Connecting, Duration::from_secs(2));
+    wait_for_health(
+        &connector,
+        ConnectorHealthKind::Connecting,
+        Duration::from_secs(2),
+    );
 
     // Reconnect CONNACK → Up again.
     session.simulate_connack();
@@ -113,7 +120,11 @@ fn reconnect_replays_active_subscriptions() {
 
     // Drop then re-establish the connection.
     session.simulate_disconnect("net blip");
-    wait_for_health(&connector, ConnectorHealthKind::Connecting, Duration::from_secs(2));
+    wait_for_health(
+        &connector,
+        ConnectorHealthKind::Connecting,
+        Duration::from_secs(2),
+    );
     session.simulate_connack();
     wait_for_health(&connector, ConnectorHealthKind::Up, Duration::from_secs(2));
 
@@ -124,7 +135,10 @@ fn reconnect_replays_active_subscriptions() {
     }
     assert_eq!(
         session.subscribe_calls(),
-        vec!["robot/+/telemetry".to_string(), "robot/+/telemetry".to_string()],
+        vec![
+            "robot/+/telemetry".to_string(),
+            "robot/+/telemetry".to_string()
+        ],
         "REQ_0985: SUBSCRIBE replayed on reconnect CONNACK"
     );
 
@@ -155,7 +169,11 @@ fn auth_rejected_connack_transitions_to_down() {
     wait_for_health(&connector, ConnectorHealthKind::Up, Duration::from_secs(2));
 
     session.simulate_auth_reject("bad credentials");
-    wait_for_health(&connector, ConnectorHealthKind::Down, Duration::from_secs(2));
+    wait_for_health(
+        &connector,
+        ConnectorHealthKind::Down,
+        Duration::from_secs(2),
+    );
 
     connector.stop_dispatcher();
 }
@@ -180,7 +198,11 @@ fn reconnect_ceiling_exceeded_transitions_to_down() {
     session.simulate_failed_reconnect();
     assert_eq!(session.reconnect_attempts(), 3);
 
-    wait_for_health(&connector, ConnectorHealthKind::Down, Duration::from_secs(2));
+    wait_for_health(
+        &connector,
+        ConnectorHealthKind::Down,
+        Duration::from_secs(2),
+    );
 
     connector.stop_dispatcher();
 }

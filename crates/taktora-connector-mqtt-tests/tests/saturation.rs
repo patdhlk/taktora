@@ -37,7 +37,9 @@ fn inbound_overflow_emits_single_degraded_transition() {
 
     // The wrapper's own send returns `Dropped { count: 3 }`, crossing the
     // threshold of 2 → one Degraded transition.
-    publish.publish_bytes(b"sample").expect("publish returns Ok");
+    publish
+        .publish_bytes(b"sample")
+        .expect("publish returns Ok");
 
     match health.current() {
         ConnectorHealth::Degraded { reason } => {

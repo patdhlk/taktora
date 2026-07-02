@@ -33,8 +33,11 @@ fn make_connector(session: &Arc<MockMqttSession>) -> MqttConnector<JsonCodec, Mo
 /// may carry wildcards). The concrete placeholder topic is never used on
 /// the inbound path.
 fn reader_routing(filter: &str) -> MqttRouting {
-    MqttRouting::new(MqttTopic::new("placeholder/topic").unwrap(), MqttQos::AtLeastOnce)
-        .with_filter(MqttTopicFilter::new(filter).unwrap())
+    MqttRouting::new(
+        MqttTopic::new("placeholder/topic").unwrap(),
+        MqttQos::AtLeastOnce,
+    )
+    .with_filter(MqttTopicFilter::new(filter).unwrap())
 }
 
 fn encode(value: u32) -> Vec<u8> {
@@ -90,7 +93,11 @@ fn inbound_publish_fans_out_to_every_matching_reader() {
     let topic = MqttTopic::new("robot/arm/telemetry").unwrap();
     session.deliver_inbound(&topic, &encode(7));
 
-    assert_eq!(recv_one(&r_single), Some(7), "single-level wildcard matches");
+    assert_eq!(
+        recv_one(&r_single),
+        Some(7),
+        "single-level wildcard matches"
+    );
     assert_eq!(recv_one(&r_multi), Some(7), "multi-level wildcard matches");
     // The non-matching reader must not receive anything.
     assert!(

@@ -81,7 +81,7 @@ impl InboundTable {
     /// record the handle via [`Self::record_subscription`] (`REQ_0986`).
     pub fn add_route(
         &mut self,
-        filter: MqttTopicFilter,
+        filter: &MqttTopicFilter,
         publisher: Arc<dyn InboundPublish>,
         descriptor_name: String,
     ) -> bool {
@@ -90,7 +90,7 @@ impl InboundTable {
             publisher,
             descriptor_name,
         });
-        match self.subscriptions.iter_mut().find(|s| s.filter == filter) {
+        match self.subscriptions.iter_mut().find(|s| &s.filter == filter) {
             Some(existing) => {
                 existing.refcount += 1;
                 false
@@ -139,7 +139,10 @@ impl InboundTable {
     /// the reconnect replay path (`REQ_0985`).
     #[must_use]
     pub fn active_filters(&self) -> Vec<MqttTopicFilter> {
-        self.subscriptions.iter().map(|s| s.filter.clone()).collect()
+        self.subscriptions
+            .iter()
+            .map(|s| s.filter.clone())
+            .collect()
     }
 
     /// Hold a replay-minted SUBSCRIBE handle for the connector's lifetime
@@ -162,6 +165,24 @@ impl InboundTable {
             .filter(|r| topic_matches(&r.filter, topic))
             .map(|r| Arc::clone(&r.publisher))
             .collect()
+    }
+}
+
+/// Run the gateway-local wildcard demux for one inbound PUBLISH: match
+/// `topic` against every registered channel filter and forward `payload`
+/// to each matching channel's gateway-side publisher (`ADR_0129`,
+/// `REQ_0987`).
+///
+/// The matching set is snapshotted under the lock, then published to
+/// after the lock is released, so a slow / saturating publisher never
+/// holds the table mutex.
+pub fn route_inbound(table: &Arc<Mutex<InboundTable>>, topic: &MqttTopic, payload: &[u8]) {
+    let publishers = {
+        let guard = table.lock().expect("inbound table mutex not poisoned");
+        guard.matching_publishers(topic)
+    };
+    for publisher in publishers {
+        let _ = publisher.publish_bytes(payload);
     }
 }
 
@@ -201,7 +222,7 @@ mod tests {
         let f = filter("a/+/c");
 
         // First channel for `f` → caller must SUBSCRIBE.
-        assert!(table.add_route(f.clone(), Arc::new(NullPublish), "c1".to_string()));
+        assert!(table.add_route(&f, Arc::new(NullPublish), "c1".to_string()));
         let unsubs = std::sync::Arc::new(AtomicUsize::new(0));
         table.record_subscription(
             f.clone(),
@@ -210,9 +231,9 @@ mod tests {
         assert_eq!(table.distinct_filter_count(), 1);
 
         // Second channel, same filter → deduplicated (no new SUBSCRIBE).
-        assert!(!table.add_route(f.clone(), Arc::new(NullPublish), "c2".to_string()));
+        assert!(!table.add_route(&f, Arc::new(NullPublish), "c2".to_string()));
         assert_eq!(table.distinct_filter_count(), 1);
-        assert_eq!(table.active_filters(), vec![f.clone()]);
+        assert_eq!(table.active_filters(), vec![f]);
 
         // Dropping the first channel keeps the subscription (refcount 2→1).
         table.remove_channel("c1");
@@ -221,7 +242,11 @@ mod tests {
 
         // Dropping the last channel sends UNSUBSCRIBE (handle dropped).
         table.remove_channel("c2");
-        assert_eq!(unsubs.load(Ordering::Acquire), 1, "UNSUBSCRIBE on last drop");
+        assert_eq!(
+            unsubs.load(Ordering::Acquire),
+            1,
+            "UNSUBSCRIBE on last drop"
+        );
         assert_eq!(table.distinct_filter_count(), 0);
     }
 
@@ -231,28 +256,10 @@ mod tests {
         let mut table = InboundTable::new();
         let fa = filter("a/+");
         let fb = filter("b/#");
-        assert!(table.add_route(fa.clone(), Arc::new(NullPublish), "c1".to_string()));
+        assert!(table.add_route(&fa, Arc::new(NullPublish), "c1".to_string()));
         table.record_subscription(fa, SubscriptionHandle(Box::new(())));
-        assert!(table.add_route(fb.clone(), Arc::new(NullPublish), "c2".to_string()));
+        assert!(table.add_route(&fb, Arc::new(NullPublish), "c2".to_string()));
         table.record_subscription(fb, SubscriptionHandle(Box::new(())));
         assert_eq!(table.distinct_filter_count(), 2);
-    }
-}
-
-/// Run the gateway-local wildcard demux for one inbound PUBLISH: match
-/// `topic` against every registered channel filter and forward `payload`
-/// to each matching channel's gateway-side publisher (`ADR_0129`,
-/// `REQ_0987`).
-///
-/// The matching set is snapshotted under the lock, then published to
-/// after the lock is released, so a slow / saturating publisher never
-/// holds the table mutex.
-pub fn route_inbound(table: &Arc<Mutex<InboundTable>>, topic: &MqttTopic, payload: &[u8]) {
-    let publishers = {
-        let guard = table.lock().expect("inbound table mutex not poisoned");
-        guard.matching_publishers(topic)
-    };
-    for publisher in publishers {
-        let _ = publisher.publish_bytes(payload);
     }
 }

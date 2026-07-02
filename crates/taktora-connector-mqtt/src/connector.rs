@@ -395,7 +395,7 @@ where
                 .inbound()
                 .lock()
                 .expect("inbound table mutex not poisoned");
-            table.add_route(filter.clone(), publisher, name.to_string())
+            table.add_route(filter, publisher, name.to_string())
         };
         self.install_inbound_router();
         if need_subscribe {
@@ -506,8 +506,7 @@ async fn run_health_watcher<S>(
 
 /// A reconnect is a transition *into* `Connected` from any other state.
 fn is_reconnect(last: &MqttConnectionState, now: &MqttConnectionState) -> bool {
-    matches!(now, MqttConnectionState::Connected)
-        && !matches!(last, MqttConnectionState::Connected)
+    matches!(now, MqttConnectionState::Connected) && !matches!(last, MqttConnectionState::Connected)
 }
 
 /// Map a connection-state observation onto a target `ConnectorHealth`

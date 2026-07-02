@@ -135,7 +135,8 @@ impl MqttHealthMonitor {
             if current == target_kind {
                 return None;
             }
-            if current == ConnectorHealthKind::Up && target_kind == ConnectorHealthKind::Connecting {
+            if current == ConnectorHealthKind::Up && target_kind == ConnectorHealthKind::Connecting
+            {
                 let _ = guard.try_transition_to(ConnectorHealth::Degraded {
                     reason: "connection lost; reconnecting".to_string(),
                 });
