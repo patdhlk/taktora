@@ -243,9 +243,13 @@ mechanism (:need:`ADR_0129`).
    :satisfies: FEAT_0036
 
    The gateway shall register each distinct topic filter with the broker
-   at most once and reference-count the channels using it, sending
-   ``UNSUBSCRIBE`` only when the last channel referencing a filter is
-   dropped.
+   at most once and reference-count the channels using it. It shall send
+   ``UNSUBSCRIBE`` for a filter when the last channel referencing it is
+   removed — by explicit channel removal or at connector teardown.
+   Per-``ChannelReader``-drop teardown is out of scope: the
+   ``Connector::create_reader`` contract returns an un-hooked reader
+   handle, so subscription lifetime is bounded by the connector, matching
+   the framework's other pub/sub connector (see :need:`ADR_0129`).
 
 .. req:: Inbound PUBLISH is matched locally and fanned out
    :id: REQ_0987
