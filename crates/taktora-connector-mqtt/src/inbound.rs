@@ -7,16 +7,16 @@
 //! itself which [`ChannelReader`](taktora_connector_transport_iox::ChannelReader)
 //! instances a message belongs to. This module owns that decision:
 //!
-//! * [`InboundTable::routes`] — one entry per inbound channel (its filter
+//! * `InboundTable::routes` — one entry per inbound channel (its filter
 //!   plus the gateway-side publisher that forwards matched bytes to the
 //!   plugin). On each PUBLISH the gateway matches the concrete topic
 //!   locally against *every* route's filter and fans out to all matches
 //!   (`REQ_0987`).
-//! * [`InboundTable::subscriptions`] — one entry per **distinct** filter,
+//! * `InboundTable::subscriptions` — one entry per **distinct** filter,
 //!   reference-counted over the channels using it. The broker sees a
 //!   filter SUBSCRIBE at most once, and an UNSUBSCRIBE only when the last
 //!   channel referencing it is released (`REQ_0986`).
-//! * [`InboundTable::replay_handles`] — SUBSCRIBE handles minted by the
+//! * `InboundTable::replay_handles` — SUBSCRIBE handles minted by the
 //!   reconnect replay path, held for the connector's lifetime so the
 //!   replay does not immediately UNSUBSCRIBE (`REQ_0985`).
 
@@ -112,7 +112,7 @@ impl InboundTable {
 
     /// Release the inbound channel named `descriptor_name`, decrementing
     /// its filter's reference count. When the count reaches zero the
-    /// [`BrokerSubscription`] is dropped, sending UNSUBSCRIBE (`REQ_0986`).
+    /// `BrokerSubscription` is dropped, sending UNSUBSCRIBE (`REQ_0986`).
     /// No-op if the channel is not registered.
     pub fn remove_channel(&mut self, descriptor_name: &str) {
         let Some(pos) = self
