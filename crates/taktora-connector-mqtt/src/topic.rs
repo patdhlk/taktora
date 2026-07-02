@@ -106,6 +106,11 @@ impl MqttTopic {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Iterate the topic's levels (substrings between `/` separators).
+    pub(crate) fn levels(&self) -> impl Iterator<Item = &str> {
+        self.0.split(LEVEL_SEPARATOR)
+    }
 }
 
 /// A validated MQTT **subscription** topic filter (wildcards allowed).
@@ -154,6 +159,11 @@ impl MqttTopicFilter {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Iterate the filter's levels (substrings between `/` separators).
+    pub(crate) fn levels(&self) -> impl Iterator<Item = &str> {
+        self.0.split(LEVEL_SEPARATOR)
     }
 }
 
