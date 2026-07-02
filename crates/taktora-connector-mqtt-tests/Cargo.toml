@@ -17,6 +17,17 @@ publish      = false
 # Empty stub — the crate exists solely to host integration tests under
 # `tests/`. A `src/lib.rs` is required so Cargo treats this as a package.
 
+[features]
+# Passthroughs to the parent crate's real-backend features. Declared here so
+# `tests/real_broker.rs`'s `#![cfg(feature = "rumqttc-integration")]` is
+# recognised by cargo's `unexpected_cfgs` lint and the file compiles under
+# `--features rumqttc-integration` / `--all-features`. Off by default so the
+# lean `cargo test -p taktora-connector-mqtt-tests` (and `--no-default-features`)
+# never pulls rumqttc; the broker-in-CI job opts in explicitly.
+default = []
+rumqttc-integration = ["taktora-connector-mqtt/rumqttc-integration"]
+tls = ["taktora-connector-mqtt/tls", "rumqttc-integration"]
+
 [dev-dependencies]
 taktora-connector-mqtt           = { workspace = true }
 taktora-connector-codec          = { workspace = true }
