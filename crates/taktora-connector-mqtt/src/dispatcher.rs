@@ -20,9 +20,9 @@ use taktora_connector_core::ConnectorError;
 use taktora_connector_transport_iox::{RawChannelReader, RawChannelWriter};
 use tracing::warn;
 
-use crate::bridge::{OutboundBridge, OutboundError};
+use crate::bridge::{InboundBridge, InboundOutcome, OutboundBridge, OutboundError};
 use crate::health::MqttHealthMonitor;
-use crate::registry::{ChannelBinding, ChannelRegistry, OutboundDrain};
+use crate::registry::{ChannelBinding, ChannelRegistry, InboundPublish, OutboundDrain};
 use crate::routing::MqttRouting;
 use crate::session::MqttSessionLike;
 
@@ -89,13 +89,94 @@ impl<const N: usize> IoxInboundPublish<N> {
     }
 }
 
-impl<const N: usize> crate::registry::InboundPublish for IoxInboundPublish<N> {
+impl<const N: usize> InboundPublish for IoxInboundPublish<N> {
     fn publish_bytes(&self, bytes: &[u8]) -> Result<(), ConnectorError> {
         let writer = self
             .writer
             .lock()
             .expect("inbound publisher mutex poisoned");
         writer.send_raw_bytes(bytes, [0u8; 32]).map(|_| ())
+    }
+}
+
+/// Per-channel inbound publisher that gates the iceoryx2 send through an
+/// [`InboundBridge`] for drop accounting (`REQ_0261`).
+///
+/// Wraps [`IoxInboundPublish`] with a bounded per-channel
+/// [`InboundBridge<()>`] and the shared [`MqttHealthMonitor`]: when the
+/// bridge is full the offending frame is dropped, the cumulative drop
+/// count is incremented, and once it crosses the configured threshold the
+/// monitor emits a single `Up → Degraded { reason: "dropped N inbound
+/// frames" }` transition. Mirrors
+/// `taktora_connector_zenoh::dispatcher::BridgedInboundPublish`.
+pub struct BridgedInboundPublish<const N: usize> {
+    iox: Option<IoxInboundPublish<N>>,
+    bridge: InboundBridge<()>,
+    health: Arc<MqttHealthMonitor>,
+    threshold: u64,
+}
+
+impl<const N: usize> BridgedInboundPublish<N> {
+    /// Construct a bridged publisher wired to an iceoryx2
+    /// [`RawChannelWriter`] for the actual SHM transport.
+    #[must_use]
+    pub fn new(
+        writer: RawChannelWriter<N>,
+        capacity: usize,
+        health: Arc<MqttHealthMonitor>,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            iox: Some(IoxInboundPublish::new(writer)),
+            bridge: InboundBridge::new(capacity),
+            health,
+            threshold,
+        }
+    }
+
+    /// Construct a publisher with no iceoryx2 transport — used by
+    /// `tests/saturation.rs`. Drop accounting + health transitions still
+    /// run; bytes are silently swallowed instead of forwarded.
+    #[must_use]
+    pub fn without_transport(
+        capacity: usize,
+        health: Arc<MqttHealthMonitor>,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            iox: None,
+            bridge: InboundBridge::new(capacity),
+            health,
+            threshold,
+        }
+    }
+
+    /// Borrow the per-channel bridge — used by tests to inspect the
+    /// running drop count.
+    #[must_use]
+    pub const fn bridge(&self) -> &InboundBridge<()> {
+        &self.bridge
+    }
+}
+
+impl<const N: usize> InboundPublish for BridgedInboundPublish<N> {
+    fn publish_bytes(&self, bytes: &[u8]) -> Result<(), ConnectorError> {
+        match self.bridge.try_send(()) {
+            InboundOutcome::Sent => {
+                // The bridge is a bounded token counter; drain the token we
+                // just enqueued so it tracks in-flight frames, then forward.
+                let _ = self.bridge.try_recv();
+                self.iox
+                    .as_ref()
+                    .map_or_else(|| Ok(()), |iox| iox.publish_bytes(bytes))
+            }
+            InboundOutcome::Dropped { count } => {
+                // Drop the offending frame and account it. A single Degraded
+                // transition fires once the threshold is crossed (`REQ_0261`).
+                let _ = self.health.record_inbound_drop(count, self.threshold);
+                Ok(())
+            }
+        }
     }
 }
 

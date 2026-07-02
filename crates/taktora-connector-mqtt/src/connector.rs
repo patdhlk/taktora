@@ -17,7 +17,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use iceoryx2::node::Node;
 use iceoryx2::prelude::{NodeBuilder, ipc};
@@ -27,15 +27,16 @@ use taktora_connector_transport_iox::{ChannelReader, ChannelWriter, ServiceFacto
 use taktora_executor::{ControlFlow, Executor, item_with_triggers};
 
 use crate::dispatcher::{
-    DEFAULT_DISPATCHER_TICK, IoxInboundPublish, IoxOutboundDrain, dispatcher_loop,
+    BridgedInboundPublish, DEFAULT_DISPATCHER_TICK, IoxOutboundDrain, dispatcher_loop,
 };
 use crate::gateway::MqttGateway;
 use crate::health::MqttHealthMonitor;
+use crate::inbound::{InboundTable, route_inbound};
 use crate::mock::MockMqttSession;
 use crate::options::MqttConnectorOptions;
-use crate::registry::{ChannelBinding, ChannelDirection, ChannelRegistry};
+use crate::registry::{ChannelBinding, ChannelDirection, ChannelRegistry, InboundPublish};
 use crate::routing::MqttRouting;
-use crate::session::{MqttConnectionState, MqttSessionLike};
+use crate::session::{InboundRouter, MqttConnectionState, MqttSessionLike};
 
 /// Tokio worker threads for the gateway runtime. One is enough for the M2a
 /// mock path; M3 can raise this when the real `rumqttc` event loop lands.
@@ -48,6 +49,7 @@ pub struct MqttState {
     health: Arc<MqttHealthMonitor>,
     options: MqttConnectorOptions,
     registry: Arc<Mutex<ChannelRegistry>>,
+    inbound: Arc<Mutex<InboundTable>>,
     stop: Arc<AtomicBool>,
 }
 
@@ -65,6 +67,7 @@ impl MqttState {
             health: Arc::new(MqttHealthMonitor::new()),
             options,
             registry: Arc::new(Mutex::new(ChannelRegistry::with_capacity(cap))),
+            inbound: Arc::new(Mutex::new(InboundTable::new())),
             stop: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -85,6 +88,12 @@ impl MqttState {
     #[must_use]
     pub const fn registry(&self) -> &Arc<Mutex<ChannelRegistry>> {
         &self.registry
+    }
+
+    /// Borrow the shared inbound demux + subscription table (`ADR_0129`).
+    #[must_use]
+    pub const fn inbound(&self) -> &Arc<Mutex<InboundTable>> {
+        &self.inbound
     }
 
     /// Clone the dispatcher stop signal.
@@ -223,6 +232,30 @@ where
         let registry = Arc::clone(self.state.registry());
         let stop = self.state.stop_signal();
         let tick = self.tick;
+
+        // Spawn the health watcher BEFORE the dispatcher consumes `session`
+        // (`ADR_0128`). It polls the connection state, maps it onto
+        // `ConnectorHealth` (`REQ_0980`–`REQ_0983`), and replays active
+        // SUBSCRIBEs on each reconnect CONNACK (`REQ_0985`). Clone the Arcs
+        // it needs so the move below can still take ownership of `session`.
+        let session_for_health = Arc::clone(&session);
+        let health = Arc::clone(self.state.health());
+        let inbound = Arc::clone(self.state.inbound());
+        let stop_for_health = Arc::clone(&stop);
+        let ceiling = self.state.options().reconnect_attempt_ceiling();
+        let poll = tick.max(Duration::from_millis(1));
+        handle.spawn(async move {
+            run_health_watcher(
+                session_for_health,
+                health,
+                inbound,
+                stop_for_health,
+                ceiling,
+                poll,
+            )
+            .await;
+        });
+
         handle.spawn(async move {
             let _ = dispatcher_loop(registry, session, stop, tick).await;
         });
@@ -279,14 +312,20 @@ where
         Ok(writer)
     }
 
-    /// Open an inbound [`ChannelReader`] (`REQ_0223`).
+    /// Open an inbound [`ChannelReader`] (`REQ_0223`, `REQ_0254`).
     ///
-    /// M2a creates the plugin-side iceoryx2 subscriber and the paired
-    /// gateway-side raw publisher, and registers the inbound binding — so the
-    /// service exists and the handle is valid. **Actual inbound delivery
-    /// (subscribe → wildcard demux → fan-out to this reader) is M2b**; the
-    /// M2a dispatcher never drives the registered [`IoxInboundPublish`]. M2b
-    /// picks up the `Inbound` binding registered here.
+    /// M2b wires the full inbound path: the plugin-side iceoryx2 subscriber
+    /// and the gateway-side raw publisher (bridged for saturation
+    /// accounting, `REQ_0261`); a demux route in the gateway's
+    /// reference-counted table so an inbound PUBLISH matching this channel's
+    /// filter is fanned out to this reader (`ADR_0129`, `REQ_0987`); a
+    /// broker SUBSCRIBE, deduplicated so a filter shared by several channels
+    /// hits the broker once (`REQ_0986`); and the gateway-local
+    /// [`InboundRouter`] that drives the fan-out.
+    ///
+    /// The subscription filter is [`MqttRouting::subscription_filter`] — the
+    /// routing's explicit `with_filter` value (which may carry `+` / `#`),
+    /// else the concrete topic.
     fn create_reader<T, const N: usize>(
         &self,
         descriptor: &ChannelDescriptor<Self::Routing, N>,
@@ -295,6 +334,7 @@ where
         T: serde::de::DeserializeOwned,
     {
         let routing = descriptor.routing().clone();
+        let filter = routing.subscription_filter();
         let svc_name = format!("{}.in", descriptor.name());
         let plugin_desc =
             ChannelDescriptor::<MqttRouting, N>::new(svc_name.clone(), routing.clone())?;
@@ -303,12 +343,24 @@ where
         // Plugin-side subscriber (returned to caller).
         let reader = factory.create_reader::<T, _, _, N>(&plugin_desc, self.codec.clone())?;
 
-        // Gateway-side raw publisher — M2b's session subscribe callbacks
-        // republish MQTT-delivered bytes through it onto this service.
+        // Gateway-side raw publisher, bridged for inbound saturation
+        // accounting (`REQ_0261`). The demux router forwards matched bytes
+        // through it onto this channel's inbound iox service.
         let raw_writer = factory.create_raw_writer_named::<N>(&svc_name)?;
-        let publish: Box<dyn crate::registry::InboundPublish> =
-            Box::new(IoxInboundPublish::<N>::new(raw_writer));
+        let publisher: Arc<dyn InboundPublish> = Arc::new(BridgedInboundPublish::<N>::new(
+            raw_writer,
+            self.state.options().inbound_bridge_capacity(),
+            Arc::clone(self.state.health()),
+            self.state.options().inbound_drop_threshold(),
+        ));
 
+        // Demux route + reference-counted broker SUBSCRIBE (dedup) +
+        // idempotent router install.
+        self.register_inbound(descriptor.name(), &filter, Arc::clone(&publisher))?;
+
+        // Keep the registry Inbound binding for dup-detection + symmetry
+        // with the outbound path; it wraps the SAME publisher (no second
+        // raw writer).
         self.state
             .registry()
             .lock()
@@ -317,9 +369,187 @@ where
                 descriptor.name().to_string(),
                 routing,
                 ChannelDirection::Inbound,
-                ChannelBinding::Inbound(publish),
+                ChannelBinding::Inbound(Box::new(ArcInboundPublish::new(publisher))),
             )?;
         Ok(reader)
+    }
+}
+
+impl<C, S> MqttConnector<C, S>
+where
+    C: taktora_connector_core::PayloadCodec + Clone + Send + Sync + 'static,
+    S: MqttSessionLike,
+{
+    /// Register an inbound channel's demux route, reference-count the
+    /// broker SUBSCRIBE (dedup per distinct filter, `REQ_0986`), and
+    /// ensure the gateway-local demux router is installed on the session.
+    fn register_inbound(
+        &self,
+        name: &str,
+        filter: &crate::topic::MqttTopicFilter,
+        publisher: Arc<dyn InboundPublish>,
+    ) -> Result<(), ConnectorError> {
+        let need_subscribe = {
+            let mut table = self
+                .state
+                .inbound()
+                .lock()
+                .expect("inbound table mutex not poisoned");
+            table.add_route(filter, publisher, name.to_string())
+        };
+        self.install_inbound_router();
+        if need_subscribe {
+            let session = self.session_snapshot()?;
+            let handle = self
+                .gateway
+                .handle()
+                .ok_or_else(|| ConnectorError::stack(GatewayShutDown))?;
+            // `subscribe` is async; the per-filter sink is unused (demux runs
+            // through the router), so a no-op sink registers pure interest.
+            let sub = handle
+                .block_on(session.subscribe(filter, Box::new(|_: &[u8]| {})))
+                .map_err(|e| ConnectorError::stack(SessionFailure(format!("{e}"))))?;
+            self.state
+                .inbound()
+                .lock()
+                .expect("inbound table mutex not poisoned")
+                .record_subscription(filter.clone(), sub);
+        }
+        Ok(())
+    }
+
+    /// Install the gateway-local demux [`InboundRouter`] on the session
+    /// (`ADR_0129`). Idempotent — the closure captures the shared inbound
+    /// table, so re-installing is a no-op replacement. Best-effort: does
+    /// nothing once the session has been moved into the dispatcher.
+    fn install_inbound_router(&self) {
+        let table = Arc::clone(self.state.inbound());
+        let router: InboundRouter = Arc::new(move |topic: &_, payload: &[u8]| {
+            route_inbound(&table, topic, payload);
+        });
+        if let Some(session) = self.peek_session() {
+            session.set_inbound_router(router);
+        }
+    }
+
+    /// Clone the session out of its slot without consuming it. `None` once
+    /// `register_with` has moved it into the dispatcher.
+    fn peek_session(&self) -> Option<Arc<S>> {
+        self.session_slot
+            .lock()
+            .expect("session slot mutex not poisoned")
+            .as_ref()
+            .map(Arc::clone)
+    }
+
+    /// Snapshot the session, erroring if it has already been consumed by
+    /// `register_with`.
+    fn session_snapshot(&self) -> Result<Arc<S>, ConnectorError> {
+        self.peek_session()
+            .ok_or_else(|| ConnectorError::stack(SessionAlreadyTaken))
+    }
+}
+
+/// Owning wrapper letting the registry hold an inbound publisher behind
+/// `Box<dyn InboundPublish>` while the demux table (and, on the real
+/// back-end, the session callback) hold clones of the same `Arc`.
+struct ArcInboundPublish {
+    inner: Arc<dyn InboundPublish>,
+}
+
+impl ArcInboundPublish {
+    const fn new(inner: Arc<dyn InboundPublish>) -> Self {
+        Self { inner }
+    }
+}
+
+impl InboundPublish for ArcInboundPublish {
+    fn publish_bytes(&self, bytes: &[u8]) -> Result<(), ConnectorError> {
+        self.inner.publish_bytes(bytes)
+    }
+}
+
+/// Health watcher task (`ADR_0128`). Polls the session's connection state,
+/// maps it onto `ConnectorHealth` (`REQ_0980`–`REQ_0983`), and replays all
+/// active SUBSCRIBEs on each reconnect CONNACK (`REQ_0985`). Exits when the
+/// stop flag is set or a terminal `Down` is reached.
+async fn run_health_watcher<S>(
+    session: Arc<S>,
+    health: Arc<MqttHealthMonitor>,
+    inbound: Arc<Mutex<InboundTable>>,
+    stop: Arc<AtomicBool>,
+    ceiling: u32,
+    poll: Duration,
+) where
+    S: MqttSessionLike,
+{
+    let mut last_state = session.state();
+    while !stop.load(Ordering::Acquire) {
+        tokio::time::sleep(poll).await;
+        let state = session.state();
+        // A fresh CONNACK (transition into `Connected`) means the clean
+        // session dropped all broker-side subscriptions — replay them.
+        if is_reconnect(&last_state, &state) {
+            replay_subscriptions(&inbound, &session).await;
+        }
+        let target = map_health(&state, session.reconnect_attempts(), ceiling);
+        let terminal = matches!(target, ConnectorHealth::Down { .. });
+        health.apply_target(target);
+        last_state = state;
+        if terminal {
+            // `Down` is terminal (auth reject / ceiling exceeded); no
+            // further transitions are observable (`REQ_0982`, `REQ_0983`).
+            break;
+        }
+    }
+}
+
+/// A reconnect is a transition *into* `Connected` from any other state.
+fn is_reconnect(last: &MqttConnectionState, now: &MqttConnectionState) -> bool {
+    matches!(now, MqttConnectionState::Connected) && !matches!(last, MqttConnectionState::Connected)
+}
+
+/// Map a connection-state observation onto a target `ConnectorHealth`
+/// (`REQ_0980`–`REQ_0983`). Single-exit.
+fn map_health(state: &MqttConnectionState, attempts: u32, ceiling: u32) -> ConnectorHealth {
+    match state {
+        MqttConnectionState::AuthRejected { reason } => ConnectorHealth::Down {
+            reason: format!("authentication rejected: {reason}"),
+            since: Instant::now(),
+        },
+        _ if attempts > ceiling => ConnectorHealth::Down {
+            reason: format!("reconnect attempts {attempts} exceeded ceiling {ceiling}"),
+            since: Instant::now(),
+        },
+        MqttConnectionState::Connected => ConnectorHealth::Up,
+        MqttConnectionState::Connecting | MqttConnectionState::Disconnected { .. } => {
+            ConnectorHealth::Connecting {
+                since: Instant::now(),
+            }
+        }
+    }
+}
+
+/// Replay every active SUBSCRIBE from the reference-counted table
+/// (`REQ_0985`). The replay handles are held for the connector's lifetime
+/// so the clean-session re-subscribe does not immediately UNSUBSCRIBE.
+async fn replay_subscriptions<S>(inbound: &Arc<Mutex<InboundTable>>, session: &Arc<S>)
+where
+    S: MqttSessionLike,
+{
+    let filters = {
+        inbound
+            .lock()
+            .expect("inbound table mutex not poisoned")
+            .active_filters()
+    };
+    for filter in filters {
+        if let Ok(handle) = session.subscribe(&filter, Box::new(|_: &[u8]| {})).await {
+            inbound
+                .lock()
+                .expect("inbound table mutex not poisoned")
+                .push_replay_handle(handle);
+        }
     }
 }
 
@@ -357,3 +587,25 @@ impl core::fmt::Display for GatewayShutDown {
 }
 
 impl std::error::Error for GatewayShutDown {}
+
+#[derive(Debug)]
+struct SessionAlreadyTaken;
+
+impl core::fmt::Display for SessionAlreadyTaken {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("mqtt connector: session has already been consumed by register_with")
+    }
+}
+
+impl std::error::Error for SessionAlreadyTaken {}
+
+#[derive(Debug)]
+struct SessionFailure(String);
+
+impl core::fmt::Display for SessionFailure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "mqtt connector: session operation failed: {}", self.0)
+    }
+}
+
+impl std::error::Error for SessionFailure {}

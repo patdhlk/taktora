@@ -8,11 +8,23 @@
 //! is a pure state read. M1 ships only the mock (`crate::mock`); the real
 //! `rumqttc`-backed session lands in a later milestone.
 
+use std::sync::Arc;
+
 use crate::routing::MqttRouting;
-use crate::topic::MqttTopicFilter;
+use crate::topic::{MqttTopic, MqttTopicFilter};
 
 /// Callback invoked with the raw payload bytes of a delivered message.
 pub type PayloadSink = Box<dyn Fn(&[u8]) + Send + Sync + 'static>;
+
+/// The gateway's single inbound-demux entry point (`ADR_0129`).
+///
+/// Installed on the session with [`MqttSessionLike::set_inbound_router`].
+/// Each inbound PUBLISH is delivered here **once** with its *concrete*
+/// topic; the gateway then matches that topic locally against every
+/// registered channel filter and fans the payload out (`REQ_0987`). The
+/// real `rumqttc` back-end will pump its `EventLoop` and call this router
+/// per `Incoming::Publish`; the mock calls it from `deliver_inbound`.
+pub type InboundRouter = Arc<dyn Fn(&MqttTopic, &[u8]) + Send + Sync + 'static>;
 
 /// The session's observable connection state. Maps to `ConnectorHealth`
 /// variants in the gateway layer (`REQ_0980`).
@@ -22,9 +34,19 @@ pub enum MqttConnectionState {
     Connecting,
     /// A successful `CONNACK` was received; the session is operational.
     Connected,
-    /// The session is disconnected; carries a human-readable reason.
+    /// The session is disconnected; carries a human-readable reason. A
+    /// disconnect is transient — the back-end retries — so it maps to
+    /// `ConnectorHealth::Connecting`, not `Down` (`REQ_0980`).
     Disconnected {
         /// Reason for the disconnect (surfaced through `HealthEvent`).
+        reason: String,
+    },
+    /// The broker returned a CONNACK with an authentication /
+    /// authorization failure return code. This is terminal: the connector
+    /// transitions to `ConnectorHealth::Down` without further reconnect
+    /// attempts (`REQ_0982`, `ADR_0128`).
+    AuthRejected {
+        /// Reason text from the rejecting CONNACK.
         reason: String,
     },
 }
@@ -71,6 +93,13 @@ pub trait MqttSessionLike: Send + Sync + 'static {
     /// transition `ConnectorHealth`.
     fn state(&self) -> MqttConnectionState;
 
+    /// Number of consecutive failed reconnect attempts since the last
+    /// successful CONNACK. The health watcher transitions the connector to
+    /// `Down` once this exceeds the configured ceiling (`REQ_0983`). The
+    /// real back-end counts `rumqttc` connection errors; a successful
+    /// CONNACK resets it to zero.
+    fn reconnect_attempts(&self) -> u32;
+
     /// Publish `payload` on the routing's topic at its QoS / retained
     /// setting.
     fn publish(
@@ -86,4 +115,10 @@ pub trait MqttSessionLike: Send + Sync + 'static {
         filter: &MqttTopicFilter,
         sink: PayloadSink,
     ) -> impl std::future::Future<Output = Result<SubscriptionHandle, SessionError>> + Send;
+
+    /// Install the gateway's single inbound-demux [`InboundRouter`]
+    /// (`ADR_0129`). Every inbound PUBLISH is delivered to `router` once,
+    /// tagged with its concrete topic; the gateway matches locally and
+    /// fans out. Idempotent — the last router installed wins.
+    fn set_inbound_router(&self, router: InboundRouter);
 }
