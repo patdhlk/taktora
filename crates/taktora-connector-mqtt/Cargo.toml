@@ -10,7 +10,7 @@ homepage     = { workspace = true }
 readme       = { workspace = true }
 keywords     = { workspace = true }
 categories   = { workspace = true }
-description  = "MQTT reference connector for the taktora-connector framework (M1 core: routing, options, session seam + mock, bounded bridges). Implements BB_0036 (FEAT_0036)."
+description  = "MQTT reference connector for the taktora-connector framework (M1 core: routing, options, session seam + mock, bounded bridges). Implements BB_0004 (FEAT_0036)."
 
 [dependencies]
 taktora-connector-core = { workspace = true }
