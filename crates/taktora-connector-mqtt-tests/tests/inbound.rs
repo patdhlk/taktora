@@ -98,3 +98,38 @@ fn inbound_publish_fans_out_to_every_matching_reader() {
         "non-matching filter must not receive the PUBLISH"
     );
 }
+
+/// `REQ_0986`: two channels sharing a filter subscribe the broker ONCE
+/// (dedup), yet an inbound PUBLISH still fans out to both readers.
+#[test]
+fn shared_filter_subscribes_broker_once_and_fans_out_to_all() {
+    let session = Arc::new(MockMqttSession::new());
+    let connector = make_connector(&session);
+
+    let desc_a = ChannelDescriptor::<MqttRouting, N>::new(
+        "share.a".to_string(),
+        reader_routing("sensors/+/temp"),
+    )
+    .unwrap();
+    let desc_b = ChannelDescriptor::<MqttRouting, N>::new(
+        "share.b".to_string(),
+        reader_routing("sensors/+/temp"),
+    )
+    .unwrap();
+
+    let reader_a = connector.create_reader::<u32, N>(&desc_a).unwrap();
+    let reader_b = connector.create_reader::<u32, N>(&desc_b).unwrap();
+
+    // Dedup: the broker saw exactly one SUBSCRIBE for the shared filter.
+    assert_eq!(
+        session.subscribe_calls(),
+        vec!["sensors/+/temp".to_string()],
+        "shared filter must be subscribed at most once"
+    );
+
+    let topic = MqttTopic::new("sensors/room/temp").unwrap();
+    session.deliver_inbound(&topic, &encode(21));
+
+    assert_eq!(recv_one(&reader_a), Some(21));
+    assert_eq!(recv_one(&reader_b), Some(21));
+}

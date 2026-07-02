@@ -165,6 +165,80 @@ impl InboundTable {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use taktora_connector_core::ConnectorError;
+
+    use super::*;
+
+    struct NullPublish;
+    impl InboundPublish for NullPublish {
+        fn publish_bytes(&self, _bytes: &[u8]) -> Result<(), ConnectorError> {
+            Ok(())
+        }
+    }
+
+    /// Drop-recording payload for a synthetic [`SubscriptionHandle`]: its
+    /// drop stands in for the broker UNSUBSCRIBE.
+    struct DropCounter(std::sync::Arc<AtomicUsize>);
+    impl Drop for DropCounter {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    fn filter(s: &str) -> MqttTopicFilter {
+        MqttTopicFilter::new(s).unwrap()
+    }
+
+    /// `REQ_0986`: a distinct filter is subscribed once and reference-counted;
+    /// UNSUBSCRIBE (handle drop) fires only when the last channel drops.
+    #[test]
+    fn dedup_refcount_and_unsubscribe_on_last_drop() {
+        let mut table = InboundTable::new();
+        let f = filter("a/+/c");
+
+        // First channel for `f` → caller must SUBSCRIBE.
+        assert!(table.add_route(f.clone(), Arc::new(NullPublish), "c1".to_string()));
+        let unsubs = std::sync::Arc::new(AtomicUsize::new(0));
+        table.record_subscription(
+            f.clone(),
+            SubscriptionHandle(Box::new(DropCounter(std::sync::Arc::clone(&unsubs)))),
+        );
+        assert_eq!(table.distinct_filter_count(), 1);
+
+        // Second channel, same filter → deduplicated (no new SUBSCRIBE).
+        assert!(!table.add_route(f.clone(), Arc::new(NullPublish), "c2".to_string()));
+        assert_eq!(table.distinct_filter_count(), 1);
+        assert_eq!(table.active_filters(), vec![f.clone()]);
+
+        // Dropping the first channel keeps the subscription (refcount 2→1).
+        table.remove_channel("c1");
+        assert_eq!(unsubs.load(Ordering::Acquire), 0, "no UNSUBSCRIBE yet");
+        assert_eq!(table.distinct_filter_count(), 1);
+
+        // Dropping the last channel sends UNSUBSCRIBE (handle dropped).
+        table.remove_channel("c2");
+        assert_eq!(unsubs.load(Ordering::Acquire), 1, "UNSUBSCRIBE on last drop");
+        assert_eq!(table.distinct_filter_count(), 0);
+    }
+
+    /// Distinct filters each require their own SUBSCRIBE.
+    #[test]
+    fn distinct_filters_each_require_subscribe() {
+        let mut table = InboundTable::new();
+        let fa = filter("a/+");
+        let fb = filter("b/#");
+        assert!(table.add_route(fa.clone(), Arc::new(NullPublish), "c1".to_string()));
+        table.record_subscription(fa, SubscriptionHandle(Box::new(())));
+        assert!(table.add_route(fb.clone(), Arc::new(NullPublish), "c2".to_string()));
+        table.record_subscription(fb, SubscriptionHandle(Box::new(())));
+        assert_eq!(table.distinct_filter_count(), 2);
+    }
+}
+
 /// Run the gateway-local wildcard demux for one inbound PUBLISH: match
 /// `topic` against every registered channel filter and forward `payload`
 /// to each matching channel's gateway-side publisher (`ADR_0129`,
