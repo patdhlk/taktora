@@ -21,6 +21,11 @@
 //!   drop-accounting (`REQ_0259`, `REQ_0260`, `REQ_0261`).
 
 #![warn(missing_docs)]
+// Allow MQTT domain identifiers (QoS, MQTT, CONNACK, CONNECT, PUBLISH,
+// SUBSCRIBE, …) to appear in docstrings without backticks. Matches the
+// posture the CAN and EtherCAT connector crates take for their fieldbus
+// terminology.
+#![allow(clippy::doc_markdown)]
 
 pub mod bridge;
 pub mod health;

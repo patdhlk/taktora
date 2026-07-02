@@ -120,7 +120,7 @@ mod tests {
             tail in proptest::collection::vec(plain_level(), 0..4),
         ) {
             let f = filter(&format!("{}/#", prefix.join("/")));
-            let mut all = prefix.clone();
+            let mut all = prefix;
             all.extend(tail);
             prop_assert!(topic_matches(&f, &topic(&all.join("/"))));
         }

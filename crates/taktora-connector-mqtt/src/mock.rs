@@ -8,7 +8,6 @@
 //! feature-gated — it ships always so downstream test crates need no
 //! protocol backend.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -192,7 +191,6 @@ impl MockMqttSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MqttQos;
 
     #[test]
     fn fresh_mock_is_connected_and_empty() {
@@ -236,6 +234,5 @@ mod tests {
         assert_eq!(matching.len(), 1);
         let none = m.matching_sinks(&MqttTopic::new("a/b/c").unwrap());
         assert!(none.is_empty());
-        let _ = MqttQos::AtMostOnce; // keep the import meaningful
     }
 }
