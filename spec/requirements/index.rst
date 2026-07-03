@@ -47,6 +47,10 @@ top-level features:
   ``.dbc`` today) into strongly-typed Rust message (de)serializers, with
   a ``no_std``, ``serde``-free wire runtime. The message-plane twin of
   the device-plane ESI/EDS toolchains. See :doc:`idl/index`.
+* :need:`FEAT_0120` "Workspace test-coverage measurement" — repo-wide
+  developer tooling: a repeatable ``cargo-llvm-cov`` entrypoint
+  (``scripts/coverage.sh``) so line coverage is a standing verification
+  artifact. See :doc:`tooling/index`.
 
 Each ``req`` directive ``:satisfies:`` one ``feat`` parent; each
 capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
@@ -64,6 +68,7 @@ capability-cluster ``feat`` ``:satisfies:`` its top-level umbrella feature.
    motion/index
    medkit/index
    idl/index
+   tooling/index
 
 Requirements at a glance
 ------------------------

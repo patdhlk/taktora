@@ -21,6 +21,7 @@ detailed-design notes that predate the arc42 adoption.
    motion/index
    medkit/index
    idl/index
+   tooling
    safety
 
 Building blocks
