@@ -32,7 +32,9 @@ cargo llvm-cov --workspace --all-features --no-report \
   --ignore-filename-regex "$IGNORE_RE" \
   -- --test-threads=1
 
-# REQ_0995: three report formats from the single run above.
+# REQ_0995: three report formats from the single run above. (`report --lcov`
+# does not create the parent directory itself; `report --html` does.)
+mkdir -p target/llvm-cov
 cargo llvm-cov report --lcov --output-path target/llvm-cov/lcov.info \
   --ignore-filename-regex "$IGNORE_RE"
 cargo llvm-cov report --html --ignore-filename-regex "$IGNORE_RE"
