@@ -70,6 +70,28 @@ Solution strategy
    expire with the repo's retention window (default 90 days) — the
    summary in the job log outlives them only as long as the log does.
 
+Implementation footprint
+------------------------
+
+.. impl:: Coverage tooling — scripts/coverage.sh + ci-coverage.yml
+   :id: IMPL_0092
+   :status: open
+   :refines: REQ_0991, REQ_0992, REQ_0993, REQ_0994, REQ_0995, REQ_0996, REQ_0997, REQ_0998, REQ_0999, REQ_1000, REQ_1001
+
+   The realising artefacts, all in-repo:
+
+   * ``scripts/coverage.sh`` — the single entrypoint: tool-presence
+     check with install hint, one instrumented
+     ``--workspace --all-features`` run (``--test-threads=1``),
+     denominator exclusions via ``--ignore-filename-regex``, lcov +
+     HTML + terminal/``summary.txt`` reports, and the optional
+     ``COVERAGE_FAIL_UNDER_LINES`` floor evaluated last.
+   * ``.github/workflows/ci-coverage.yml`` — topic workflow (shared
+     diff classifier) invoking the same script; job summary + artifact
+     publication; the floor env commented out (informational today).
+   * ``CONTRIBUTING.md`` "Test coverage" section — contributor-facing
+     documentation.
+
 Decisions at a glance
 ---------------------
 
