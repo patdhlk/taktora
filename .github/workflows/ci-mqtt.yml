@@ -1,0 +1,161 @@
+name: ci-mqtt
+
+# Connector-mqtt focused CI. The workspace ci.yml already builds + tests the
+# default (mock) backend; this workflow adds the M3 real-backend coverage:
+# clippy under the rumqttc-integration + tls features, and a broker-in-CI job
+# that stands up mosquitto (plain 1883, password auth, and TLS on 8883 with a
+# self-signed CA generated in the job) and runs the real-session integration
+# tests against it. Certs are generated at job time — no private keys are ever
+# committed. main has no required status checks, so skipped jobs never block.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # 0. Classify the diff. All-Rust connector CI, so every job is gated on
+  #    `code` — README-only / spec-only PRs skip the whole matrix.
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: ./scripts/classify-changes.sh
+
+  # 1. Default-feature build + test on Linux. Mock backend only — a plain
+  #    build must NOT pull rumqttc, so the real-broker integration tests are
+  #    cfg'd out here (rumqttc-integration off by default).
+  build-test-default:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: build+test default (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (default features — mock backend only)
+        run: cargo build -p taktora-connector-mqtt -p taktora-connector-mqtt-tests --all-targets
+      - name: Test (default features)
+        run: cargo test -p taktora-connector-mqtt -p taktora-connector-mqtt-tests -- --test-threads=1
+
+  # 2. Connector-scoped clippy under both feature configurations. The
+  #    workspace clippy job in ci.yml covers --all-features; this exercises
+  #    default features and the real backend (rumqttc-integration + tls) in
+  #    isolation so the feature-gated paths are linted.
+  clippy-mqtt:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: clippy (taktora-connector-mqtt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (default features)
+        run: cargo clippy -p taktora-connector-mqtt --all-targets -- -D warnings
+      - name: Clippy (rumqttc-integration + tls)
+        run: cargo clippy -p taktora-connector-mqtt --all-targets --all-features -- -D warnings
+
+  # 3. Broker-in-CI integration. Stands up mosquitto with a password file
+  #    (auth test) and a self-signed CA + server cert (TLS on 8883), then
+  #    runs the real-session tests with rumqttc-integration + tls. The tests
+  #    early-return when MQTT_TEST_BROKER is unset, so this job is the only
+  #    place they actually exercise a broker.
+  broker-integration:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: mqtt broker integration (plain/auth/tls)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate mosquitto password file
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mosq"
+          # Hash the credentials with the mosquitto_passwd shipped in the image.
+          # `cat` emits only the hash line to stdout; grep guards against any
+          # stray banner text. Matches MQTT_TEST_USER / MQTT_TEST_PASS below.
+          docker run --rm --entrypoint sh eclipse-mosquitto:2 \
+            -c 'mosquitto_passwd -b -c /tmp/pw taktora taktora-secret >/dev/null 2>&1 && cat /tmp/pw' \
+            | grep '^taktora:' > "$RUNNER_TEMP/mosq/mosquitto.passwd"
+          test -s "$RUNNER_TEMP/mosq/mosquitto.passwd"
+
+      - name: Generate self-signed CA + server certificate (TLS on 8883)
+        run: |
+          set -euo pipefail
+          CERTS="$RUNNER_TEMP/certs"; mkdir -p "$CERTS"
+          openssl req -x509 -new -nodes -newkey rsa:2048 \
+            -keyout "$CERTS/ca.key" -out "$CERTS/ca.crt" -days 3650 \
+            -subj "/CN=taktora-test-ca"
+          openssl req -new -nodes -newkey rsa:2048 \
+            -keyout "$CERTS/server.key" -out "$CERTS/server.csr" \
+            -subj "/CN=localhost"
+          printf 'subjectAltName = DNS:localhost, IP:127.0.0.1\n' > "$CERTS/san.ext"
+          openssl x509 -req -in "$CERTS/server.csr" \
+            -CA "$CERTS/ca.crt" -CAkey "$CERTS/ca.key" -CAcreateserial \
+            -out "$CERTS/server.crt" -days 3650 -extfile "$CERTS/san.ext"
+          # The mosquitto container runs as uid 1883; make the test-only key
+          # world-readable so the broker can load it. The private key is
+          # generated here and never leaves the runner.
+          chmod 644 "$CERTS"/*.key "$CERTS"/*.crt
+
+      - name: Write mosquitto.conf (plain 1883 + auth + TLS 8883)
+        run: |
+          set -euo pipefail
+          # Mount targets are fixed by namoshek/mosquitto-github-action:
+          #   password-file -> /mosquitto/config/mosquitto.passwd
+          #   certificates  -> /mosquitto-certs
+          cat > "$RUNNER_TEMP/mosq/mosquitto.conf" <<'EOF'
+          listener 1883 0.0.0.0
+          allow_anonymous true
+          password_file /mosquitto/config/mosquitto.passwd
+
+          listener 8883 0.0.0.0
+          allow_anonymous true
+          cafile /mosquitto-certs/ca.crt
+          certfile /mosquitto-certs/server.crt
+          keyfile /mosquitto-certs/server.key
+          EOF
+
+      - name: Start mosquitto broker
+        uses: namoshek/mosquitto-github-action@v1
+        with:
+          version: '2'
+          ports: '1883:1883 8883:8883'
+          config: ${{ runner.temp }}/mosq/mosquitto.conf
+          password-file: ${{ runner.temp }}/mosq/mosquitto.passwd
+          certificates: ${{ runner.temp }}/certs
+
+      - name: Run MQTT broker integration tests (rumqttc-integration + tls)
+        env:
+          MQTT_TEST_BROKER: localhost
+          MQTT_TEST_USER: taktora
+          MQTT_TEST_PASS: taktora-secret
+          MQTT_TEST_CA: ${{ runner.temp }}/certs/ca.crt
+        run: |
+          cargo test -p taktora-connector-mqtt-tests \
+            --features rumqttc-integration,tls \
+            --test real_broker -- --test-threads=1 --nocapture
