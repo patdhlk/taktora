@@ -38,7 +38,18 @@ mkdir -p target/llvm-cov
 cargo llvm-cov report --lcov --output-path target/llvm-cov/lcov.info \
   --ignore-filename-regex "$IGNORE_RE"
 cargo llvm-cov report --html --ignore-filename-regex "$IGNORE_RE"
-cargo llvm-cov report --ignore-filename-regex "$IGNORE_RE"
+
+# REQ_1001: gate-ready, not gating. With COVERAGE_FAIL_UNDER_LINES set
+# (e.g. "85"), the summary report exits nonzero below that line-coverage
+# floor. It runs last, so a tripped floor still leaves the lcov + HTML
+# reports above for inspection. Unset (the default, and CI today):
+# informational only.
+FAIL_UNDER=()
+if [[ -n "${COVERAGE_FAIL_UNDER_LINES:-}" ]]; then
+  FAIL_UNDER=(--fail-under-lines "$COVERAGE_FAIL_UNDER_LINES")
+fi
+cargo llvm-cov report --ignore-filename-regex "$IGNORE_RE" \
+  ${FAIL_UNDER[@]+"${FAIL_UNDER[@]}"} | tee target/llvm-cov/summary.txt
 
 echo
 echo "coverage: HTML report at target/llvm-cov/html/index.html"

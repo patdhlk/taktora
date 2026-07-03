@@ -1,0 +1,78 @@
+name: ci-coverage
+
+# Workspace line-coverage measurement (FEAT_0120, ADR_0134/ADR_0135). Runs the
+# same entrypoint as local development (scripts/coverage.sh) and publishes the
+# per-crate summary to the job summary plus the lcov + HTML reports as
+# workflow artifacts. Informational only today — no coverage floor is
+# enforced. Gate-ready by design (REQ_1001): uncommenting the
+# COVERAGE_FAIL_UNDER_LINES env below turns this job into a hard
+# line-coverage floor with no other change. main has no required status
+# checks, so skipped jobs never block a merge.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 0. Classify the diff — README-only / spec-only PRs skip the measurement.
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: ./scripts/classify-changes.sh
+
+  coverage:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    # Gate-ready (REQ_1001): set a line-coverage floor here to make this job
+    # a hard gate. Baseline at introduction (2026-07-03) was 87.7%.
+    # env:
+    #   COVERAGE_FAIL_UNDER_LINES: "85"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: Measure coverage
+        run: ./scripts/coverage.sh
+      - name: Publish per-crate summary to job summary
+        # Runs even when a (future) coverage floor trips, so the numbers that
+        # tripped it are visible without downloading artifacts.
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f target/llvm-cov/summary.txt ]; then
+            {
+              echo '## Workspace line coverage'
+              echo '```'
+              cat target/llvm-cov/summary.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload lcov + HTML reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            target/llvm-cov/lcov.info
+            target/llvm-cov/html
+          if-no-files-found: ignore

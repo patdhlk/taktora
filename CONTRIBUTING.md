@@ -86,7 +86,10 @@ One instrumented `--all-features` test run (same serial-test discipline
 as above), reported three ways: a per-crate summary on the terminal, an
 HTML report at `target/llvm-cov/html/index.html`, and an lcov trace at
 `target/llvm-cov/lcov.info`. Generated sources and `xtask` are excluded
-from the denominator. Spec: `FEAT_0120` / `ADR_0134`.
+from the denominator. CI runs the same script on code-changing PRs
+(`ci-coverage.yml`) and publishes the summary plus both reports —
+informational only, no coverage floor is enforced. Spec: `FEAT_0120` /
+`ADR_0134` / `ADR_0135`.
 
 ## Coding conventions
 

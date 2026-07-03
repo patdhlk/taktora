@@ -6,7 +6,7 @@ coverage is a repeatable verification artifact rather than a one-off number.
 
 .. feat:: Workspace test-coverage measurement
    :id: FEAT_0120
-   :status: draft
+   :status: open
 
    **Motivation.** No coverage measurement exists in the repository today —
    no tool, no script, no CI job. For a project building a safety argument,
@@ -19,17 +19,21 @@ coverage is a repeatable verification artifact rather than a one-off number.
    wrapping ``cargo-llvm-cov`` (LLVM source-based instrumentation, runs on
    the pinned stable toolchain); a single ``--all-features`` measurement
    run; denominator curation (generated code and dev tooling excluded);
-   terminal, HTML, and lcov outputs; contributor documentation.
+   terminal, HTML, and lcov outputs; contributor documentation. An
+   informational CI job (``ci-coverage.yml``) runs the same entrypoint
+   and publishes the results in-repo (:need:`ADR_0135`); the gate
+   mechanism exists but no floor is enforced (:need:`REQ_1001`).
 
-   **Non-goals (deferred until a baseline exists).** CI integration
-   (runner choice, artifact upload, Codecov); coverage thresholds or
-   gates; doctest coverage (requires nightly ``-Z doctest-in-workspace``
+   **Non-goals.** Enforcing a coverage floor (the mechanism is prepared,
+   the number is a later decision against the baseline); coverage trend
+   tracking / external services (Codecov — :need:`ADR_0135`); doctest
+   coverage (requires nightly ``-Z doctest-in-workspace``
    instrumentation; the repo pins stable); per-crate coverage targets for
    the safety-relevant core (executor, connector) — a later spec question.
 
 .. req:: Coverage entrypoint script
    :id: REQ_0991
-   :status: draft
+   :status: open
    :satisfies: FEAT_0120
 
    The repository shall provide ``scripts/coverage.sh`` that measures line
@@ -37,7 +41,7 @@ coverage is a repeatable verification artifact rather than a one-off number.
 
 .. req:: All-features instrumentation
    :id: REQ_0992
-   :status: draft
+   :status: open
    :satisfies: FEAT_0120
 
    The coverage run shall compile and test the workspace with
@@ -46,7 +50,7 @@ coverage is a repeatable verification artifact rather than a one-off number.
 
 .. req:: Serial test execution
    :id: REQ_0993
-   :status: draft
+   :status: open
    :satisfies: FEAT_0120
 
    The coverage run shall pass ``--test-threads=1`` to test binaries,
@@ -55,7 +59,7 @@ coverage is a repeatable verification artifact rather than a one-off number.
 
 .. req:: Denominator excludes generated code and dev tooling
    :id: REQ_0994
-   :status: draft
+   :status: open
    :satisfies: FEAT_0120
 
    The coverage report shall exclude build-script-generated sources
@@ -65,7 +69,7 @@ coverage is a repeatable verification artifact rather than a one-off number.
 
 .. req:: Report outputs
    :id: REQ_0995
-   :status: draft
+   :status: open
    :satisfies: FEAT_0120
 
    The script shall emit a per-crate terminal summary, an HTML report,
@@ -74,7 +78,7 @@ coverage is a repeatable verification artifact rather than a one-off number.
 
 .. req:: Missing-tool diagnostic
    :id: REQ_0996
-   :status: draft
+   :status: open
    :satisfies: FEAT_0120
 
    When ``cargo-llvm-cov`` is not installed, the script shall exit
@@ -82,8 +86,46 @@ coverage is a repeatable verification artifact rather than a one-off number.
 
 .. req:: Contributor documentation
    :id: REQ_0997
-   :status: draft
+   :status: open
    :satisfies: FEAT_0120
 
    ``CONTRIBUTING.md`` shall document the coverage entrypoint, what it
    measures, and where the reports land.
+
+.. req:: CI measures coverage via the same entrypoint
+   :id: REQ_0998
+   :status: open
+   :satisfies: FEAT_0120
+
+   CI shall measure workspace coverage on code-changing pull requests and
+   pushes to ``main`` by running the same entrypoint as local development
+   (``scripts/coverage.sh``), so CI and local numbers cannot drift.
+
+.. req:: CI publishes lcov and HTML as workflow artifacts
+   :id: REQ_0999
+   :status: open
+   :satisfies: FEAT_0120
+
+   The CI coverage job shall upload the lcov trace and the HTML report as
+   workflow artifacts, including when a (future) coverage floor fails the
+   job — the reports that explain a failure must survive it.
+
+.. req:: CI publishes the per-crate summary to the job summary
+   :id: REQ_1000
+   :status: open
+   :satisfies: FEAT_0120
+
+   The CI coverage job shall write the per-crate coverage summary to the
+   GitHub job summary, so the numbers are readable without downloading
+   artifacts.
+
+.. req:: Optional line-coverage floor, unset by default
+   :id: REQ_1001
+   :status: open
+   :satisfies: FEAT_0120
+
+   The coverage entrypoint shall support an optional line-coverage floor
+   via the ``COVERAGE_FAIL_UNDER_LINES`` environment variable, exiting
+   nonzero when total line coverage falls below it. The variable shall be
+   unset by default and in CI: today the measurement is informational,
+   and enabling the gate is a one-line change, not a redesign.
