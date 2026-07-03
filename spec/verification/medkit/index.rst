@@ -107,17 +107,21 @@ they verify to ``implemented`` and link these tests.
 .. test:: A running executor drives binding liveness and timing
    :id: TEST_0913
    :status: implemented
-   :verifies: REQ_0923, REQ_0924
+   :verifies: REQ_0923, REQ_0924, REQ_0925
 
    A real ``taktora-executor`` with the binding registered as observer and
    monitor runs cyclic App items: the App entity health reflects the lifecycle
    hooks (a running App reads healthy, an erroring App degrades to ``Error``),
    and the readable ``data`` timing (execution count, EWMA, period / rate)
-   updates from ``post_execute`` and ``on_cycle_stats``.
+   updates from ``post_execute`` and ``on_cycle_stats``. Because the hooks
+   fire on the live executor's ``WaitSet`` thread while the provider reads
+   off-path, this test also stands as the verification of the bounded,
+   non-blocking hook write path (:need:`REQ_0925`) after the retirement of
+   the counting-allocator test (:need:`TEST_0914`, :need:`ADR_0133`).
 
 .. test:: Hook write path performs zero heap allocation
    :id: TEST_0914
-   :status: implemented
+   :status: rejected
    :verifies: REQ_0925
 
    The binding's hooks are driven in a steady-state loop under a counting global
@@ -125,6 +129,13 @@ they verify to ``implemented`` and link these tests.
    zero allocations per hook cycle, with a deliberate-allocation negative case
    proving the counter still observes this thread — mirroring the executor's own
    cycle-stats allocation test and holding :need:`ADR_0111`.
+
+   **Retired.** Zero-alloc test enforcement is scoped to executor and
+   connector scope pre-1.0 (:need:`ADR_0133`); the counting-global-allocator
+   harness is flake-prone (GitHub #132) and :need:`REQ_0925` no longer
+   mandates verified allocation-freedom. The test file
+   (``hook_no_alloc.rs``) is removed; the property stays true by
+   construction per :need:`ADR_0114`.
 
 .. test:: Builder and TOML manifests agree
    :id: TEST_0909

@@ -137,6 +137,53 @@ arc42 §4.
    the latest folded values, not a per-cycle trace; a richer history would need
    the ring pattern and is out of scope for this slice.
 
+.. arch-decision:: Zero-alloc test enforcement scoped to executor + connector pre-1.0
+   :id: ADR_0133
+   :status: accepted
+   :refines: ADR_0114
+   :links: REQ_0925, TEST_0914
+
+   **Context.** Allocation-freedom is asserted across the workspace by
+   counting-global-allocator differential tests (the ``TEST_0194`` pattern:
+   ``count(big) − count(small)`` under a process-wide counter). That harness
+   counts *every* thread's allocations during the tracking window, so it is
+   inherently sensitive to platform-allocator and harness noise — the class of
+   intermittent off-by-one failures documented in GitHub #132. Each such test
+   is a flake liability, and the medkit diagnostics surface had inherited one
+   (:need:`TEST_0914` for :need:`REQ_0925`) even though medkit is
+   pre-1.0 diagnostics tooling, not certified control-path code.
+
+   **Decision.** Pre-1.0, *verified* zero-allocation (a counting-allocator
+   regression test in CI) is required only where the property is load-bearing:
+   **executor scope** (the dispatch / telemetry fold on the ``WaitSet``
+   thread, :need:`REQ_0104`) and **connector scope** (the cyclic channel
+   registry path, :need:`REQ_0328`). Everywhere else — medkit first —
+   allocation-freedom may remain a *design property* (ADR_0114's per-task
+   atomic sink allocates nothing by construction) without a test enforcing
+   it: :need:`REQ_0925` is softened accordingly and :need:`TEST_0914` is
+   retired. Existing no-alloc guards outside the two mandated scopes (motion,
+   DLT logging) may stay while they are quiet, but they are regression
+   guards, not requirements, and are dropped rather than stabilised if they
+   flake.
+
+   **Alternatives considered.**
+
+   * *Harden the harness instead* (thread-scoped counting, retry-on-flake,
+     platform skips). Rejected: real engineering cost to keep a guarantee
+     medkit does not need before 1.0.0, and retries would normalise a
+     flaky-by-design gate.
+   * *Keep the mandate but mark the test* ``#[ignore]`` *on noisy platforms.*
+     Rejected: leaves the requirement claiming a verification that no longer
+     runs everywhere — a silent traceability lie.
+
+   **Consequences.** ✅ The flake class leaves the medkit suite; CI
+   signal-to-noise improves without touching the binding's design. ✅ The
+   enforcement boundary is now explicit and citable for future subsystems
+   (new no-alloc tests need an executor- or connector-scope justification).
+   ❌ An allocation regression introduced into the medkit hook write path is
+   no longer caught by CI; re-verifying :need:`REQ_0925` (with a
+   thread-scoped harness) is deferred to the 1.0 hardening pass.
+
 .. arch-decision:: Mandatory grouping manifest, applied in the merge pipeline
    :id: ADR_0113
    :status: accepted
