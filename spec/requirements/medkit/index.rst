@@ -189,19 +189,24 @@ Requirements
    without it. The read path shall run on the gateway's own runtime, off the
    control path.
 
-.. req:: Allocation-free, non-blocking hook write path
+.. req:: Non-blocking, bounded hook write path
    :id: REQ_0925
    :status: implemented
    :satisfies: FEAT_0100
-   :links: BB_0108, TEST_0914
+   :links: BB_0108, TEST_0913
 
    The hooks run on the executor ``WaitSet`` thread inside the bounded-time
-   control path, so the write path shall perform **no heap allocation** and
-   shall take **no lock** that could contend the control path. It shall write
-   into a bounded, pre-allocated, single-producer / single-consumer structure
-   (per-task atomics) so a stalled or slow diagnostics reader can never perturb
-   the machine, holding the freedom-from-interference contract of
-   :need:`ADR_0111` (see :need:`ADR_0114`).
+   control path, so the write path shall take **no lock** that could contend
+   the control path and shall write into a bounded, pre-allocated,
+   single-producer / single-consumer structure (per-task atomics) so a
+   stalled or slow diagnostics reader can never perturb the machine, holding
+   the freedom-from-interference contract of :need:`ADR_0111` (see
+   :need:`ADR_0114`). Heap-allocation-freedom remains the design intent —
+   ADR_0114's per-task atomic sink allocates nothing by construction — but
+   is **not a verified requirement pre-1.0**: zero-alloc test enforcement is
+   scoped to executor and connector scope (:need:`ADR_0133`), and the
+   counting-allocator test formerly holding this clause (:need:`TEST_0914`)
+   is retired.
 
 .. req:: Mandatory Area/Component grouping manifest
    :id: REQ_0920
