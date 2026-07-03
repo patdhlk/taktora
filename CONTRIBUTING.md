@@ -74,6 +74,20 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 typos
 ```
 
+### Test coverage
+
+```bash
+# Measure workspace line coverage (needs cargo-llvm-cov:
+# `cargo install cargo-llvm-cov --locked`).
+scripts/coverage.sh
+```
+
+One instrumented `--all-features` test run (same serial-test discipline
+as above), reported three ways: a per-crate summary on the terminal, an
+HTML report at `target/llvm-cov/html/index.html`, and an lcov trace at
+`target/llvm-cov/lcov.info`. Generated sources and `xtask` are excluded
+from the denominator. Spec: `FEAT_0120` / `ADR_0134`.
+
 ## Coding conventions
 
 - Workspace edition 2024, MSRV 1.85.
