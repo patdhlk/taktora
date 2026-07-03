@@ -485,6 +485,49 @@ pub struct GenericError {
     pub parameters: BTreeMap<String, String>,
 }
 
+/// Source identity of the running binary, reported under `vendor_info` in the
+/// version catalogue (`GET /api/v1/version-info`, [`REQ_0990`]).
+///
+/// This is the wire DTO; the values are captured at build time by the
+/// `taktora-build-info` crate and injected into the gateway by the binary, so
+/// the extractable core owns the shape without depending on the capture crate
+/// (`ADR_0132`). [`BuildInfo::default`] is the honest all-`"unknown"` value a
+/// binary that injects nothing reports.
+///
+/// [`REQ_0990`]: https://taktora.dev/requirements/medkit/index.html
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuildInfo {
+    /// Full 40-hex git commit hash, or `"unknown"`.
+    pub git_sha: String,
+    /// Abbreviated git commit hash, or `"unknown"`.
+    pub git_short: String,
+    /// `git describe` string (nearest tag + distance, or the short hash when
+    /// untagged), or `"unknown"`.
+    pub git_describe: String,
+    /// Whether the worktree had uncommitted changes at build time.
+    pub git_dirty: bool,
+    /// Build time as a UTC RFC3339 instant, or `"unknown"`.
+    pub build_timestamp: String,
+    /// `rustc --version` of the compiler that built the binary, or `"unknown"`.
+    pub rustc_version: String,
+}
+
+impl Default for BuildInfo {
+    /// All-`"unknown"` identity: what a binary that injects no build info, or a
+    /// build with no git metadata, honestly reports.
+    fn default() -> Self {
+        let unknown = || "unknown".to_owned();
+        Self {
+            git_sha: unknown(),
+            git_short: unknown(),
+            git_describe: unknown(),
+            git_dirty: false,
+            build_timestamp: unknown(),
+            rustc_version: unknown(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -677,5 +720,24 @@ mod tests {
             );
         }
         assert_eq!(Severity::from_wire_value(9), None);
+    }
+
+    #[test]
+    fn build_info_default_is_all_unknown() {
+        // The honest fallback (`REQ_0990`): a binary that injects no build
+        // identity, or a build with no `.git`, reports `"unknown"` everywhere
+        // and a clean tree, never an empty string or a panic.
+        let info = BuildInfo::default();
+        assert_eq!(info.git_sha, "unknown");
+        assert_eq!(info.git_short, "unknown");
+        assert_eq!(info.git_describe, "unknown");
+        assert_eq!(info.build_timestamp, "unknown");
+        assert_eq!(info.rustc_version, "unknown");
+        assert!(!info.git_dirty);
+
+        // Serializes with a JSON boolean `git_dirty`, not a string.
+        let json = serde_json::to_value(&info).expect("serialize BuildInfo");
+        assert_eq!(json["git_dirty"], Value::Bool(false));
+        assert_eq!(json["git_sha"], Value::String("unknown".to_owned()));
     }
 }

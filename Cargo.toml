@@ -58,6 +58,7 @@ members = [
     "crates/taktora-replay",
     "crates/taktora-stats",
     "crates/taktora-telemetry-export",
+    "crates/taktora-build-info",
     "crates/taktora-medkit-model",
     "crates/taktora-medkit-manifest",
     "crates/taktora-medkit-provider",
@@ -129,6 +130,7 @@ taktora-motion-proto             = { path = "crates/taktora-motion-proto", versi
 taktora-motion                   = { path = "crates/taktora-motion", version = "0.1.5" }
 taktora-stats                    = { path = "crates/taktora-stats", version = "0.1.6" }
 taktora-telemetry-export         = { path = "crates/taktora-telemetry-export", version = "0.1.0" }
+taktora-build-info               = { path = "crates/taktora-build-info", version = "0.1.0" }
 taktora-medkit-model             = { path = "crates/taktora-medkit-model", version = "0.2.0" }
 taktora-medkit-manifest          = { path = "crates/taktora-medkit-manifest", version = "0.1.0" }
 taktora-medkit-provider          = { path = "crates/taktora-medkit-provider", version = "0.2.0" }

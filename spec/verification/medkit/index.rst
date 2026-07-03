@@ -530,3 +530,18 @@ they verify to ``implemented`` and link these tests.
    entity-scoped ``href``, the flat per-sub-resource href keys, and the
    ``_links`` self/collection; ``GET /functions/{id}`` exposes the narrower
    function set (no ``locks``/``status``).
+
+.. test:: Build identity in the version catalogue
+   :id: TEST_0956
+   :status: implemented
+   :verifies: REQ_0990
+
+   Two checks. (1) Over a live gateway with an injected ``BuildInfo``,
+   ``GET /api/v1/version-info`` carries under ``vendor_info`` the string fields
+   ``git_sha``, ``git_short``, ``git_describe``, ``build_timestamp``, and
+   ``rustc_version`` plus a boolean ``git_dirty``, each typed as specified, with
+   the existing ``version`` unchanged; ``TEST_0906``'s golden shape-match still
+   passes, since the fields are additive under ``vendor_info``. (2) A
+   ``BuildInfo`` captured with git metadata absent yields ``"unknown"`` for every
+   git-derived field and ``false`` for ``git_dirty`` without panicking, holding
+   the no-``.git`` fallback of :need:`REQ_0990`.

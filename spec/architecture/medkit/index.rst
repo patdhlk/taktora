@@ -575,6 +575,49 @@ arc42 §4.
    at connect (live-refresh is a future refinement). ❌ Telemetry/log values are
    still simulation-sourced until a real binding lands (:need:`ADR_0126`).
 
+.. arch-decision:: Compile-time build identity, captured in a leaf crate and injected as data
+   :id: ADR_0132
+   :status: accepted
+   :links: REQ_0990
+
+   **Context.** The version catalogue reported only the crate semver
+   (``CARGO_PKG_VERSION`` baked at compile time). A field issue could not be tied
+   back to the exact source a binary was built from — there was no commit, no
+   dirty state, no build time on the wire. Two questions: where the identity
+   comes from, and how it reaches the surface without breaching the
+   extractable-core invariant (:need:`REQ_0916`, :need:`ADR_0111`), under which
+   the ``model`` / ``provider`` / ``gateway`` / ``gateway-axum`` crates carry no
+   edge out to a non-medkit ``taktora-*`` crate.
+
+   **Decision.** Capture at **compile time**, not runtime. A leaf
+   ``taktora-build-info`` crate whose hand-rolled ``build.rs`` (zero
+   dependencies) shells ``git rev-parse`` / ``git describe`` /
+   ``git status --porcelain`` and records the UTC build timestamp and ``rustc``
+   version, emitting them as ``cargo:rustc-env`` constants its ``lib.rs`` reads
+   back into a ``BuildInfo``. Identity travels *with* the binary, so a deployed
+   device names its commit with no runtime configuration and no way to lie by
+   misconfiguration. A failing git command degrades that field to ``"unknown"``
+   rather than failing the build, so a build from a published crates.io tarball
+   (no ``.git``) still compiles. Reach the surface by **injection, not
+   dependency**: the ``BuildInfo`` DTO lives in ``taktora-medkit-model``
+   (defaulting to all-``"unknown"``), ``version_info_document`` renders a
+   ``&BuildInfo`` under ``vendor_info``, and the application binary — outside the
+   extractable core — calls ``taktora_build_info::capture()`` and wires it into
+   the ``gateway-axum`` router builder. Build identity thus flows through the
+   same injected-seam pattern as ``Provider`` / ``ActionSink`` / ``Manifest``.
+
+   **Consequences.** ✅ A running binary reports its exact commit, dirty state,
+   and build time; a field issue traces to source. ✅ The extractable core keeps
+   zero edge to ``taktora-build-info`` (only binaries and examples depend on it),
+   so the diagnostics folder still lifts out cleanly, and the capture crate is
+   reusable by any taktora binary, not just medkit. ✅ The fields are additive
+   under ``vendor_info``, so a ``ros2_medkit`` client reads ``/version-info``
+   unchanged (:need:`REQ_0911`). ❌ The ``git_dirty`` flag reflects the tree at
+   the last ``build-info`` recompile, not necessarily every rebuild; CI and
+   release artefacts are clean rebuilds, so it is accurate on the binaries that
+   actually ship. ❌ A binary that forgets to inject reports an honest
+   ``"unknown"`` rather than failing loudly — the default is safe, not noisy.
+
 Building block view
 -------------------
 
@@ -814,6 +857,31 @@ provider seam.
    infrastructure), and the enriched ``entity_detail`` catalogue driven by a
    per-kind relation/segment source shared with the router. Off the control path;
    no taktora-runtime edge.
+
+.. building-block:: Build identity — capture crate + injection seam
+   :id: BB_0123
+   :status: open
+   :implements: REQ_0990
+
+   A leaf ``publish = false`` crate ``taktora-build-info`` plus the seam that
+   carries its output into the read surface without an edge into the extractable
+   core (:need:`ADR_0132`). ``taktora-build-info``'s hand-rolled ``build.rs``
+   (zero dependencies) shells ``git rev-parse HEAD`` / ``--short HEAD``,
+   ``git describe --tags --always``, and ``git status --porcelain`` (→ dirty
+   flag), records the UTC build timestamp and ``rustc --version``, and emits each
+   as a ``cargo:rustc-env=TAKTORA_BUILD_*`` value, with ``cargo:rerun-if-changed``
+   on ``.git/HEAD`` and the resolved ref so a rebuild after a new commit
+   re-captures the hash instead of keeping a stale one; any failing git command
+   yields ``"unknown"``. Its ``lib.rs`` reads the values back through ``env!``
+   into a ``capture() -> BuildInfo``. The ``BuildInfo`` DTO lives in
+   ``taktora-medkit-model`` (all-``"unknown"`` default), so the core owns the
+   shape; ``taktora-medkit-gateway``'s ``version_info_document`` takes a
+   ``&BuildInfo`` and renders it under ``vendor_info``; and
+   ``taktora-medkit-gateway-axum`` threads it through the router builder
+   (``with_build_info``), defaulting to the unknown ``BuildInfo``. Only the
+   application binary and examples depend on ``taktora-build-info`` and call
+   ``capture()`` to inject — the core keeps zero edge to it, holding the
+   extractable-core invariant (:need:`REQ_0916`).
 
 .. architecture:: medkit crate decomposition
    :id: ARCH_0080

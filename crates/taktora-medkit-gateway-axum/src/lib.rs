@@ -51,7 +51,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use taktora_medkit_gateway::view::{API_BASE, root_document, version_info_document};
 use taktora_medkit_gateway::{FaultStatusFilter, Gateway, MergedView, collection_segment};
-use taktora_medkit_model::EntityKind;
+use taktora_medkit_model::{BuildInfo, EntityKind};
 use taktora_medkit_provider::{ActionSink, Provider, Relation};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -342,8 +342,11 @@ fn kind_routes(kind: EntityKind, relations: &'static [Relation]) -> Router<Serve
     router
 }
 
-fn api_router() -> Router<ServerState> {
+fn api_router(build_info: &BuildInfo) -> Router<ServerState> {
     let root = get(|| async { Json(root_document()) });
+    // The injected build identity (`REQ_0990`) is static per process; clone it
+    // into the version-info handler so the route can render it without state.
+    let build_info = build_info.clone();
     Router::new()
         // The contract's canonical root is `/api/v1/` (trailing slash); accept
         // the bare prefix too.
@@ -351,7 +354,10 @@ fn api_router() -> Router<ServerState> {
         .route(&format!("{API_BASE}/"), root)
         .route(
             &format!("{API_BASE}/version-info"),
-            get(|| async { Json(version_info_document()) }),
+            get(move || {
+                let build_info = build_info.clone();
+                async move { Json(version_info_document(&build_info)) }
+            }),
         )
         .route(
             &format!("{API_BASE}/health"),
@@ -544,7 +550,9 @@ fn router_with_state(
         // (`501`) (`REQ_0968`).
         auth::auth_disabled_router(API_BASE)
     };
-    let mut app = api_router().with_state(state).merge(auth_routes);
+    let mut app = api_router(&config.build_info)
+        .with_state(state)
+        .merge(auth_routes);
 
     if let Some(layer) = cors_layer(&config.cors) {
         app = app.layer(layer);

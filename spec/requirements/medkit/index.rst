@@ -613,7 +613,7 @@ Write plane — operations (simulation-backed)
 --------------------------------------------
 
 The first write family, built on a command-side seam that mirrors the read
-[`Provider`] seam. v1 is backed by an in-memory simulation that performs **no
+``Provider`` seam. v1 is backed by an in-memory simulation that performs **no
 real effect**, so it touches no safety-critical resource and the write-surface
 safety gate (:need:`ADR_0119`) is not yet engaged; the gate re-enters at the
 seam when a real-effect binding lands (:need:`ADR_0126`).
@@ -779,6 +779,34 @@ single-entity catalogue), brought to contract fidelity (:need:`ADR_0127`).
    shall match the captured ``*_get.json`` goldens for apps/components/functions
    and be derived from the mounted surface for areas, driven by a single per-kind
    relation/segment source so routes and links cannot drift.
+
+Build identity
+--------------
+
+The read surface advertised only the crate semver, so a field issue could not be
+tied back to the exact source a binary was built from. This pins the *build* —
+the commit, whether the tree was clean, and when it was built — into the version
+catalogue, captured at compile time and injected as data so the extractable core
+stays dependency-clean (:need:`ADR_0132`).
+
+.. req:: Build identity in the version catalogue
+   :id: REQ_0990
+   :status: implemented
+   :satisfies: FEAT_0100
+   :links: BB_0123, ADR_0132, TEST_0956
+
+   The ``GET /api/v1/version-info`` document shall report, under ``vendor_info``,
+   the identity of the source the binary was built from: the full and short git
+   commit hash, a working-tree dirty flag, a ``git describe`` string (nearest tag
+   plus distance, or the short hash when untagged), the build timestamp (UTC,
+   RFC3339), and the ``rustc`` version — alongside the existing crate ``version``.
+   The identity shall be captured at build time and travel with the binary, so a
+   deployed device reports its exact commit with no runtime configuration. When
+   git metadata is unavailable at build time — for example a build from a
+   published crates.io tarball, which carries no ``.git`` — the git-derived
+   fields shall degrade to ``"unknown"`` and the build shall not fail. The added
+   fields shall be additive under ``vendor_info`` so a client written against the
+   ros2_medkit contract (:need:`REQ_0911`) reads the document unchanged.
 
 Requirements at a glance
 ------------------------
