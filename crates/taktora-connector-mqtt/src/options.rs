@@ -24,6 +24,35 @@ pub struct Credentials {
     pub password: String,
 }
 
+/// Optional TLS configuration for the broker connection (`REQ_0256`).
+///
+/// Carries only the PEM-encoded CA certificate(s) used to validate the
+/// broker; client-certificate authentication is deferred to a follow-on
+/// spec. The bytes are stored raw (no `rustls` types) so this type — and
+/// [`MqttConnectorOptions`] — compile in the lean default build; the real
+/// session interprets them into a rumqttc TLS transport only under the
+/// `tls` cargo feature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TlsOptions {
+    ca_cert_pem: Vec<u8>,
+}
+
+impl TlsOptions {
+    /// Construct TLS options from PEM-encoded CA certificate(s).
+    #[must_use]
+    pub fn new(ca_cert_pem: impl Into<Vec<u8>>) -> Self {
+        Self {
+            ca_cert_pem: ca_cert_pem.into(),
+        }
+    }
+
+    /// The PEM-encoded CA certificate(s) validating the broker.
+    #[must_use]
+    pub fn ca_cert_pem(&self) -> &[u8] {
+        &self.ca_cert_pem
+    }
+}
+
 /// Process-wide configuration for an MQTT connector. Constructed via
 /// [`MqttConnectorOptions::builder`]; never mutated after `build`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +63,7 @@ pub struct MqttConnectorOptions {
     keep_alive: Duration,
     clean_session: bool,
     credentials: Option<Credentials>,
+    tls: Option<TlsOptions>,
     outbound_bridge_capacity: usize,
     inbound_bridge_capacity: usize,
     inbound_drop_threshold: u64,
@@ -83,6 +113,13 @@ impl MqttConnectorOptions {
     #[must_use]
     pub const fn credentials(&self) -> Option<&Credentials> {
         self.credentials.as_ref()
+    }
+
+    /// Optional TLS configuration (`REQ_0256`). Default `None` (plain TCP).
+    /// Honoured by the real session only under the `tls` cargo feature.
+    #[must_use]
+    pub const fn tls(&self) -> Option<&TlsOptions> {
+        self.tls.as_ref()
     }
 
     /// Outbound (plugin → gateway) bridge capacity (`REQ_0259`).
@@ -135,6 +172,7 @@ pub struct MqttConnectorOptionsBuilder {
     keep_alive: Duration,
     clean_session: bool,
     credentials: Option<Credentials>,
+    tls: Option<TlsOptions>,
     outbound_bridge_capacity: usize,
     inbound_bridge_capacity: usize,
     inbound_drop_threshold: u64,
@@ -154,6 +192,7 @@ impl MqttConnectorOptionsBuilder {
             keep_alive: DEFAULT_KEEP_ALIVE,
             clean_session: true,
             credentials: None,
+            tls: None,
             outbound_bridge_capacity: DEFAULT_BRIDGE_CAPACITY,
             inbound_bridge_capacity: DEFAULT_BRIDGE_CAPACITY,
             inbound_drop_threshold: 1,
@@ -205,6 +244,14 @@ impl MqttConnectorOptionsBuilder {
             username: username.into(),
             password: password.into(),
         });
+        self
+    }
+
+    /// Set the TLS configuration (`REQ_0256`). Honoured by the real session
+    /// only under the `tls` cargo feature.
+    #[must_use]
+    pub fn tls(mut self, tls: TlsOptions) -> Self {
+        self.tls = Some(tls);
         self
     }
 
@@ -262,6 +309,7 @@ impl MqttConnectorOptionsBuilder {
             keep_alive: self.keep_alive,
             clean_session: self.clean_session,
             credentials: self.credentials,
+            tls: self.tls,
             outbound_bridge_capacity: self.outbound_bridge_capacity.max(1),
             inbound_bridge_capacity: self.inbound_bridge_capacity.max(1),
             inbound_drop_threshold: self.inbound_drop_threshold.max(1),
@@ -291,6 +339,7 @@ mod tests {
         assert_eq!(o.keep_alive(), DEFAULT_KEEP_ALIVE);
         assert!(o.clean_session());
         assert!(o.credentials().is_none());
+        assert!(o.tls().is_none(), "TLS defaults to off (plain TCP)");
         assert_eq!(o.outbound_bridge_capacity(), DEFAULT_BRIDGE_CAPACITY);
         assert_eq!(o.inbound_bridge_capacity(), DEFAULT_BRIDGE_CAPACITY);
         assert_eq!(o.inbound_drop_threshold(), 1);
@@ -336,5 +385,16 @@ mod tests {
         assert_eq!(o.outbound_bridge_capacity(), 128);
         assert_eq!(o.inbound_bridge_capacity(), 256);
         assert_eq!(o.reconnect_attempt_ceiling(), 3);
+    }
+
+    #[test]
+    fn tls_options_round_trip() {
+        // REQ_0256: TLS CA material survives the builder as raw PEM bytes.
+        const CA: &[u8] = b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+        let o = MqttConnectorOptions::builder()
+            .broker_port(8883)
+            .tls(TlsOptions::new(CA))
+            .build();
+        assert_eq!(o.tls().map(TlsOptions::ca_cert_pem), Some(CA));
     }
 }

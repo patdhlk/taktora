@@ -12,6 +12,22 @@ keywords     = { workspace = true }
 categories   = { workspace = true }
 description  = "MQTT reference connector for the taktora-connector framework. Implements BB_0004 (FEAT_0036)."
 
+[features]
+default = []
+# `rumqttc-integration` pulls the real `rumqttc` MQTT client (MQTT 3.1.1)
+# and exposes `RealMqttSession` (M3, `REQ_0257`). Off by default so a plain
+# `cargo build` never pulls rumqttc's transitive stack; the always-built
+# `MockMqttSession` stays the default backend. rumqttc is taken with
+# `default-features = false` so TLS is opt-in via the `tls` feature below.
+rumqttc-integration = ["dep:rumqttc"]
+# `tls` layers rustls-backed TLS onto the real session (`REQ_0256`) by
+# enabling rumqttc's `use-rustls` transport (which pulls `rustls` 0.22 with
+# the ring crypto provider transitively — so `rustls` stays behind this
+# default-off feature and never enters the lean default build). Implies
+# `rumqttc-integration`. Client-certificate auth is deferred to a follow-on
+# spec.
+tls = ["rumqttc-integration", "rumqttc/use-rustls"]
+
 [dependencies]
 taktora-connector-core           = { workspace = true }
 taktora-connector-transport-iox  = { workspace = true }
@@ -23,6 +39,11 @@ tokio                            = { workspace = true }
 serde                            = { workspace = true, features = ["std"] }
 thiserror                        = { workspace = true }
 tracing                          = { workspace = true }
+# Protocol stack — optional, behind `rumqttc-integration` (`REQ_0257`).
+# `default-features = false` disables rumqttc's own default `use-rustls` so
+# the plain integration build stays TCP-only; the `tls` feature re-enables it
+# (which transitively pulls rustls 0.22 + ring for the TLS transport).
+rumqttc = { version = "0.24", optional = true, default-features = false }
 
 [dev-dependencies]
 proptest = { workspace = true }

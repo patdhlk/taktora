@@ -39,3 +39,6 @@ cachable = "cachable"  # Project prefers `cachable` over `cacheable`.
 
 # Prose vocabulary typos flags overzealously.
 mis      = "mis"       # Used as a prefix in hyphenated compounds like "mis-model".
+
+# MQTT vocabulary.
+mosquitto = "mosquitto"  # Eclipse Mosquitto, the MQTT broker; not a typo of "mosquito".
