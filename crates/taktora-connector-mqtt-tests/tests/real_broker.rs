@@ -46,7 +46,9 @@ struct Tick {
 
 /// The broker host, or `None` (→ skip) when `MQTT_TEST_BROKER` is unset.
 fn broker_host() -> Option<String> {
-    std::env::var("MQTT_TEST_BROKER").ok().filter(|h| !h.is_empty())
+    std::env::var("MQTT_TEST_BROKER")
+        .ok()
+        .filter(|h| !h.is_empty())
 }
 
 fn test_user() -> String {
@@ -207,8 +209,14 @@ async fn test_0256_tls_handshake_round_trip() {
         .expect("subscribe tls");
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    let routing = MqttRouting::new(MqttTopic::new("taktora/it/tls").unwrap(), MqttQos::AtLeastOnce);
-    session.publish(&routing, b"tls-ok").await.expect("publish tls");
+    let routing = MqttRouting::new(
+        MqttTopic::new("taktora/it/tls").unwrap(),
+        MqttQos::AtLeastOnce,
+    );
+    session
+        .publish(&routing, b"tls-ok")
+        .await
+        .expect("publish tls");
 
     let got = wait_for_payload(&received, Duration::from_secs(10)).await;
     assert_eq!(got, b"tls-ok", "payload survives the TLS round-trip");

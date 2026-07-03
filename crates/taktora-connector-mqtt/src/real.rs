@@ -76,7 +76,10 @@ impl Shared {
     }
 
     fn set_state(&self, state: MqttConnectionState) {
-        *self.state.write().expect("real session state lock not poisoned") = state;
+        *self
+            .state
+            .write()
+            .expect("real session state lock not poisoned") = state;
     }
 
     fn snapshot_state(&self) -> MqttConnectionState {
