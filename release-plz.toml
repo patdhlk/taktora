@@ -136,3 +136,115 @@ changelog_update      = false
 git_release_enable    = false
 git_tag_enable        = false
 publish               = false
+
+[[package]]
+name                  = "taktora-build-info"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-connector-j1939-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-connector-mqtt-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-connector-ui-adapters"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-connector-ui-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-cyclic-fieldbus-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-ethercat-esi-codegen-ethercrab-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-idl-codegen-can-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-medkit-binding-connector-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-medkit-binding-executor-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-medkit-gateway-axum-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-motion-core-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-motion-tests"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
+
+[[package]]
+name                  = "taktora-telemetry-export"
+release               = false
+changelog_update      = false
+git_release_enable    = false
+git_tag_enable        = false
+publish               = false
