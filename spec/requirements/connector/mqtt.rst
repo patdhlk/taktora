@@ -37,8 +37,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: MqttConnector implements Connector
    :id: REQ_0250
    :github: 168
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0957
 
    The connector crate shall expose ``MqttConnector<C: PayloadCodec>``
    that implements the ``Connector`` trait with
@@ -47,8 +48,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: MqttRouting carries topic, qos, retained
    :id: REQ_0251
    :github: 167
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0958
 
    The ``MqttRouting`` struct shall carry the MQTT topic name, the QoS
    level, and a retained-message flag. It shall implement the ``Routing``
@@ -57,8 +59,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: QoS 0 and 1 supported
    :id: REQ_0252
    :github: 168
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0961
 
    The connector shall support MQTT QoS levels ``AtMostOnce`` (0) and
    ``AtLeastOnce`` (1). QoS 2 is deferred to a follow-on spec.
@@ -66,8 +69,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: Retained-message publish supported
    :id: REQ_0253
    :github: 168
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0961
 
    When ``MqttRouting::retained`` is true, the connector shall publish the
    envelope payload as a retained MQTT message.
@@ -75,8 +79,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: Wildcard subscriptions supported
    :id: REQ_0254
    :github: 169
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0959, TEST_0960, TEST_0966
 
    The connector shall accept inbound subscriptions whose topic includes
    the MQTT wildcards ``+`` (single-level) and ``#`` (multi-level), and
@@ -86,8 +91,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: Username/password authentication
    :id: REQ_0255
    :github: 170
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0255
 
    The connector shall accept username and password credentials in
    ``MqttConnectorOptions`` and present them on the MQTT CONNECT packet.
@@ -95,8 +101,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: TLS is optional via cargo feature
    :id: REQ_0256
    :github: 170
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0256
 
    The connector shall provide TLS support via ``rustls`` behind a
    default-off ``tls`` cargo feature. Client-certificate authentication
@@ -105,8 +112,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: MQTT 3.1.1 baseline
    :id: REQ_0257
    :github: 170
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0257
 
    The connector shall target MQTT protocol version 3.1.1. MQTT 5.0
    features (user properties, shared subscriptions, response topic) are
@@ -115,8 +123,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: Tokio sidecar inside the gateway crate
    :id: REQ_0258
    :github: 168
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0962
 
    The MQTT gateway shall host ``rumqttc::EventLoop`` on a tokio runtime
    contained inside ``taktora-connector-mqtt``. Tokio shall not leak into
@@ -125,8 +134,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: Bridge channels are bounded
    :id: REQ_0259
    :github: 167
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0963
 
    The outbound (taktora-executor → tokio) and inbound (tokio →
    taktora-executor) bridges shall be bounded channels with configurable
@@ -135,8 +145,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: Outbound bridge saturation surfaces as BackPressure
    :id: REQ_0260
    :github: 168
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0964
 
    When the outbound bridge channel is full, ``ChannelWriter::send`` shall
    return ``ConnectorError::BackPressure`` and the connector shall report
@@ -145,8 +156,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 .. req:: Inbound bridge saturation drops frames and signals Degraded
    :id: REQ_0261
    :github: 169
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0965
 
    When the inbound bridge channel is full, the gateway shall
    (1) increment the per-channel inbound-drop counter exposed via
@@ -169,8 +181,9 @@ as health rather than repairing it in the connector (:need:`ADR_0128`).
 .. req:: Connection state maps to ConnectorHealth
    :id: REQ_0980
    :github: 169
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0968
 
    The gateway shall map the MQTT connection state onto
    ``ConnectorHealth``: a pending or backing-off connection attempt shall
@@ -179,8 +192,9 @@ as health rather than repairing it in the connector (:need:`ADR_0128`).
 .. req:: Reconnect backoff is configurable
    :id: REQ_0981
    :github: 169
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0969
 
    The connector shall expose ``rumqttc``'s reconnect backoff parameters
    through ``MqttConnectorOptions`` rather than a bespoke reconnect loop.
@@ -188,8 +202,9 @@ as health rather than repairing it in the connector (:need:`ADR_0128`).
 .. req:: Auth-rejected CONNACK transitions to Down
    :id: REQ_0982
    :github: 169
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0970
 
    When the broker returns a ``CONNACK`` with an authentication or
    authorization failure return code, the connector shall transition to
@@ -198,8 +213,9 @@ as health rather than repairing it in the connector (:need:`ADR_0128`).
 .. req:: Reconnect-attempt ceiling transitions to Down
    :id: REQ_0983
    :github: 169
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0971
 
    The connector shall transition to ``ConnectorHealth::Down`` when the
    number of consecutive failed reconnect attempts exceeds a configurable
@@ -214,8 +230,9 @@ reconnect (:need:`ADR_0130`).
 .. req:: Clean session on CONNECT
    :id: REQ_0984
    :github: 169
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0972
 
    The connector shall connect with the MQTT clean-session flag set to
    true. The flag shall be configurable via ``MqttConnectorOptions``.
@@ -223,8 +240,9 @@ reconnect (:need:`ADR_0130`).
 .. req:: SUBSCRIBE replay on reconnect
    :id: REQ_0985
    :github: 169
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0973
 
    On each reconnect ``CONNACK`` the gateway shall replay every active
    subscription from its subscription table, since the clean session
@@ -239,8 +257,9 @@ mechanism (:need:`ADR_0129`).
 .. req:: Broker subscriptions are deduplicated and reference-counted
    :id: REQ_0986
    :github: 169
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0967
 
    The gateway shall register each distinct topic filter with the broker
    at most once and reference-count the channels using it. It shall send
@@ -254,8 +273,9 @@ mechanism (:need:`ADR_0129`).
 .. req:: Inbound PUBLISH is matched locally and fanned out
    :id: REQ_0987
    :github: 169
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0960, TEST_0966
 
    The gateway shall match each inbound ``PUBLISH`` topic locally against
    all registered channel filters and deliver the message to every
@@ -267,8 +287,9 @@ Codec default
 .. req:: JsonCodec is the default codec
    :id: REQ_0988
    :github: 167
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0036
+   :links: BB_0004, TEST_0974
 
    The MQTT connector's examples and integration tests shall use
    ``JsonCodec`` as the default codec (:need:`ADR_0131`).
