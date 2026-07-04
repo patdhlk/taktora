@@ -1,0 +1,27 @@
+# Broker + app, wired together. Run the whole round-trip with:
+#
+#   docker compose up --build --abort-on-container-exit
+#
+# The app connects to the `broker` service, publishes `--ticks` Ticks, sees
+# each one echoed back by the broker (send seq=N / recv seq=N), then exits 0.
+# Tear down with `docker compose down`.
+
+services:
+  broker:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - broker
+    environment:
+      MQTT_BROKER: broker
+      MQTT_PORT: "1883"
+    # Publish 20 Ticks against the real broker, then exit.
+    command: ["--ticks", "20"]
