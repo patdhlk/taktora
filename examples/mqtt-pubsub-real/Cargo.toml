@@ -1,0 +1,48 @@
+[package]
+name        = "mqtt-pubsub-real"
+version     = "0.1.0"
+edition     = "2024"
+publish     = false
+description = "taktora integration example: executor + mqtt connector (RealMqttSession) pub/sub over a real broker"
+license     = "Apache-2.0 OR MIT"
+
+# Make this example a standalone workspace so it never accidentally joins a
+# parent Cargo workspace (e.g. when checked out under a nested directory like
+# `.claude/worktrees/...`). Each example owns its own `Cargo.lock`.
+[workspace]
+
+[dependencies]
+# NOTE: version reqs must track the CURRENT published majors — a `^0.1` req on a
+# crate whose local/published version is 0.2.x silently rejects the
+# `[patch.crates-io]` path override (examples-local.sh on becomes a no-op
+# building stale crates.io versions) and can split the dependency graph into
+# two versions of a shared crate, failing cross-crate API calls with type
+# mismatches. Same trap previously fixed in the ethercat-real-bus and
+# ethercat-wago-coupler examples.
+taktora-executor                = "0.4"
+taktora-connector-core          = "0.2"
+taktora-connector-host          = "0.1"
+taktora-connector-transport-iox = "0.1"
+taktora-connector-codec         = "0.1"
+# 0.1.0 was the M1-core-only release without `MqttConnector`; the real rumqttc
+# backend + the `rumqttc-integration` feature ship in 0.2.0.
+taktora-connector-mqtt          = { version = "0.2", features = ["rumqttc-integration"] }
+
+clap        = { version = "4", features = ["derive"] }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+tokio       = { version = "1", features = ["rt-multi-thread"] }
+
+# >>> taktora-examples-local-deps >>>
+# [patch.crates-io]
+# taktora-executor                = { path = "../../crates/taktora-executor" }
+# taktora-executor-tracing        = { path = "../../crates/taktora-executor-tracing" }
+# taktora-log                     = { path = "../../crates/taktora-log" }
+# taktora-log-dlt                 = { path = "../../crates/taktora-log-dlt" }
+# taktora-bounded-alloc           = { path = "../../crates/taktora-bounded-alloc" }
+# taktora-connector-core          = { path = "../../crates/taktora-connector-core" }
+# taktora-connector-transport-iox = { path = "../../crates/taktora-connector-transport-iox" }
+# taktora-connector-codec         = { path = "../../crates/taktora-connector-codec" }
+# taktora-connector-host          = { path = "../../crates/taktora-connector-host" }
+# taktora-connector-mqtt          = { path = "../../crates/taktora-connector-mqtt" }
+# <<< taktora-examples-local-deps <<<
