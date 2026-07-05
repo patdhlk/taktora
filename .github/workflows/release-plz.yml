@@ -87,6 +87,11 @@ jobs:
     timeout-minutes: 60         # generous - 10 crates with verify builds
     permissions:
       contents: write           # create git tags and GitHub Releases
+    # Expose which crates were released so the `sbom` job can attach a bill of
+    # materials to each one's GitHub Release.
+    outputs:
+      releases: ${{ steps.release.outputs.releases }}
+      releases_created: ${{ steps.release.outputs.releases_created }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -100,9 +105,49 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run release-plz (publish to crates.io)
+        id: release
         uses: release-plz/action@v0.5
         with:
           command: release
         env:
           GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Job 3 - generate a Software Bill of Materials per released crate and attach
+  #         it to that crate's GitHub Release.
+  #
+  # Runs only when the release job actually cut releases (i.e. the release PR was
+  # merged this push). For each released crate it emits two SBOMs scoped to that
+  # crate's own transitive dependency graph — CycloneDX 1.6 (*.cdx.json) and
+  # SPDX 2.3 (*.spdx.json) — and uploads them as release assets.
+  # ---------------------------------------------------------------------------
+  sbom:
+    name: SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: release-plz-release
+    if: needs.release-plz-release.outputs.releases_created == 'true'
+    permissions:
+      contents: write           # upload assets to the GitHub Releases
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install cargo-sbom
+        run: cargo binstall --no-confirm cargo-sbom
+
+      - name: Generate & upload per-crate SBOMs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASES: ${{ needs.release-plz-release.outputs.releases }}
+        run: ./scripts/generate-sbom.sh
