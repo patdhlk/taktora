@@ -33,7 +33,7 @@
 
 use core::time::Duration;
 use taktora_bounded_alloc::CountingAllocator;
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 
 #[global_allocator]
 static ALLOC: CountingAllocator = CountingAllocator::new();
@@ -79,7 +79,7 @@ fn cycle_stats_fold_is_zero_allocation() {
                 d.interval(Duration::from_millis(1));
                 Ok(())
             },
-            |_| Ok(ControlFlow::Continue),
+            |_| Ok(ItemFlow::Continue),
         ))
         .unwrap();
 
@@ -107,7 +107,7 @@ fn cycle_stats_fold_is_zero_allocation() {
             |_| {
                 let v: Vec<u8> = vec![1, 2, 3];
                 core::hint::black_box(&v);
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .unwrap();

@@ -88,14 +88,14 @@ artefact.
    single pool slot per invocation. ``Executor::add_graph`` builds a
    ``TaskKind::Graph`` whose vertex closures decrement successor
    in-degree counters and dispatch ready successors via the
-   ``ReadyRing``. Abort propagation: ``Ok(ControlFlow::StopChain)``
+   ``ReadyRing``. Abort propagation: ``Ok(ItemFlow::StopChain)``
    or ``Err`` in a chain breaks the iterator
    (``executor.rs::build_chain_job``); in a graph the same outcomes
    flip a ``stop_flag`` and short-circuit the subtree
    (``graph.rs::cancel_subtree``). ``wrap_with_condition(item,
    predicate)`` in ``src/condition.rs`` gates execution on a
    runtime-evaluated predicate; a ``false`` predicate returns
-   ``Ok(ControlFlow::StopChain)``.
+   ``Ok(ItemFlow::StopChain)``.
 
 .. building-block:: Deadline trigger and timing monitor
    :id: BB_0028

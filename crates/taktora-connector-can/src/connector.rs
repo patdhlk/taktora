@@ -38,7 +38,7 @@ use iceoryx2::prelude::{NodeBuilder, ipc};
 use taktora_connector_core::{ChannelDescriptor, ConnectorError, ConnectorHealth};
 use taktora_connector_host::{Connector, HealthSubscription};
 use taktora_connector_transport_iox::{ChannelReader, ChannelWriter, ServiceFactory};
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 
 use crate::dispatcher::{
     BridgedInboundPublish, DEFAULT_TX_TICK, IoxOutboundDrain, dispatcher_loop,
@@ -237,7 +237,7 @@ where
                 d.interval(tick);
                 Ok(())
             },
-            |_ctx| Ok(ControlFlow::Continue),
+            |_ctx| Ok(ItemFlow::Continue),
         );
         executor.add(heartbeat).map_err(ConnectorError::stack)?;
         Ok(())

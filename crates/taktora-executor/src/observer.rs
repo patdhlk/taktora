@@ -43,6 +43,13 @@ impl UserEvent {
 
 /// Lifecycle observer invoked by the executor at well-defined points.
 ///
+/// # Why two hooks?
+///
+/// This handles coarse, infrequent lifecycle events — executor up/down,
+/// app start/stop, faults, and user events — so its callbacks can afford
+/// to do real work. For per-`execute` timing on the dispatch hot path
+/// (which must stay cheap), use [`crate::ExecutionMonitor`] instead.
+///
 /// All methods have no-op defaults. The executor never blocks on observer
 /// callbacks — heavy work should be queued internally.
 pub trait Observer: Send + Sync {

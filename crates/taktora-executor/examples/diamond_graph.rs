@@ -1,7 +1,7 @@
 //! Diamond DAG with the root triggered every 500ms.
 
 use core::time::Duration;
-use taktora_executor::{ControlFlow, Executor, item, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item, item_with_triggers};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut exec = Executor::builder().worker_threads(4).build()?;
@@ -14,20 +14,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         |_| {
             println!("root");
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ));
     let left = g.vertex(item(|_| {
         println!("  left");
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     }));
     let right = g.vertex(item(|_| {
         println!("  right");
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     }));
     let merge = g.vertex(item(|_| {
         println!("merge");
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     }));
     g.edge(root, left);
     g.edge(root, right);

@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use taktora_executor::{
-    ControlFlow, CycleObservation, DispatchMode, Executor, MockClock, Observer, item_with_triggers,
+    CycleObservation, DispatchMode, Executor, ItemFlow, MockClock, Observer, item_with_triggers,
 };
 
 const PERIOD_NS: u64 = 10_000_000; // 10 ms nominal — matches the declared interval
@@ -82,7 +82,7 @@ fn run_with_advances(
         move |_ctx| {
             let i = n.fetch_add(1, Ordering::Relaxed);
             body_clock.advance(advances(i));
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .expect("add task");
@@ -190,7 +190,7 @@ fn each_task_anchors_lateness_on_its_own_first_dispatch() {
         },
         move |_ctx| {
             body_clock.advance(PERIOD_NS);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .expect("add task A");
@@ -200,7 +200,7 @@ fn each_task_anchors_lateness_on_its_own_first_dispatch() {
             d.interval(Duration::from_millis(20));
             Ok(())
         },
-        move |_ctx| Ok(ControlFlow::Continue),
+        move |_ctx| Ok(ItemFlow::Continue),
     ))
     .expect("add task B");
 

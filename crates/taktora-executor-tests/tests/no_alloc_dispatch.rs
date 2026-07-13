@@ -43,7 +43,7 @@
 
 use core::time::Duration;
 use taktora_bounded_alloc::CountingAllocator;
-use taktora_executor::{ControlFlow, DispatchMode, Executor, item, item_with_triggers};
+use taktora_executor::{DispatchMode, Executor, ItemFlow, item, item_with_triggers};
 
 #[global_allocator]
 static ALLOC: CountingAllocator = CountingAllocator::new();
@@ -64,10 +64,10 @@ fn trivial_chain() -> Vec<Box<dyn taktora_executor::ExecutableItem>> {
             d.interval(Duration::from_millis(1));
             Ok(())
         },
-        |_| Ok(ControlFlow::Continue),
+        |_| Ok(ItemFlow::Continue),
     );
-    let mid = item(|_| Ok(ControlFlow::Continue));
-    let tail = item(|_| Ok(ControlFlow::Continue));
+    let mid = item(|_| Ok(ItemFlow::Continue));
+    let tail = item(|_| Ok(ItemFlow::Continue));
     vec![Box::new(head), Box::new(mid), Box::new(tail)]
 }
 
@@ -149,11 +149,11 @@ fn dispatch_is_zero_allocation() {
                 d.interval(Duration::from_millis(1));
                 Ok(())
             },
-            |_| Ok(ControlFlow::Continue),
+            |_| Ok(ItemFlow::Continue),
         ));
-        let l = g.vertex(item(|_| Ok(ControlFlow::Continue)));
-        let rt = g.vertex(item(|_| Ok(ControlFlow::Continue)));
-        let m = g.vertex(item(|_| Ok(ControlFlow::Continue)));
+        let l = g.vertex(item(|_| Ok(ItemFlow::Continue)));
+        let rt = g.vertex(item(|_| Ok(ItemFlow::Continue)));
+        let m = g.vertex(item(|_| Ok(ItemFlow::Continue)));
         g.edge(r, l).edge(r, rt).edge(l, m).edge(rt, m).root(r);
         g.build().unwrap();
         let per_iter = per_iter_allocs(&mut exec);
@@ -169,7 +169,7 @@ fn dispatch_is_zero_allocation() {
                 d.interval(Duration::from_millis(1));
                 Ok(())
             },
-            |_| Ok(ControlFlow::Continue),
+            |_| Ok(ItemFlow::Continue),
         );
         exec.add(it).unwrap();
         let per_iter = per_iter_allocs(&mut exec);
@@ -197,7 +197,7 @@ fn dispatch_is_zero_allocation() {
                 d.interval(Duration::from_millis(1));
                 Ok(())
             },
-            |_| Ok(ControlFlow::Continue),
+            |_| Ok(ItemFlow::Continue),
         );
         exec.add(it).unwrap();
         let per_iter = per_iter_allocs(&mut exec);
@@ -221,7 +221,7 @@ fn dispatch_is_zero_allocation() {
             |_| {
                 let v: Vec<u8> = vec![1, 2, 3];
                 core::hint::black_box(&v);
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         );
         exec.add(head).unwrap();

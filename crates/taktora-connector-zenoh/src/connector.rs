@@ -257,7 +257,7 @@ where
 use taktora_connector_core::{ChannelDescriptor, ConnectorHealth};
 use taktora_connector_host::{Connector, HealthSubscription};
 use taktora_connector_transport_iox::{ChannelReader, ChannelWriter};
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 
 use crate::dispatcher::{
     BridgedCorrelatedPublish, BridgedInboundPublish, IoxOutboundDrain, dispatcher_loop,
@@ -386,7 +386,7 @@ where
                 d.interval(tick);
                 Ok(())
             },
-            |_ctx| Ok(ControlFlow::Continue),
+            |_ctx| Ok(ItemFlow::Continue),
         );
         executor.add(heartbeat).map_err(ConnectorError::stack)?;
         Ok(())

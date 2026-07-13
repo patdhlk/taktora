@@ -38,7 +38,7 @@ equivalent of a PLC cause-effect network.
    :satisfies: FEAT_0013
    :links: BB_0027, TEST_0116
 
-   An item returning ``Ok(ControlFlow::StopChain)`` or ``Err`` shall
+   An item returning ``Ok(ItemFlow::StopChain)`` or ``Err`` shall
    prevent any downstream items in its enclosing chain or DAG from being
    dispatched within the same triggering cycle.
 

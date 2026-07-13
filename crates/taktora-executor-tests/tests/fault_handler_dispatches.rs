@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ExecuteResult, Executor, ExecutorError, ItemFlow, item_with_triggers};
 
 #[test]
 fn fault_handler_dispatches_in_place_of_main() {
@@ -31,14 +31,14 @@ fn fault_handler_dispatches_in_place_of_main() {
                 move |_ctx| -> ExecuteResult {
                     main_calls_for_item.fetch_add(1, Ordering::SeqCst);
                     std::thread::sleep(Duration::from_millis(3));
-                    Ok(ControlFlow::Continue)
+                    Ok(ItemFlow::Continue)
                 },
             ),
             item_with_triggers(
                 |_d| -> Result<(), ExecutorError> { Ok(()) },
                 move |_ctx| -> ExecuteResult {
                     handler_calls_for_item.fetch_add(1, Ordering::SeqCst);
-                    Ok(ControlFlow::Continue)
+                    Ok(ItemFlow::Continue)
                 },
             ),
         )

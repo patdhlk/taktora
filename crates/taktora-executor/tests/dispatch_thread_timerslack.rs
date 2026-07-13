@@ -16,7 +16,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 
 #[test]
 fn dispatch_thread_runs_with_one_microsecond_timer_slack() {
@@ -44,7 +44,7 @@ fn dispatch_thread_runs_with_one_microsecond_timer_slack() {
                 raw.trim().parse().expect("parse timerslack_ns"),
                 Ordering::SeqCst,
             );
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();

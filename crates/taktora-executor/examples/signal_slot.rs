@@ -1,7 +1,7 @@
 //! Signal/slot pair triggered on an interval.
 
 use core::time::Duration;
-use taktora_executor::{ControlFlow, Executor, item_with_triggers, signal_slot};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers, signal_slot};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut exec = Executor::builder().worker_threads(2).build()?;
@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             d.interval(Duration::from_millis(300));
             Ok(())
         },
-        |_| Ok(ControlFlow::Continue),
+        |_| Ok(ItemFlow::Continue),
     );
     let signal = signal.before_send(|n: &mut u32| {
         *n += 1;

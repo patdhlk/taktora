@@ -3,7 +3,7 @@
 use core::time::Duration;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use taktora_executor::{ControlFlow, Executor, item, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item, item_with_triggers};
 
 #[test]
 fn chain_runs_items_in_order() {
@@ -18,19 +18,19 @@ fn chain_runs_items_in_order() {
         },
         move |_| {
             l1.lock().unwrap().push(1);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     );
 
     let l2 = Arc::clone(&log);
     let mid = item(move |_| {
         l2.lock().unwrap().push(2);
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     });
     let l3 = Arc::clone(&log);
     let tail = item(move |_| {
         l3.lock().unwrap().push(3);
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     });
 
     let chain: Vec<Box<dyn taktora_executor::ExecutableItem>> =
@@ -55,13 +55,13 @@ fn stop_chain_aborts_remaining_items() {
         },
         move |_| {
             c1.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::StopChain)
+            Ok(ItemFlow::StopChain)
         },
     );
     let c2 = Arc::clone(&counter);
     let tail = item(move |_| {
         c2.fetch_add(1, Ordering::SeqCst);
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     });
 
     let chain: Vec<Box<dyn taktora_executor::ExecutableItem>> =
@@ -84,14 +84,14 @@ fn err_in_middle_propagates_and_stops() {
             d.interval(Duration::from_millis(10));
             Ok(())
         },
-        |_| Ok(ControlFlow::Continue),
+        |_| Ok(ItemFlow::Continue),
     );
     let mid = item(|_| Err(Box::new(std::io::Error::other("mid-err"))));
     let tail_seen = Arc::new(AtomicU32::new(0));
     let t = Arc::clone(&tail_seen);
     let tail = item(move |_| {
         t.fetch_add(1, Ordering::SeqCst);
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     });
 
     let chain: Vec<Box<dyn taktora_executor::ExecutableItem>> =

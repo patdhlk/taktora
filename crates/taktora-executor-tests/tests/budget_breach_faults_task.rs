@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use taktora_executor::{
-    ControlFlow, ExecuteResult, Executor, ExecutorError, FaultReason, FaultState, Observer, TaskId,
+    ExecuteResult, Executor, ExecutorError, FaultReason, FaultState, ItemFlow, Observer, TaskId,
     item_with_triggers,
 };
 
@@ -45,7 +45,7 @@ fn budget_breach_faults_task_and_halts_dispatch() {
             move |_ctx| -> ExecuteResult {
                 call_count_for_item.fetch_add(1, Ordering::SeqCst);
                 std::thread::sleep(Duration::from_millis(3));
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add");

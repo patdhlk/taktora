@@ -3,7 +3,7 @@
 
 use core::time::Duration;
 use iceoryx2::prelude::*;
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 
 #[derive(Debug, Default, Clone, Copy, ZeroCopySend)]
 #[repr(C)]
@@ -35,7 +35,7 @@ impl taktora_executor::ExecutableItem for Consumer {
         {
             println!("got {}", s.payload().0);
         }
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     }
 }
 
@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .send_copy(Count(n))
                 .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
             n += 1;
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 

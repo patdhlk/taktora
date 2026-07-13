@@ -2,7 +2,7 @@
 
 use core::time::Duration;
 use std::sync::Arc;
-use taktora_executor::{ControlFlow, Executor, Observer, UserEvent, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, Observer, UserEvent, item_with_triggers};
 use taktora_executor_tracing::TracingObserver;
 
 #[test]
@@ -26,7 +26,7 @@ fn tracing_observer_runs_without_panic() {
             },
             |ctx| {
                 ctx.send_event(UserEvent::new(1, 7).with_string("hi"));
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .unwrap();

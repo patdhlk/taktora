@@ -5,6 +5,14 @@ use core::time::Duration;
 use std::time::Instant;
 
 /// Hook invoked before and after every `execute` call. Defaults are no-ops.
+///
+/// # Why two hooks?
+///
+/// This is the per-`execute` timing hook: it fires on the dispatch hot
+/// path around every single item invocation, so implementations must stay
+/// cheap. For coarse lifecycle events (executor up/down, app start/stop,
+/// faults, user events) — which fire rarely and can afford more work —
+/// use [`crate::Observer`] instead.
 pub trait ExecutionMonitor: Send + Sync {
     /// Called immediately before an item's `execute()` is invoked.
     fn pre_execute(&self, _task: TaskId, _at: Instant) {}

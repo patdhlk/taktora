@@ -14,7 +14,6 @@
 //!   [`ExecutionMonitor`].
 //!
 //! See the workspace `README.md` for a quick-start.
-#![doc(html_root_url = "https://docs.rs/taktora-executor/0.1.0")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod attachment_map;
@@ -52,7 +51,7 @@ pub use channel::{Channel, EVENT_SUFFIX, NotifyOutcome, Publisher, Subscriber};
 pub use clock::{MockClock, MonotonicClock, SystemClock};
 pub use condition::{Conditional, wrap_with_condition};
 pub use context::{Context, Stoppable};
-pub use control_flow::{ControlFlow, ExecuteResult};
+pub use control_flow::{ExecuteResult, ItemFlow};
 pub use error::{ExecutorError, ItemError};
 pub use executor::{Executor, ExecutorBuilder, ExecutorGraphBuilder};
 pub use fatal::{FatalContext, FatalHandler, FatalSite};

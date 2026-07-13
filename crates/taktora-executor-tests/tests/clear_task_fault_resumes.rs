@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use taktora_executor::{
-    ControlFlow, ExecuteResult, Executor, ExecutorError, FaultReason, Observer, TaskId,
+    ExecuteResult, Executor, ExecutorError, FaultReason, ItemFlow, Observer, TaskId,
     item_with_triggers,
 };
 
@@ -46,7 +46,7 @@ fn clear_task_fault_resumes_dispatch() {
             move |_ctx| -> ExecuteResult {
                 calls_for_item.fetch_add(1, Ordering::SeqCst);
                 std::thread::sleep(Duration::from_millis(3));
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add");

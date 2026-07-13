@@ -38,7 +38,7 @@ pub(crate) struct Graph {
     pending: AtomicUsize,
     /// Stop request observed during this run.
     stop_flag: AtomicBool,
-    /// `ControlFlow::StopChain` observed during this run.
+    /// `ItemFlow::StopChain` observed during this run.
     stop_chain_seen: AtomicBool,
     /// First per-vertex error observed during this run.
     first_err: Mutex<Option<crate::error::ItemError>>,
@@ -465,8 +465,8 @@ impl Graph {
                     observer.on_app_stop(task_id.clone());
                 }
                 match &res {
-                    Ok(crate::ControlFlow::Continue) => {}
-                    Ok(crate::ControlFlow::StopChain) => {
+                    Ok(crate::ItemFlow::Continue) => {}
+                    Ok(crate::ItemFlow::StopChain) => {
                         g.stop_chain_seen.store(true, Ordering::Release);
                         g.stop_flag.store(true, Ordering::Release);
                     }
@@ -615,7 +615,7 @@ impl Graph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ControlFlow, item};
+    use crate::{ItemFlow, item};
 
     #[test]
     fn empty_graph_rejected() {
@@ -627,7 +627,7 @@ mod tests {
     #[test]
     fn missing_root_rejected() {
         let mut b = GraphBuilder::new();
-        b.vertex(item(|_| Ok(ControlFlow::Continue)));
+        b.vertex(item(|_| Ok(ItemFlow::Continue)));
         let err = b.finish().expect_err("missing root");
         assert!(format!("{err}").contains("no root"));
     }
@@ -635,8 +635,8 @@ mod tests {
     #[test]
     fn cycle_rejected() {
         let mut b = GraphBuilder::new();
-        let a = b.vertex(item(|_| Ok(ControlFlow::Continue)));
-        let v = b.vertex(item(|_| Ok(ControlFlow::Continue)));
+        let a = b.vertex(item(|_| Ok(ItemFlow::Continue)));
+        let v = b.vertex(item(|_| Ok(ItemFlow::Continue)));
         b.edge(a, v).edge(v, a).root(a);
         let err = b.finish().expect_err("cycle");
         assert!(format!("{err}").contains("cycle"));
@@ -645,8 +645,8 @@ mod tests {
     #[test]
     fn unreachable_vertex_rejected() {
         let mut b = GraphBuilder::new();
-        let a = b.vertex(item(|_| Ok(ControlFlow::Continue)));
-        let _orphan = b.vertex(item(|_| Ok(ControlFlow::Continue)));
+        let a = b.vertex(item(|_| Ok(ItemFlow::Continue)));
+        let _orphan = b.vertex(item(|_| Ok(ItemFlow::Continue)));
         b.root(a);
         let err = b.finish().expect_err("unreachable");
         assert!(format!("{err}").contains("reachable"));
@@ -656,10 +656,10 @@ mod tests {
     #[allow(clippy::many_single_char_names)]
     fn diamond_graph_builds() {
         let mut b = GraphBuilder::new();
-        let r = b.vertex(item(|_| Ok(ControlFlow::Continue)));
-        let l = b.vertex(item(|_| Ok(ControlFlow::Continue)));
-        let rt = b.vertex(item(|_| Ok(ControlFlow::Continue)));
-        let m = b.vertex(item(|_| Ok(ControlFlow::Continue)));
+        let r = b.vertex(item(|_| Ok(ItemFlow::Continue)));
+        let l = b.vertex(item(|_| Ok(ItemFlow::Continue)));
+        let rt = b.vertex(item(|_| Ok(ItemFlow::Continue)));
+        let m = b.vertex(item(|_| Ok(ItemFlow::Continue)));
         b.edge(r, l).edge(r, rt).edge(l, m).edge(rt, m).root(r);
         let g = b.finish().expect("diamond");
         assert_eq!(g.successors[r.0], vec![l.0, rt.0]);

@@ -38,7 +38,7 @@ use taktora_connector_host::{Connector, HealthSubscription};
 use taktora_connector_transport_iox::{
     ChannelReader, ChannelWriter, ServiceFactory, SliceChannelReader, SliceChannelWriter,
 };
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 
 use crate::addr_claim::ClaimGate;
 use crate::dispatcher::{DEFAULT_TX_TICK, dispatcher_loop};
@@ -365,7 +365,7 @@ where
                 d.interval(tick);
                 Ok(())
             },
-            |_ctx| Ok(ControlFlow::Continue),
+            |_ctx| Ok(ItemFlow::Continue),
         );
         executor.add(heartbeat).map_err(ConnectorError::stack)?;
         Ok(())

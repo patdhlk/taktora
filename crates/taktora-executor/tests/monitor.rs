@@ -4,7 +4,7 @@ use core::time::Duration;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use taktora_executor::{ControlFlow, ExecutionMonitor, Executor, TaskId, item_with_triggers};
+use taktora_executor::{ExecutionMonitor, Executor, ItemFlow, TaskId, item_with_triggers};
 
 #[derive(Default)]
 struct RecordingMonitor {
@@ -37,7 +37,7 @@ fn monitor_brackets_each_execute() {
             d.interval(Duration::from_millis(10));
             Ok(())
         },
-        |_| Ok(ControlFlow::Continue),
+        |_| Ok(ItemFlow::Continue),
     ))
     .unwrap();
 

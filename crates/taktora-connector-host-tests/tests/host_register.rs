@@ -16,7 +16,7 @@ use taktora_connector_core::{
 };
 use taktora_connector_host::{Connector, ConnectorHost, HealthSubscription};
 use taktora_connector_transport_iox::{ChannelReader, ChannelWriter};
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 
 #[derive(Clone, Debug)]
 struct EchoRouting;
@@ -77,7 +77,7 @@ impl Connector for EchoConnector {
             },
             move |_ctx| {
                 state.ticks.fetch_add(1, Ordering::SeqCst);
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         );
         executor.add(item).map_err(ConnectorError::stack)?;
