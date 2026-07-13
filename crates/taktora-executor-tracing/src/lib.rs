@@ -5,8 +5,6 @@
 //! to forward all executor lifecycle events to the global `tracing`
 //! subscriber.
 
-#![doc(html_root_url = "https://docs.rs/taktora-executor-tracing/0.1.0")]
-
 use taktora_executor::{
     ExecutorError, ExecutorFaultReason, FaultReason, Observer, TaskId, UserEvent,
 };

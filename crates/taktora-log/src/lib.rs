@@ -3,7 +3,6 @@
 //! See the crate-level README and `spec/requirements/logging.rst` in
 //! the taktora repository for the full specification.
 
-#![doc(html_root_url = "https://docs.rs/taktora-log/0.1.0")]
 // `forbid` rather than the workspace's usual `deny`: this is a pure-safe
 // facade crate — every backend lives behind the `LogSink` trait, so there
 // is no path that legitimately needs `unsafe`.
