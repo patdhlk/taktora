@@ -119,3 +119,38 @@ codegen toolchain (:need:`FEAT_0080`). Each ``arch-decision``
    and per-bus, matching the one-NIC-per-example reality. The cost is that
    a large multi-bus installation maintains several files — accepted for
    v1, revisited if a real multi-bus need appears.
+
+.. arch-decision:: Codegen is the default EtherCAT path; manual routing is the escape hatch
+   :id: ADR_0137
+   :status: accepted
+   :refines: FEAT_0080
+
+   **Context.** The connector exposes manual PDI bit-slice routing —
+   callers supply bit offsets, ``PdoDirection`` (Rx/Tx), and codec wire
+   widths directly. It is fully general but leaks bit-level detail into user
+   code: the hardware-free ``ethercat-mock-loop`` example needs roughly
+   twenty lines of header commentary to explain loopback bit offsets,
+   direction semantics, and constant-width encoding. The ESI + netcfg
+   codegen toolchain (:need:`FEAT_0080`) emits the same routing tables typed
+   at build time from vendor descriptions, with no runtime parsing.
+
+   **Decision.** Documentation presents the ESI + netcfg build-time codegen
+   toolchain as the **default** EtherCAT integration path
+   (:need:`REQ_1006`); manual PDI routing is framed as the **escape hatch**
+   for mock/loopback and ESI-less devices. This is docs-only positioning —
+   the manual routing API is retained unchanged. Considered and rejected:
+
+   * **Feature-gate or demote the manual routing API in code** — wrong for a
+     pre-1.0 experiment; manual routing is legitimately required by the
+     mock/loopback path and by any device without an ESI description, and
+     gating it would break the only hardware-free example.
+   * **Ship a codegen-on-``MockBusDriver`` example** so "codegen is default"
+     is runnable without hardware — deferred: generating a real vendor
+     driver only to loop its own outputs back to its inputs is of
+     questionable fidelity as a teaching reference.
+
+   **Consequences.** ✅ Newcomers meet the typed, zero-parse codegen path
+   first; bit-level routing detail stops being the default teaching surface.
+   ❌ The only hardware-free EtherCAT example still uses the manual API, so
+   "codegen is the default" is not yet demonstrable without real silicon —
+   tracked as a deferred non-goal on :need:`FEAT_0121`.

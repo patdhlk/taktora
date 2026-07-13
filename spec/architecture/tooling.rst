@@ -70,6 +70,42 @@ Solution strategy
    expire with the repo's retention window (default 90 days) — the
    summary in the job log outlives them only as long as the log does.
 
+.. arch-decision:: Front door is a curated example + guide, not a facade crate
+   :id: ADR_0136
+   :status: accepted
+   :refines: FEAT_0121
+
+   **Context.** The workspace is 41 independently-versioned pre-1.0 library
+   crates with no facade; assembling an application means picking five to
+   eight of them by hand, and discovery is the first-hour cost. A ``taktora``
+   umbrella crate that re-exported a curated subset behind feature flags is
+   the obvious convenience — but it couples those independently-versioned
+   crates behind one semver surface, so every underlying breaking change
+   either bumps the facade or leaks through it. The repository's examples
+   also pin *published* crate versions, so a facade would itself have to be
+   published before any example could depend on it.
+
+   **Decision.** The front door is a curated golden-path example
+   (:need:`REQ_1002`) plus a two-tier assembly guide (:need:`REQ_1004`,
+   :need:`REQ_1005`) — additive documentation and one runnable crate, nothing
+   new to version. The ``taktora`` facade crate is **deferred** until the
+   curated ~7-crate stack proves stable enough to carry a semver surface.
+   Considered and rejected:
+
+   * **Publish the facade now** — incurs a standing versioning liability over
+     41 pre-1.0 crates whose APIs still churn, plus a publish-ordering
+     constraint (the facade must ship before any example uses it), to buy a
+     convenience the docs deliver at near-zero cost.
+   * **Docs-only, no runnable example** — a crate list without a working
+     "this is how the pieces fit" reference does not fix the first-hour
+     problem; the golden path has to be executable.
+
+   **Consequences.** ✅ The discovery fix ships immediately with no standing
+   liability — nothing new to version, and the underlying crates keep bumping
+   independently. ❌ No ``cargo add taktora`` / ``use taktora::prelude::*``
+   one-liner; the canonical stack lives in prose and can drift from reality
+   unless the example and guide are maintained together.
+
 Implementation footprint
 ------------------------
 
