@@ -1,5 +1,13 @@
 # ethercat-mock-loop
 
+> **Prefer codegen for real devices.** This example wires PDI bit-slice
+> routing by hand — the raw **escape hatch** for hardware-free loopback and
+> ESI-less devices. The recommended default for real EtherCAT hardware is the
+> **ESI + netcfg build-time codegen** path, which generates typed drivers and
+> routing tables with no hand-written bit offsets; see
+> [`ethercat-stepper`](../ethercat-stepper) for that path. Use the manual
+> routing here only for mock/loopback or devices without an ESI.
+
 A 1 kHz control loop driven by the executor through
 `taktora-connector-ethercat` with `MockBusDriver` configured in
 loopback. Writes a `u16` counter to the outbound PDI slice and reads

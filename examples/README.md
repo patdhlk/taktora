@@ -10,14 +10,21 @@ write, with no workspace-relative paths active by default.
 
 | Example | Backend | CI | What it shows |
 |---|---|---|---|
+| [`mqtt-zenoh-bridge`](mqtt-zenoh-bridge)   | Mock MQTT+Zenoh      | build + run | **Start here.** One executor bridging two protocols across the same `ChannelReader` / `ChannelWriter` seam |
 | [`zenoh-pubsub-mock`](zenoh-pubsub-mock)   | `MockZenohSession`   | build + run | end-to-end pub/sub through the zenoh connector, no router needed |
 | [`zenoh-pubsub-real`](zenoh-pubsub-real)   | `RealZenohSession`   | build only  | same shape, but over the real `zenoh::Session` (two-terminal recipe) |
 | [`mqtt-pubsub-mock`](mqtt-pubsub-mock)     | `MockMqttSession`    | build + run | end-to-end pub/sub through the MQTT connector, no broker needed |
 | [`mqtt-pubsub-real`](mqtt-pubsub-real)     | `RealMqttSession`    | build only  | real pub/sub over rumqttc against a bundled mosquitto (docker compose) |
-| [`ethercat-mock-loop`](ethercat-mock-loop) | `MockBusDriver`      | build + run | 1 kHz control loop over the EtherCAT connector with PDI bit-slice routing |
-| [`ethercat-real-bus`](ethercat-real-bus)   | `EthercrabBusDriver` | build only  | drives a real Beckhoff EK1100 + EL1008 from a Linux host (Pi the canonical target) |
+| [`ethercat-stepper`](ethercat-stepper)     | `EthercrabBusDriver` | build only  | **recommended EtherCAT path** — ESI + netcfg `build.rs` codegen driving a Beckhoff EL7047 through generated typed drivers |
+| [`ethercat-mock-loop`](ethercat-mock-loop) | `MockBusDriver`      | build + run | the raw-routing **escape hatch** — a 1 kHz loopback control loop wiring PDI bit-slice routing by hand (no codegen, no hardware) |
+| [`ethercat-real-bus`](ethercat-real-bus)   | `EthercrabBusDriver` | build only  | drives a real Beckhoff EK1100 + EL1008 from a Linux host (Pi the canonical target) via ESI-generated typed drivers |
 
 ## Quick start
+
+    cd examples/mqtt-zenoh-bridge && cargo run -- --ticks 5
+
+That's the golden-path example: one executor bridging MQTT to Zenoh, no
+broker or router needed. For a single-protocol pub/sub demo instead:
 
     cd examples/zenoh-pubsub-mock && cargo run
 
