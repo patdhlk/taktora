@@ -17,7 +17,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use taktora_executor::{ItemFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 use taktora_telemetry_export::{CycleRing, NdjsonRingObserver, spawn};
 
 struct Args {

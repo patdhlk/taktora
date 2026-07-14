@@ -30,7 +30,8 @@ use taktora_connector_codec::JsonCodec;
 use taktora_connector_core::{ChannelDescriptor, PayloadCodec};
 use taktora_connector_host::Connector;
 use taktora_connector_mqtt::{
-    MockMqttSession, MqttConnector, MqttConnectorOptions, MqttQos, MqttRouting, MqttState, MqttTopic,
+    MockMqttSession, MqttConnector, MqttConnectorOptions, MqttQos, MqttRouting, MqttState,
+    MqttTopic,
 };
 use taktora_connector_zenoh::{
     KeyExprOwned, MockZenohSession, ZenohConnector, ZenohConnectorOptions, ZenohRouting, ZenohState,
@@ -155,8 +156,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "taktora.examples.bridge.zenoh.out",
         zenoh_routing.clone(),
     )?;
-    let zenoh_desc_sink =
-        ChannelDescriptor::<ZenohRouting, N>::new("taktora.examples.bridge.zenoh.out", zenoh_routing)?;
+    let zenoh_desc_sink = ChannelDescriptor::<ZenohRouting, N>::new(
+        "taktora.examples.bridge.zenoh.out",
+        zenoh_routing,
+    )?;
     let egress_sink = zenoh.create_reader::<AlarmDecision, N>(&zenoh_desc_sink)?;
     let egress = zenoh.create_writer::<AlarmDecision, N>(&zenoh_desc_out)?;
 
