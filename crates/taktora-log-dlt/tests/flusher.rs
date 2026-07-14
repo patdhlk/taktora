@@ -142,7 +142,7 @@ fn mid_drain_write_failure_rebuffers_remainder() {
         remaining.len(),
         tags
     );
-    let full = [b'1', b'2', b'3', b'4'];
+    let full = *b"1234";
     assert_eq!(
         tags,
         full[full.len() - tags.len()..],
