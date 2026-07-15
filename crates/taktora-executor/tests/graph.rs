@@ -3,7 +3,7 @@
 use core::time::Duration;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use taktora_executor::{ControlFlow, Executor, item, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item, item_with_triggers};
 
 #[test]
 fn diamond_runs_all_vertices_once() {
@@ -19,23 +19,23 @@ fn diamond_runs_all_vertices_once() {
         },
         move |_| {
             c0.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ));
     let c1 = Arc::clone(&counts[1]);
     let l = g.vertex(item(move |_| {
         c1.fetch_add(1, Ordering::SeqCst);
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     }));
     let c2 = Arc::clone(&counts[2]);
     let rt = g.vertex(item(move |_| {
         c2.fetch_add(1, Ordering::SeqCst);
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     }));
     let c3 = Arc::clone(&counts[3]);
     let m = g.vertex(item(move |_| {
         c3.fetch_add(1, Ordering::SeqCst);
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     }));
     g.edge(r, l).edge(r, rt).edge(l, m).edge(rt, m).root(r);
     g.build().unwrap();
@@ -58,11 +58,11 @@ fn root_stop_chain_skips_dependents() {
             d.interval(Duration::from_millis(10));
             Ok(())
         },
-        |_| Ok(ControlFlow::StopChain),
+        |_| Ok(ItemFlow::StopChain),
     ));
     let leaf_v = g.vertex(item(move |_| {
         l.fetch_add(1, Ordering::SeqCst);
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     }));
     g.edge(r, leaf_v).root(r);
     g.build().unwrap();
@@ -82,7 +82,7 @@ fn vertex_err_stops_dispatch_and_propagates() {
         },
         |_| Err(Box::new(std::io::Error::other("graph-err"))),
     ));
-    let t = g.vertex(item(|_| Ok(ControlFlow::Continue)));
+    let t = g.vertex(item(|_| Ok(ItemFlow::Continue)));
     g.edge(r, t).root(r);
     g.build().unwrap();
 

@@ -19,8 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use taktora_executor::{
-    ControlFlow, CycleObservation, CyclicClock, DispatchMode, Executor, Observer,
-    item_with_triggers,
+    CycleObservation, CyclicClock, DispatchMode, Executor, ItemFlow, Observer, item_with_triggers,
 };
 
 /// Scripted scheduling clock: loop entry reads 0 (grid epoch), the first
@@ -70,7 +69,7 @@ fn late_first_dispatch_reports_startup_delay_not_zero() {
             d.interval(Duration::from_millis(1));
             Ok(())
         },
-        |_| Ok(ControlFlow::Continue),
+        |_| Ok(ItemFlow::Continue),
     ))
     .expect("add task");
 

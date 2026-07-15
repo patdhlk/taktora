@@ -13,7 +13,7 @@
 use std::time::Duration;
 
 use taktora_bounded_alloc::CountingAllocator;
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ExecuteResult, Executor, ExecutorError, ItemFlow, item_with_triggers};
 
 #[global_allocator]
 static ALLOC: CountingAllocator = CountingAllocator::new();
@@ -53,7 +53,7 @@ fn overrun_path_zero_alloc_in_steady_state() {
                 // re-fire the overrun counter. Either way, the
                 // post-execute fault-detection branch must not allocate.
                 std::thread::sleep(Duration::from_micros(1500));
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add");

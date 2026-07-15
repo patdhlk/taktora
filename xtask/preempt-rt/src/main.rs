@@ -17,7 +17,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 use taktora_telemetry_export::{CycleRing, NdjsonRingObserver, spawn};
 
 struct Args {
@@ -101,7 +101,7 @@ fn run() -> Result<(), String> {
             Ok(())
         },
         // Idle body: do nothing measurable; we are sampling dispatch timing.
-        |_ctx| Ok(ControlFlow::Continue),
+        |_ctx| Ok(ItemFlow::Continue),
     ))
     .map_err(|e| format!("add task: {e}"))?;
 

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use taktora_executor::{
-    ControlFlow, ExecuteResult, Executor, ExecutorError, FaultState, item_with_triggers,
+    ExecuteResult, Executor, ExecutorError, FaultState, ItemFlow, item_with_triggers,
 };
 
 #[test]
@@ -26,7 +26,7 @@ fn fault_state_set_from_worker_visible_from_main() {
             },
             |_ctx| -> ExecuteResult {
                 std::thread::sleep(Duration::from_millis(3));
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add");

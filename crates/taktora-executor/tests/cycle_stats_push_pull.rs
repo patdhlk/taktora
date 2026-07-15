@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use taktora_executor::{
-    ControlFlow, CycleObservation, Executor, MockClock, Observer, item_with_triggers,
+    CycleObservation, Executor, ItemFlow, MockClock, Observer, item_with_triggers,
 };
 
 const TOOK_NS: u64 = 1_000_000; // 1 ms exact body cost
@@ -59,7 +59,7 @@ fn push_count_matches_cycles_and_pull_reflects_samples() {
         },
         move |_ctx| {
             body_clock.advance(TOOK_NS);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .expect("add");

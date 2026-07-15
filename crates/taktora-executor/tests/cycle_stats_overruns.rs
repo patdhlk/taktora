@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ExecuteResult, Executor, ExecutorError, ItemFlow, item_with_triggers};
 
 #[test]
 #[allow(clippy::too_many_lines)] // multi-phase test: phase A/B/C must share state
@@ -48,7 +48,7 @@ fn snapshot_overrun_count_agrees_with_api_and_increments_only_on_breach() {
                     std::thread::sleep(Duration::from_millis(150));
                 }
                 // Fast path: no sleep — execute returns in ~µs, far under budget.
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add task");

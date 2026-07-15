@@ -6,8 +6,8 @@ use iceoryx2::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use taktora_executor::{
-    Channel, Context, ControlFlow, ExecutableItem, ExecuteResult, Executor, ExecutorError,
-    ItemError, Subscriber, TriggerDeclarer,
+    Channel, Context, ExecutableItem, ExecuteResult, Executor, ExecutorError, ItemError, ItemFlow,
+    Subscriber, TriggerDeclarer,
 };
 
 #[derive(Debug, Clone, Copy, ZeroCopySend)]
@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "[producer] sent tag={n} via loan() (delivered to {} listeners)",
                 outcome.listeners_notified
             );
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     p.payload.len()
                 );
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         }
     }
     exec.add(Consumer { sub: subscriber })?;

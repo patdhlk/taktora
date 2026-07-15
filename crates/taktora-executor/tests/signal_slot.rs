@@ -3,7 +3,7 @@
 use core::time::Duration;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use taktora_executor::{ControlFlow, Executor, item_with_triggers, signal_slot};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers, signal_slot};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -26,7 +26,7 @@ fn unit_signal_to_slot_fires_chain() {
             d.interval(Duration::from_millis(10));
             Ok(())
         },
-        |_| Ok(ControlFlow::Continue),
+        |_| Ok(ItemFlow::Continue),
     );
     let signal = signal.before_send(|payload: &mut u32| {
         *payload = 7;

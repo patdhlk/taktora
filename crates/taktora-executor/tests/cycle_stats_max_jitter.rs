@@ -18,7 +18,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use taktora_executor::{ControlFlow, Executor, MockClock, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, MockClock, item_with_triggers};
 
 const PERIOD_NS: u64 = 1_000_000; // 1 ms nominal — matches the declared interval
 const DELTA_NS: u64 = 5_000_000; // 5 ms overshoot injected every 5th cycle
@@ -56,7 +56,7 @@ fn max_jitter_reflects_exact_period_violation() {
                 PERIOD_NS
             };
             body_clock.advance(advance);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .expect("add task");

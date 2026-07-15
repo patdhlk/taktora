@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use iceoryx2::prelude::*;
-use taktora_executor::{ControlFlow, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{Executor, ExecutorError, ItemFlow, item_with_triggers};
 
 /// Deadline window. Comfortably larger than the time the WaitSet needs to wake
 /// on a pending event (phase A) so the real-event path never accidentally trips
@@ -100,7 +100,7 @@ fn deadline_dual_identity_routes_both_id_forms_to_same_task() {
         },
         move |_ctx| {
             dispatches_for_item.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .expect("add deadline-triggered task");

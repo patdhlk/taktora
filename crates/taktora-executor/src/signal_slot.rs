@@ -1,7 +1,7 @@
 //! `signal_slot::pair` — pre-built [`ExecutableItem`]s wrapping a [`Channel<T>`](crate::Channel).
 
 use crate::context::Context;
-use crate::control_flow::{ControlFlow, ExecuteResult};
+use crate::control_flow::{ExecuteResult, ItemFlow};
 use crate::error::ExecutorError;
 use crate::executor::Executor;
 use crate::item::ExecutableItem;
@@ -85,9 +85,9 @@ impl<T: Payload + Default + Copy + Send> ExecutableItem for SignalItem<T> {
                 .map_err(|e| -> crate::error::ItemError { Box::new(e) })?
         };
         if outcome.sent {
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         } else {
-            Ok(ControlFlow::StopChain)
+            Ok(ItemFlow::StopChain)
         }
     }
 }
@@ -148,7 +148,7 @@ impl<T: Payload + Copy + Send> ExecutableItem for SlotItem<T> {
             delivered_any = true;
             if let Some(cb) = self.after_recv.as_mut() {
                 if !(cb)(sample.payload()) {
-                    return Ok(ControlFlow::StopChain);
+                    return Ok(ItemFlow::StopChain);
                 }
             }
             if matches!(self.policy, TakePolicy::Single) {
@@ -156,9 +156,9 @@ impl<T: Payload + Copy + Send> ExecutableItem for SlotItem<T> {
             }
         }
         if delivered_any {
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         } else {
-            Ok(ControlFlow::StopChain)
+            Ok(ItemFlow::StopChain)
         }
     }
 }

@@ -3,7 +3,7 @@ use core::time::Duration;
 use iceoryx2::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use taktora_executor::{ControlFlow, Executor, ExecutorError, TriggerDeclarer, item_with_triggers};
+use taktora_executor::{Executor, ExecutorError, ItemFlow, TriggerDeclarer, item_with_triggers};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -25,7 +25,7 @@ fn interval_trigger_fires_run_n_times() {
         },
         move |_| {
             c.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();
@@ -48,7 +48,7 @@ fn run_for_terminates_on_timeout() {
         },
         move |_| {
             c.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();
@@ -68,7 +68,7 @@ fn stoppable_terminates_run() {
         },
         move |ctx| {
             ctx.stop_executor();
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();
@@ -102,7 +102,7 @@ fn subscriber_trigger_dispatches_task() {
             if c.load(Ordering::SeqCst) >= 3 {
                 ctx.stop_executor();
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();
@@ -135,7 +135,7 @@ fn threaded_pool_executes_items_correctly() {
         },
         move |_| {
             c.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();
@@ -160,7 +160,7 @@ fn item_task_id_override_takes_precedence() {
         }
         fn execute(&mut self, ctx: &mut Context<'_>) -> ExecuteResult {
             ctx.stop_executor();
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         }
         fn task_id(&self) -> Option<&str> {
             Some("custom-from-item")
@@ -216,7 +216,7 @@ fn run_n_survives_eintr_from_unrelated_signals() {
         },
         move |_| {
             c.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();
@@ -309,7 +309,7 @@ fn multi_listener_dispatches_once_per_wake() {
         },
         move |_| {
             c.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();

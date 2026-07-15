@@ -2,7 +2,7 @@
 
 use core::time::Duration;
 use std::time::Instant;
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 
 /// Verify that a `Stoppable` clone obtained *before* `run()` is waker-aware
 /// because the stop event is now wired at `build()` time (Option A). The
@@ -19,7 +19,7 @@ fn stop_from_other_thread_wakes_idle_executor() {
             d.interval(Duration::from_secs(60));
             Ok(())
         },
-        |_| Ok(ControlFlow::Continue),
+        |_| Ok(ItemFlow::Continue),
     ))
     .unwrap();
 

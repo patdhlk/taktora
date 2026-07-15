@@ -32,6 +32,34 @@ Four layered pieces:
 
 **Specification:** [https://taktora.dev/](https://taktora.dev/) — built from `spec/` on every push to `main`.
 
+## Start here
+
+The crate list below is long, but you don't wire all 41 crates together.
+**Building an app means assembling ~7 crates on a single `Executor`:** one
+execution core, the connector framework's four shared pieces, and one crate
+per protocol you actually talk to.
+
+| Crate | Role |
+|---|---|
+| [`taktora-executor`](crates/taktora-executor) | The execution core — the `Executor`, interval/IPC triggers, and the work items your logic lives in. |
+| [`taktora-connector-core`](crates/taktora-connector-core) | The protocol-agnostic seam: `ChannelDescriptor` and the typed `ChannelReader` / `ChannelWriter` every connector hands back. |
+| [`taktora-connector-host`](crates/taktora-connector-host) | The `Connector` trait that binds a protocol connector onto the executor (`register_with`, `create_reader` / `create_writer`, health). |
+| [`taktora-connector-transport-iox`](crates/taktora-connector-transport-iox) | The iceoryx2 shared-memory transport carrying bytes between a connector's gateway and your work items. Pulled in transitively; you rarely call it directly. |
+| [`taktora-connector-codec`](crates/taktora-connector-codec) | Payload codecs (`JsonCodec`, `BinaryCodec`) that turn your typed structs into wire bytes and back. |
+| `taktora-connector-<proto>` | One per protocol — e.g. [`taktora-connector-mqtt`](crates/taktora-connector-mqtt), [`taktora-connector-zenoh`](crates/taktora-connector-zenoh), [`taktora-connector-ethercat`](crates/taktora-connector-ethercat). Add only the ones you use. |
+
+**The golden path** is [`examples/mqtt-zenoh-bridge/`](examples/mqtt-zenoh-bridge) —
+one executor bridging MQTT ingress to Zenoh egress across the same
+reader/writer seam, hardware-free against in-process mocks:
+
+```bash
+cd examples/mqtt-zenoh-bridge && cargo run -- --ticks 5
+# → ingested=5 bridged=5 egress=5
+```
+
+Read that example's [`README.md`](examples/mqtt-zenoh-bridge/README.md) for the
+full walkthrough; the rest of this page is the by-layer reference.
+
 ## What's here
 
 The workspace has grown to 41 library crates (plus per-crate `*-tests` siblings),
@@ -97,13 +125,13 @@ grouped by layer.
 
 ```rust,no_run
 use core::time::Duration;
-use taktora_executor::{item_with_triggers, ControlFlow, Executor};
+use taktora_executor::{item_with_triggers, ItemFlow, Executor};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut exec = Executor::builder().worker_threads(0).build()?;
     exec.add(item_with_triggers(
         |d| { d.interval(Duration::from_secs(1)); Ok(()) },
-        |_| { println!("tick"); Ok(ControlFlow::Continue) },
+        |_| { println!("tick"); Ok(ItemFlow::Continue) },
     ))?;
     exec.run()?;
     Ok(())
@@ -137,7 +165,7 @@ impl taktora_executor::ExecutableItem for MyTask {
         _ctx: &mut taktora_executor::Context<'_>,
     ) -> taktora_executor::ExecuteResult {
         // do work
-        Ok(taktora_executor::ControlFlow::Continue)
+        Ok(taktora_executor::ItemFlow::Continue)
     }
 }
 ```

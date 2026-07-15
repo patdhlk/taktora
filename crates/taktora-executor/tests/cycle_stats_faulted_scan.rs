@@ -3,7 +3,7 @@
 //! join).
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use taktora_executor::{ControlFlow, CycleObservation, Executor, Observer, item_with_triggers};
+use taktora_executor::{CycleObservation, Executor, ItemFlow, Observer, item_with_triggers};
 
 #[derive(Default)]
 struct IdxRec {
@@ -38,7 +38,7 @@ fn cycle_index_contiguous_including_faulted_scans() {
         },
         move |_ctx| {
             std::thread::sleep(Duration::from_millis(6));
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .expect("add");

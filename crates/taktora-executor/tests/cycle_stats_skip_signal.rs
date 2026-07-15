@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use taktora_executor::{
-    ControlFlow, CycleObservation, DispatchMode, Executor, Observer, item_with_triggers,
+    CycleObservation, DispatchMode, Executor, ItemFlow, Observer, item_with_triggers,
 };
 
 const PERIOD: Duration = Duration::from_millis(50);
@@ -59,7 +59,7 @@ fn starved_dispatch_signals_skipped_slots_and_re_anchors() {
             if n.fetch_add(1, Ordering::Relaxed) == 2 {
                 std::thread::sleep(Duration::from_millis(130));
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .expect("add task");

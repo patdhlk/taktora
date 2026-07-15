@@ -4,7 +4,7 @@ use core::time::Duration;
 use iceoryx2::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -44,7 +44,7 @@ fn server_trigger_fires_when_request_arrives() {
             if c.load(Ordering::SeqCst) >= 2 {
                 ctx.stop_executor();
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();

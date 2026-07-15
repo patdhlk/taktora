@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use std::io;
 use taktora_executor::{
-    Context, ControlFlow, ExecutableItem, ExecuteResult, ExecutionMonitor, Executor, ExecutorError,
+    Context, ExecutableItem, ExecuteResult, ExecutionMonitor, Executor, ExecutorError, ItemFlow,
     Observer, TriggerDeclarer,
 };
 use taktora_medkit_binding_executor::ExecutorBinding;
@@ -34,7 +34,7 @@ impl ExecutableItem for AppItem {
         if self.fail {
             Err(Box::new(io::Error::other("deliberate failure")))
         } else {
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         }
     }
 

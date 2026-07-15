@@ -3,7 +3,7 @@
 use core::time::Duration;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use taktora_executor::{ControlFlow, Executor, Observer, UserEvent};
+use taktora_executor::{Executor, ItemFlow, Observer, UserEvent};
 
 #[derive(Default)]
 struct CountingObserver {
@@ -51,7 +51,7 @@ impl taktora_executor::ExecutableItem for AppItem {
         ctx: &mut taktora_executor::Context<'_>,
     ) -> taktora_executor::ExecuteResult {
         ctx.send_event(UserEvent::new(1, 42));
-        Ok(ControlFlow::Continue)
+        Ok(ItemFlow::Continue)
     }
     fn app_id(&self) -> Option<u32> {
         Some(7)

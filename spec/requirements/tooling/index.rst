@@ -10,3 +10,4 @@ complexity gate, the publish-ordering guards.
    :maxdepth: 2
 
    coverage
+   onboarding

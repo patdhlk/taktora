@@ -3,7 +3,7 @@
 use core::time::Duration;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use taktora_executor::{ControlFlow, Executor, Runner, RunnerFlags, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, Runner, RunnerFlags, item_with_triggers};
 
 #[test]
 fn runner_runs_until_stop() {
@@ -17,7 +17,7 @@ fn runner_runs_until_stop() {
         },
         move |_| {
             c.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();
@@ -40,7 +40,7 @@ fn runner_deferred_does_not_run_until_started() {
         },
         move |_| {
             c.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .unwrap();

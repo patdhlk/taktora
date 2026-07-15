@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ExecuteResult, Executor, ExecutorError, ItemFlow, item_with_triggers};
 
 #[test]
 fn overrun_count_is_monotonic_across_clears() {
@@ -22,7 +22,7 @@ fn overrun_count_is_monotonic_across_clears() {
             },
             |_ctx| -> ExecuteResult {
                 std::thread::sleep(Duration::from_millis(3));
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add");

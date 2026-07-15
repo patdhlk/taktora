@@ -1,5 +1,15 @@
 //! Integration example: executor + ethercat connector (MockBusDriver loopback).
 //!
+//! This example deliberately uses the **low-level manual routing API**:
+//! it wires PDI bit offsets, `PdoDirection` Rx/Tx, and `BinaryCodec` wire
+//! widths by hand. That is the escape hatch for hardware-free loopback and
+//! for ESI-less devices — it is *not* the recommended way to talk to a real
+//! device. For real hardware, prefer the **ESI + netcfg build-time codegen**
+//! path, which turns vendor descriptions into typed drivers and routing
+//! tables with zero hand-wired bit offsets; see `examples/ethercat-stepper/`
+//! (which uses a `build.rs` ESI + netcfg codegen pipeline). Reach for the
+//! manual routing below only for mock/loopback or devices without an ESI.
+//!
 //! A 1 kHz interval item writes a `u16` counter into one PDI routing
 //! slice and reads back the same value (lagged by ~1 cycle) from the
 //! paired inbound slice. Asserts `lag <= 2` and exits with a

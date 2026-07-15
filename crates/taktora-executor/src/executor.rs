@@ -2624,8 +2624,8 @@ fn build_chain_job(
             // check still fires per item. `REQ_0071`.
             post_execute_detect_fault(&id, started, took, &fault_ctx);
             match res {
-                Ok(crate::ControlFlow::Continue) => {}
-                Ok(crate::ControlFlow::StopChain) => break,
+                Ok(crate::ItemFlow::Continue) => {}
+                Ok(crate::ItemFlow::StopChain) => break,
                 Err(_) => {
                     record_first_err(&err_slot, &id, res);
                     break;
@@ -2661,7 +2661,7 @@ fn run_item_catch_unwind(
         |payload| {
             let msg =
                 panic_payload_message(&*payload).unwrap_or_else(|| "panicked task".to_string());
-            Err::<crate::ControlFlow, crate::ItemError>(Box::new(PanickedTask(msg)))
+            Err::<crate::ItemFlow, crate::ItemError>(Box::new(PanickedTask(msg)))
         },
     )
 }
@@ -2933,7 +2933,7 @@ impl Executor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ControlFlow, item};
+    use crate::{ItemFlow, item};
     use iceoryx2::prelude::ZeroCopySend;
 
     /// Minimal zero-copy payload for tests that need a real subscriber to
@@ -2945,8 +2945,8 @@ mod tests {
     #[test]
     fn add_returns_unique_ids() {
         let mut exec = Executor::builder().worker_threads(0).build().unwrap();
-        let a = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
-        let b = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
+        let a = exec.add(item(|_| Ok(ItemFlow::Continue))).unwrap();
+        let b = exec.add(item(|_| Ok(ItemFlow::Continue))).unwrap();
         assert_ne!(a, b);
     }
 
@@ -2964,7 +2964,7 @@ mod tests {
         let mut exec = Executor::builder().worker_threads(0).build().unwrap();
         exec.add(item(move |_| {
             r.fetch_add(1, Ordering::Relaxed);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         }))
         .expect("add");
         exec.dispatch_twice_one_barrier(0);
@@ -2989,10 +2989,10 @@ mod tests {
         let r = Arc::clone(&runs);
         let mut exec = Executor::builder().worker_threads(0).build().unwrap();
         exec.add_with_fault_handler(
-            item(|_| Ok(ControlFlow::Continue)),
+            item(|_| Ok(ItemFlow::Continue)),
             item(move |_| {
                 r.fetch_add(1, Ordering::Relaxed);
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             }),
         )
         .expect("add_with_fault_handler");
@@ -3033,7 +3033,7 @@ mod tests {
             },
             move |_ctx| {
                 h.fetch_add(1, Ordering::Relaxed);
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add");
@@ -3063,7 +3063,7 @@ mod tests {
             },
             move |_ctx| {
                 h.fetch_add(1, Ordering::Relaxed);
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add");
@@ -3139,7 +3139,7 @@ mod tests {
             },
             move |_ctx| {
                 h.fetch_add(1, Ordering::Relaxed);
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add");
@@ -3224,7 +3224,7 @@ mod tests {
                 d.interval(period);
                 Ok(())
             },
-            |_ctx| Ok(ControlFlow::Continue),
+            |_ctx| Ok(ItemFlow::Continue),
         ))
         .expect("add");
         assert_eq!(
@@ -3339,7 +3339,7 @@ mod tests {
                     d.subscriber(&sub);
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             ))
             .expect_err("interval + subscriber must be rejected");
         match err {
@@ -3378,7 +3378,7 @@ mod tests {
                     d.subscriber(&sub);
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             ))
             .expect_err("interval + subscriber must be rejected in Legacy too");
         assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
@@ -3394,7 +3394,7 @@ mod tests {
                 d.interval(Duration::from_millis(1));
                 Ok(())
             },
-            |_| Ok(crate::ControlFlow::Continue),
+            |_| Ok(crate::ItemFlow::Continue),
         ))
         .expect("single interval accepted");
         // Multiple listeners (no interval): still accepted (multi-listener is
@@ -3410,7 +3410,7 @@ mod tests {
                 d.subscriber(&sub_b);
                 Ok(())
             },
-            |_| Ok(crate::ControlFlow::Continue),
+            |_| Ok(crate::ItemFlow::Continue),
         ))
         .expect("multiple listeners accepted");
     }
@@ -3431,7 +3431,7 @@ mod tests {
                     d.interval(Duration::from_millis(2));
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             ))
             .expect_err("multiple intervals must be rejected");
         match err {
@@ -3457,7 +3457,7 @@ mod tests {
                     d.interval(Duration::ZERO);
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             ))
             .expect_err("zero-period interval must be rejected");
         match err {
@@ -3488,7 +3488,7 @@ mod tests {
                     d.subscriber(&sub);
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             )])
             .expect_err("chain head interval + subscriber must be rejected");
         assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
@@ -3504,7 +3504,7 @@ mod tests {
                     d.interval(Duration::ZERO);
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             )])
             .expect_err("chain head zero-period interval must be rejected");
         assert!(matches!(err, ExecutorError::DeclareTriggers(_)));
@@ -3524,7 +3524,7 @@ mod tests {
                     d.interval(Duration::from_millis(2));
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             )])
             .expect_err("chain head with two intervals must be rejected");
         match err {
@@ -3554,7 +3554,7 @@ mod tests {
                 d.subscriber(&sub);
                 Ok(())
             },
-            |_| Ok(crate::ControlFlow::Continue),
+            |_| Ok(crate::ItemFlow::Continue),
         ));
         g.root(r);
         let err = g
@@ -3575,7 +3575,7 @@ mod tests {
                 d.interval(Duration::ZERO);
                 Ok(())
             },
-            |_| Ok(crate::ControlFlow::Continue),
+            |_| Ok(crate::ItemFlow::Continue),
         ));
         g.root(r);
         let err = g
@@ -3635,7 +3635,7 @@ mod tests {
                 d.interval(Duration::from_millis(1));
                 Ok(())
             },
-            |_| Ok(crate::ControlFlow::Continue),
+            |_| Ok(crate::ItemFlow::Continue),
         ))
         .unwrap();
 
@@ -3657,7 +3657,7 @@ mod tests {
     fn custom_id_is_preserved() {
         let mut exec = Executor::builder().worker_threads(0).build().unwrap();
         let id = exec
-            .add_with_id("my-task", item(|_| Ok(ControlFlow::Continue)))
+            .add_with_id("my-task", item(|_| Ok(ItemFlow::Continue)))
             .unwrap();
         assert_eq!(id.as_str(), "my-task");
     }
@@ -3673,7 +3673,7 @@ mod tests {
                     d.budget(Duration::from_millis(5));
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             ))
             .unwrap();
         let entry = exec
@@ -3694,10 +3694,10 @@ mod tests {
                     d.interval(Duration::from_millis(5));
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             ))
             .unwrap();
-        let event_driven = exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
+        let event_driven = exec.add(item(|_| Ok(ItemFlow::Continue))).unwrap();
 
         let cyclic_entry = exec
             .tasks
@@ -3735,11 +3735,11 @@ mod tests {
                 d.interval(Duration::from_millis(5));
                 Ok(())
             },
-            |_| Ok(crate::ControlFlow::Continue),
+            |_| Ok(crate::ItemFlow::Continue),
         ))
         .unwrap();
         // Event-driven single-item add path.
-        exec.add(item(|_| Ok(ControlFlow::Continue))).unwrap();
+        exec.add(item(|_| Ok(ItemFlow::Continue))).unwrap();
 
         assert_eq!(exec.tasks.len(), 2);
         assert_eq!(exec.cycle_stats.len(), exec.tasks.len());
@@ -3757,9 +3757,9 @@ mod tests {
                         d.budget(Duration::from_millis(5));
                         Ok(())
                     },
-                    |_| Ok(crate::ControlFlow::Continue),
+                    |_| Ok(crate::ItemFlow::Continue),
                 ),
-                crate::item::item_with_triggers(|_d| Ok(()), |_| Ok(crate::ControlFlow::Continue)),
+                crate::item::item_with_triggers(|_d| Ok(()), |_| Ok(crate::ItemFlow::Continue)),
             )
             .unwrap();
         let entry = exec
@@ -3785,7 +3785,7 @@ mod tests {
                 called_d.store(true, Ordering::SeqCst);
                 Ok(())
             },
-            |_| Ok(ControlFlow::Continue),
+            |_| Ok(ItemFlow::Continue),
         );
 
         let mut exec = Executor::builder().worker_threads(0).build().unwrap();
@@ -3803,7 +3803,7 @@ mod tests {
                     d.interval(Duration::from_millis(10));
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             ))
             .unwrap();
         // Task starts in Running state — clearing should error.
@@ -3829,7 +3829,7 @@ mod tests {
                     d.budget(Duration::from_millis(5));
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             ))
             .unwrap();
         assert_eq!(exec.overrun_count(task_id).unwrap(), 0);
@@ -3854,7 +3854,7 @@ mod tests {
                     d.interval(Duration::from_millis(10));
                     Ok(())
                 },
-                |_| Ok(crate::ControlFlow::Continue),
+                |_| Ok(crate::ItemFlow::Continue),
             ))
             .unwrap();
         assert_eq!(exec.task_fault_state(task_id).unwrap(), FaultState::Running);

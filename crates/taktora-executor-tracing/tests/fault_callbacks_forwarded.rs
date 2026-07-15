@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use taktora_executor::{
-    ControlFlow, ExecuteResult, Executor, ExecutorError, Observer, item_with_triggers,
+    ExecuteResult, Executor, ExecutorError, ItemFlow, Observer, item_with_triggers,
 };
 use taktora_executor_tracing::TracingObserver;
 use tracing::Subscriber;
@@ -115,7 +115,7 @@ fn fault_callbacks_forwarded_to_tracing() {
                     // first execute() call, transitioning the task to
                     // Faulted{BudgetExceeded} and firing on_task_fault.
                     std::thread::sleep(Duration::from_millis(3));
-                    Ok(ControlFlow::Continue)
+                    Ok(ItemFlow::Continue)
                 },
             ))
             .expect("add");

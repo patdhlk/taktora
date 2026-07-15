@@ -2,7 +2,7 @@
 //! user-supplied predicate.
 
 use crate::context::Context;
-use crate::control_flow::{ControlFlow, ExecuteResult};
+use crate::control_flow::{ExecuteResult, ItemFlow};
 use crate::error::ExecutorError;
 use crate::item::ExecutableItem;
 use crate::trigger::TriggerDeclarer;
@@ -40,7 +40,7 @@ where
         if (self.cond)() {
             self.item.execute(ctx)
         } else {
-            Ok(ControlFlow::StopChain)
+            Ok(ItemFlow::StopChain)
         }
     }
 
@@ -60,23 +60,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ControlFlow;
+    use crate::ItemFlow;
     use crate::context::ContextHarness;
     use crate::item::item;
 
     #[test]
     fn condition_true_runs_inner() {
-        let mut wrapped = wrap_with_condition(item(|_| Ok(ControlFlow::Continue)), || true);
+        let mut wrapped = wrap_with_condition(item(|_| Ok(ItemFlow::Continue)), || true);
         let h = ContextHarness::new("t");
         let res = wrapped.execute(&mut h.context()).unwrap();
-        assert_eq!(res, ControlFlow::Continue);
+        assert_eq!(res, ItemFlow::Continue);
     }
 
     #[test]
     fn condition_false_stops_chain() {
-        let mut wrapped = wrap_with_condition(item(|_| Ok(ControlFlow::Continue)), || false);
+        let mut wrapped = wrap_with_condition(item(|_| Ok(ItemFlow::Continue)), || false);
         let h = ContextHarness::new("t");
         let res = wrapped.execute(&mut h.context()).unwrap();
-        assert_eq!(res, ControlFlow::StopChain);
+        assert_eq!(res, ItemFlow::StopChain);
     }
 }

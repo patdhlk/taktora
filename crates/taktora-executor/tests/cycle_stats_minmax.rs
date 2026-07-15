@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use taktora_executor::{ControlFlow, Executor, MockClock, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, MockClock, item_with_triggers};
 
 const BASE_NS: u64 = 1_000_000; // 1 ms ordinary body
 const SPIKE_NS: u64 = 20_000_000; // 20 ms one-off spike
@@ -49,7 +49,7 @@ fn min_max_retain_exact_observed_extremes() {
             // among BASE bodies gives distinct, exact min/max extremes.
             let advance = if n == 4 { SPIKE_NS } else { BASE_NS };
             body_clock.advance(advance);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .expect("add task");

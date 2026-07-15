@@ -59,7 +59,7 @@ Test cases verifying the deterministic logic sequencing sub-feature
    :status: implemented
    :verifies: REQ_0022
 
-   **Goal.** An item returning ``Ok(ControlFlow::StopChain)`` or
+   **Goal.** An item returning ``Ok(ItemFlow::StopChain)`` or
    ``Err`` prevents downstream items in its enclosing chain or
    DAG from being dispatched within the same triggering cycle.
 
@@ -106,9 +106,9 @@ Test cases verifying the deterministic logic sequencing sub-feature
    **Steps.**
 
    1. ``condition_true_runs_inner``: wrap with ``|| true``;
-      execute; assert the result is ``ControlFlow::Continue``.
+      execute; assert the result is ``ItemFlow::Continue``.
    2. ``condition_false_stops_chain``: wrap with ``|| false``;
-      execute; assert the result is ``ControlFlow::StopChain``.
+      execute; assert the result is ``ItemFlow::StopChain``.
 
    **Expected outcome.** Both branches behave as documented.
    Note that the false branch surfaces as ``StopChain`` and thus

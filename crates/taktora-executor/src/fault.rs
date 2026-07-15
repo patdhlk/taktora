@@ -22,6 +22,9 @@ use std::time::Instant;
 
 /// Per-task fault state. Stored as packed `AtomicU64` in `TaskEntry`;
 /// the public API hands callers this snapshot view.
+///
+/// Not to be confused with [`ExecutorFaultState`], which is the
+/// executor-wide counterpart; this one is scoped to a single task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FaultState {
     /// Task is healthy and dispatches normally.
@@ -54,6 +57,9 @@ pub enum FaultReason {
 }
 
 /// Executor-wide fault state.
+///
+/// Not to be confused with [`FaultState`], which is the per-task
+/// counterpart; this one spans the whole executor and halts all tasks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExecutorFaultState {
     /// Executor is healthy; all tasks dispatch normally.

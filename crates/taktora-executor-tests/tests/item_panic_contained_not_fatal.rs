@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use taktora_executor::{
-    ControlFlow, ExecuteResult, Executor, ExecutorError, FaultState, Observer, TaskId,
+    ExecuteResult, Executor, ExecutorError, FaultState, ItemFlow, Observer, TaskId,
     item_with_triggers,
 };
 
@@ -110,7 +110,7 @@ fn item_panic_is_contained_not_fatal() {
         },
         move |_ctx| -> ExecuteResult {
             sibling_counter_in_item.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .expect("add sibling task");

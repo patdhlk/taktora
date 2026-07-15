@@ -126,7 +126,7 @@ where
 mod tests {
     use super::*;
     use crate::context::ContextHarness;
-    use crate::control_flow::ControlFlow;
+    use crate::control_flow::ItemFlow;
 
     #[test]
     fn closure_item_runs() {
@@ -136,7 +136,7 @@ mod tests {
 
         let mut it = item(move |_ctx| {
             cell_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         });
 
         let harness = ContextHarness::new("test-task");
@@ -159,7 +159,7 @@ mod tests {
                 calls_d.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
             },
-            |_ctx| Ok(ControlFlow::Continue),
+            |_ctx| Ok(ItemFlow::Continue),
         );
 
         let mut declarer_storage = TriggerDeclarer::new_test();

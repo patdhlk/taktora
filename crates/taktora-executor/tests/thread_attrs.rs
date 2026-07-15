@@ -2,7 +2,7 @@
 #![cfg(feature = "thread_attrs")]
 
 use core::time::Duration;
-use taktora_executor::{ControlFlow, Executor, ThreadAttributes, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, ThreadAttributes, item_with_triggers};
 
 #[test]
 fn worker_attrs_compiles_and_runs() {
@@ -21,7 +21,7 @@ fn worker_attrs_compiles_and_runs() {
             d.interval(Duration::from_millis(10));
             Ok(())
         },
-        |_| Ok(ControlFlow::Continue),
+        |_| Ok(ItemFlow::Continue),
     ))
     .unwrap();
 

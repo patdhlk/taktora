@@ -12,7 +12,7 @@
 //!
 //! [`SystemClock`]: taktora_executor::SystemClock
 use std::time::Duration;
-use taktora_executor::{ControlFlow, Executor, item_with_triggers};
+use taktora_executor::{Executor, ItemFlow, item_with_triggers};
 
 #[test]
 fn default_system_clock_produces_real_telemetry() {
@@ -30,7 +30,7 @@ fn default_system_clock_produces_real_telemetry() {
         },
         move |_ctx| {
             std::thread::sleep(Duration::from_millis(1));
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))
     .expect("add task");

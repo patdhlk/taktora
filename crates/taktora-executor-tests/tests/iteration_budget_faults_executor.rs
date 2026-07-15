@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use taktora_executor::{
-    ControlFlow, ExecuteResult, Executor, ExecutorError, ExecutorFaultReason, ExecutorFaultState,
-    FaultReason, Observer, TaskId, item_with_triggers,
+    ExecuteResult, Executor, ExecutorError, ExecutorFaultReason, ExecutorFaultState, FaultReason,
+    ItemFlow, Observer, TaskId, item_with_triggers,
 };
 
 #[derive(Default)]
@@ -60,7 +60,7 @@ fn executor_wide_breach_faults_executor_and_cascades_silently() {
             },
             |_ctx| -> ExecuteResult {
                 std::thread::sleep(Duration::from_millis(20));
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add slow");
@@ -72,7 +72,7 @@ fn executor_wide_breach_faults_executor_and_cascades_silently() {
                 d.interval(Duration::from_millis(5));
                 Ok(())
             },
-            |_ctx| -> ExecuteResult { Ok(ControlFlow::Continue) },
+            |_ctx| -> ExecuteResult { Ok(ItemFlow::Continue) },
         ))
         .expect("add healthy");
 
