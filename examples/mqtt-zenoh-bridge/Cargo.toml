@@ -23,7 +23,7 @@ license     = "Apache-2.0 OR MIT"
 # These reqs are the exact union of what examples/mqtt-pubsub-mock and
 # examples/zenoh-pubsub-mock already pin — this bridge simply consumes both
 # connectors at once through the same executor + codec seam.
-taktora-executor                = "0.4"
+taktora-executor                = "0.5"
 taktora-connector-core          = "0.2"
 taktora-connector-host          = "0.1"
 taktora-connector-transport-iox = "0.1"

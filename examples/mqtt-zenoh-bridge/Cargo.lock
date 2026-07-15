@@ -125,9 +125,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.6.1"
+version = "4.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ddb117e43bbf7dacf0a4190fef4d345b9bad68dfc649cb349e7d17d28428e51"
+checksum = "dd059f9da4f5c36b3787f65d38ccaab1cc315f07b01f89abc8359ee6a8205011"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -135,9 +135,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.6.0"
+version = "4.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "714a53001bf66416adb0e2ef5ac857140e7dc3a0c48fb28b2f10762fc4b5069f"
+checksum = "f09628afdcc538b57f3c6341e9c8e9970f18e4a481690a64974d7023bd33548b"
 dependencies = [
  "anstream",
  "anstyle",
@@ -898,9 +898,9 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "syn"
-version = "2.0.118"
+version = "2.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b9ae57f904213ebb649ce6895b8a66c66f0203b9319718f69a5612a065b1422"
+checksum = "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -909,9 +909,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-codec"
-version = "0.1.12"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8958ce79d8530b1a9ffe8232ca9cde6e85f762acc8a595a3a7785d14d08db19"
+checksum = "8d2dc7060128f14bf5dd5d82925c84362cb21d910c5e344ad607cdf0b929c93a"
 dependencies = [
  "serde",
  "serde_json",
@@ -920,9 +920,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-core"
-version = "0.2.9"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61a95e380af4476de114c59a436898b98d9c858f34a1d60caa93de05bcca634d"
+checksum = "528815555e9a88b624e4c47d522c50aa119cca4feead332f7c94e73fbb8ec565"
 dependencies = [
  "rand",
  "serde",
@@ -931,9 +931,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-host"
-version = "0.1.17"
+version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0319dc9222f1ed7e9e78b65a90a7439a70bc58e38d8aa46af065481b658b8d49"
+checksum = "34e9d541a70717459ece225f5835c5d80952958a03258eb1d3d19978a9cac7f1"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",
@@ -946,9 +946,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-mqtt"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "796a05377de1d61d7c2e4f328db9a5ad12a4046adec13563cdf26b13b30f0ccc"
+checksum = "8de804cbe4a32d98f55da3442d1a85d8d0a79f489e6778c514a2a5d4b526735a"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",
@@ -964,9 +964,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-transport-iox"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6466a94b5101b92b8016959d2d270989906a8bd3958cebc3d30586f20d65d881"
+checksum = "197955a766b31af8231581463988b5a0492bc28cd40d82b30d193ab87a1c360f"
 dependencies = [
  "iceoryx2",
  "serde",
@@ -975,9 +975,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-connector-zenoh"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ecd24dc2c695035340b62f058bc06d653b3c35544182df39d03aefc042ac8b6"
+checksum = "b1ff4f48ad21c02eb2a76d1d71ae5feb6ce6f5c59ad746a16e1d966571d7ccc3"
 dependencies = [
  "crossbeam-channel",
  "iceoryx2",
@@ -993,9 +993,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-executor"
-version = "0.4.3"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac98aaa638c9cd16ea4dc893aa841af101d4729cdb3e11b125e0c4e376d08d8d"
+checksum = "138fa96989989ff3c1188b9d7f533b387f33118008d7304737212f7656541aae"
 dependencies = [
  "bitflags",
  "crossbeam-channel",
@@ -1011,9 +1011,9 @@ dependencies = [
 
 [[package]]
 name = "taktora-stats"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85f8a1d5ad61def3b35204ad113f4622b5ca953dd7ed61e4d3de67696c325dd7"
+checksum = "6ebfa9ee5f04f83ec30bf20ee46b2420ec8b67c82b9e967800ba08e22e751e67"
 
 [[package]]
 name = "thiserror"
@@ -1105,9 +1105,9 @@ dependencies = [
 
 [[package]]
 name = "toml_writer"
-version = "1.1.1+spec-1.1.0"
+version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
+checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "tracing"

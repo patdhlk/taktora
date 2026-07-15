@@ -17,7 +17,7 @@ use taktora_connector_zenoh::{
     KeyExprOwned, MockZenohSession, ZenohConnector, ZenohConnectorOptions, ZenohRouting,
     ZenohState,
 };
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ItemFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
 
 const N: usize = 256;
 const KEY: &str = "taktora/examples/pubsub";
@@ -94,9 +94,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // the executor down.
                 std::thread::sleep(Duration::from_millis(150));
                 ctx.stop_executor();
-                Ok(ControlFlow::StopChain)
+                Ok(ItemFlow::StopChain)
             } else {
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             }
         },
     ))?;
@@ -112,7 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let t = env.value;
                 println!("recv seq={} ts_ms={}", t.seq, t.ts_ms);
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
@@ -131,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     last_state = new_state;
                 }
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 

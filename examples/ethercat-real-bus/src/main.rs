@@ -22,7 +22,7 @@ use taktora_connector_ethercat::{
 };
 use taktora_connector_host::Connector;
 use taktora_ethercat_esi_rt::{EsiDevice, Lsb0};
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ItemFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
 
 /// ESI-generated typed device drivers. `build.rs` runs
 /// `taktora-ethercat-esi-build` over `esi/*.xml` and writes
@@ -313,7 +313,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if normal_mode && total > 0 && cycle >= total {
                 ctx.stop_executor();
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
@@ -340,7 +340,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(e) => eprintln!("EL2004 encode failed: {e}"),
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
@@ -406,7 +406,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 ctx.stop_executor();
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 

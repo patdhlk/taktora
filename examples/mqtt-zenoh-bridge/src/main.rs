@@ -36,7 +36,7 @@ use taktora_connector_mqtt::{
 use taktora_connector_zenoh::{
     KeyExprOwned, MockZenohSession, ZenohConnector, ZenohConnectorOptions, ZenohRouting, ZenohState,
 };
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ItemFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
 
 /// Channel capacity (iceoryx2 service buffer slots) and codec scratch size.
 const N: usize = 256;
@@ -219,9 +219,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // decides when the pipeline is fully drained and stops the
                 // executor. (Blocking here instead would starve those items:
                 // a worker held in a sleep loop does not let them drain.)
-                Ok(ControlFlow::StopChain)
+                Ok(ItemFlow::StopChain)
             } else {
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             }
         },
     ))?;
@@ -245,7 +245,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map_err(|e| -> taktora_executor::ItemError { Box::new(e) })?;
                 stats_bridge.lock().expect("stats mutex").bridged += 1;
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
@@ -279,7 +279,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if done {
                 ctx.stop_executor();
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
@@ -304,7 +304,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     zenoh_last = now;
                 }
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 

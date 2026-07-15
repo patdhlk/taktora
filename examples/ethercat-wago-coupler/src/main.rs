@@ -30,7 +30,7 @@ use taktora_connector_ethercat::{
     SmWatchdog, SubDeviceMap, connector::EthercatState, declare_pdu_storage,
 };
 use taktora_connector_host::Connector;
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ItemFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
 
 /// Channel capacity (iceoryx2 service buffer slots).
 const N: usize = 256;
@@ -280,7 +280,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if normal_mode && total > 0 && cycle >= total {
                 ctx.stop_executor();
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
@@ -350,7 +350,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 ctx.stop_executor();
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 

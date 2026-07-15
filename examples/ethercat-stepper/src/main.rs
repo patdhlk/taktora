@@ -33,7 +33,7 @@ use taktora_connector_ethercat::{
 };
 use taktora_connector_host::Connector;
 use taktora_ethercat_esi_rt::{EsiDevice, Lsb0};
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ItemFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
 
 use ethercat_stepper::codec::RawImageCodec;
 use ethercat_stepper::control::{Controller, MoveParams};
@@ -279,7 +279,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => eprintln!("EL2004 encode failed: {e}"),
             }
 
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
@@ -315,7 +315,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 matches!(last_state, taktora_connector_core::ConnectorHealthKind::Up),
                 Ordering::Relaxed,
             );
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 

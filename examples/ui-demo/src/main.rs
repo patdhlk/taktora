@@ -17,7 +17,7 @@
 use std::time::Duration;
 
 use clap::Parser;
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ItemFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
 
 use taktora_connector_host::Connector;
 use taktora_connector_ui::{UiConnector, UiConnectorOptions};
@@ -121,10 +121,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 && heartbeat >= u64::from(max)
             {
                 ctx.stop_executor();
-                return Ok(ControlFlow::StopChain);
+                return Ok(ItemFlow::StopChain);
             }
 
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 

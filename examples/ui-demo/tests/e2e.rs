@@ -15,7 +15,7 @@ use std::time::Duration;
 use taktora_connector_host::Connector;
 use taktora_connector_ui::{UiConnector, UiConnectorOptions};
 use taktora_connector_ui_client::{BindMode, Client, CommandOutcome};
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ItemFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
 
 use ui_demo::{Enable, JogRelative, Simulator, StepperState};
 
@@ -88,7 +88,7 @@ fn demo_producer_serves_the_client_control_loop_end_to_end() {
                 sim.step();
                 stepper.set(&sim.view_model());
                 jog_can.set(sim.can_jog());
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             },
         ))
         .expect("add control item");
