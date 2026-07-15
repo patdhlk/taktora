@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3](https://github.com/patdhlk/taktora/compare/taktora-ethercat-esi-v0.5.2...taktora-ethercat-esi-v0.5.3) - 2026-07-15
+
+
+### Added
+
+- Onboarding golden path + assembly guide (FEAT_0121) ([#186](https://github.com/patdhlk/taktora/pull/186))
+
 ## [0.5.2](https://github.com/patdhlk/taktora/compare/taktora-ethercat-esi-v0.5.1...taktora-ethercat-esi-v0.5.2) - 2026-06-27
 
 
