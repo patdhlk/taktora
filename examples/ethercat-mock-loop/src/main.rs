@@ -44,7 +44,7 @@ use taktora_connector_ethercat::{
     connector::EthercatState,
 };
 use taktora_connector_host::Connector;
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ItemFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
 
 /// Channel capacity (iceoryx2 service buffer slots).
 const N: usize = 256;
@@ -136,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     last_state = new_state;
                 }
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
@@ -188,7 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::thread::sleep(Duration::from_millis(20));
                 ctx.stop_executor();
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 

@@ -17,7 +17,7 @@ use taktora_connector_host::Connector;
 use taktora_connector_mqtt::{
     MockMqttSession, MqttConnector, MqttConnectorOptions, MqttQos, MqttRouting, MqttState, MqttTopic,
 };
-use taktora_executor::{ControlFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
+use taktora_executor::{ItemFlow, ExecuteResult, Executor, ExecutorError, item_with_triggers};
 
 const N: usize = 256;
 const TOPIC: &str = "taktora/examples/pubsub";
@@ -111,9 +111,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // last publish through MockMqttSession before teardown.
                 std::thread::sleep(Duration::from_millis(150));
                 ctx.stop_executor();
-                Ok(ControlFlow::StopChain)
+                Ok(ItemFlow::StopChain)
             } else {
-                Ok(ControlFlow::Continue)
+                Ok(ItemFlow::Continue)
             }
         },
     ))?;
@@ -129,7 +129,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let t = env.value;
                 println!("recv seq={} ts_ms={}", t.seq, t.ts_ms);
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
@@ -147,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     last_state = new_state;
                 }
             }
-            Ok(ControlFlow::Continue)
+            Ok(ItemFlow::Continue)
         },
     ))?;
 
