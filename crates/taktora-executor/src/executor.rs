@@ -1769,7 +1769,7 @@ fn build_attachments<'w>(
     tasks: &[TaskEntry],
     dispatch_mode: crate::DispatchMode,
     listener_storage: &mut Vec<Arc<crate::trigger::RawListener>>,
-    guards: &mut Vec<WaitSetGuard<'w, 'w, ipc::Service>>,
+    guards: &mut Vec<WaitSetGuard<'w, 'static, ipc::Service>>,
     attachment_to_task: &mut Vec<usize>,
     cyclic_task_indices: &mut Vec<usize>,
     cyclic_periods: &mut Vec<u64>,
@@ -1822,15 +1822,20 @@ fn attach_trigger_decl<'w>(
     waitset: &'w WaitSet<ipc::Service>,
     listener_storage: &mut Vec<Arc<crate::trigger::RawListener>>,
     decl: &TriggerDecl,
-) -> Result<WaitSetGuard<'w, 'w, ipc::Service>, ExecutorError> {
+) -> Result<WaitSetGuard<'w, 'static, ipc::Service>, ExecutorError> {
     // Clone the listener Arc and obtain a lifetime-erased reference. SAFETY:
     // both `listener_storage` and `waitset` are stack-local in `dispatch_loop`
     // and dropped together at its end; guards are dropped before
-    // `listener_storage`.
+    // `listener_storage`. The reference is fabricated as `'static` so the
+    // 'attachment lifetime matches `WaitSet::attach_interval` (which yields a
+    // `'static` attachment on iceoryx2 0.9), letting all three arms below unify
+    // under `WaitSetGuard`'s invariance. `'static` is the maximal fabricated
+    // lifetime; runtime soundness still rests solely on the drop-order discipline
+    // documented above, not on the borrow.
     let mut listener_ref = |listener: &Arc<crate::trigger::RawListener>| {
         listener_storage.push(Arc::clone(listener));
         let l_ref = listener_storage.last().unwrap().as_ref();
-        let l_ref: &crate::trigger::RawListener = unsafe { &*(l_ref as *const _) };
+        let l_ref: &'static crate::trigger::RawListener = unsafe { &*(l_ref as *const _) };
         l_ref
     };
 
