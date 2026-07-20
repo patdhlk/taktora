@@ -43,7 +43,7 @@ thread_attrs = ["dep:core_affinity"]
 # Always present on Linux: timerfd FFI + the iceoryx2 file-descriptor traits
 # needed to attach a timerfd to the WaitSet (REQ_0268 "Option 2", timerfd.rs).
 libc              = "0.2"
-iceoryx2-bb-posix = "0.8"
+iceoryx2-bb-posix = "0.9"
 
 [target.'cfg(unix)'.dev-dependencies]
 # EINTR robustness test (run_loop.rs): installs a no-op signal handler and

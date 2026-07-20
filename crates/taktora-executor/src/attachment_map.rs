@@ -84,7 +84,7 @@ mod tests {
     fn make_guards(
         waitset: &WaitSet<ipc::Service>,
         n: usize,
-    ) -> Vec<WaitSetGuard<'_, '_, ipc::Service>> {
+    ) -> Vec<WaitSetGuard<'_, 'static, ipc::Service>> {
         (0..n)
             .map(|i| {
                 // Distinct durations → distinct interval attachments → distinct ids.

@@ -140,7 +140,7 @@ taktora-medkit-binding-executor  = { path = "crates/taktora-medkit-binding-execu
 taktora-medkit-binding-connector = { path = "crates/taktora-medkit-binding-connector", version = "0.2.3" }
 
 # External crates
-iceoryx2          = "0.8"
+iceoryx2          = "0.9"
 thiserror         = "2"
 bitflags          = "2"
 bitvec            = "1"
@@ -184,15 +184,22 @@ tempfile          = "3"
 rsruckig          = "2"
 pollster          = "0.3"
 
-# Pinned alloc-free fork of iceoryx2 0.8.1's WaitSet fd-notification dispatch
+# Pinned alloc-free fork of iceoryx2 0.9.3's WaitSet fd-notification dispatch
 # (REQ_0104). Upstream allocates two scratch Vecs per fired-fd dispatch
-# (waitset.rs ~901 + ~624), which the master-timerfd cyclic path hits every
-# cycle, violating the zero-alloc steady-state guarantee. The fork reuses the
-# per-wait triggered-fd buffer and drops the dead (fd, deadline-idx) Vec.
-# src/waitset.rs differs from published 0.8.1; src/service/mod.rs additionally
-# imports the container `String` trait so `as_str` resolves under newer nightly
-# (rust-lang/rust#147992) — the rustdoc-JSON build cargo-public-api drives would
-# otherwise fail to compile iceoryx2. Remove once released upstream.
-# Fork: https://github.com/patdhlk/iceoryx2 (branch taktora-pin-0.8.1-alloc-free).
+# (waitset.rs: `triggered_file_descriptors` + `fd_and_deadline_queue_idx`), which
+# the master-timerfd cyclic path hits every cycle, violating the zero-alloc
+# steady-state guarantee. The fork reuses a per-WaitSet triggered-fd scratch
+# buffer and drops the dead (fd, deadline-idx) Vec. iceoryx2/src/waitset.rs is
+# the only file that differs from published 0.9.3. Remove once released upstream.
+# (The 0.8.1 fork's nightly `container String as_str` import fix is unnecessary
+# on 0.9.3, which uses `alloc::string::String` directly.)
+# Fork: https://github.com/patdhlk/iceoryx2 (branch taktora-pin-0.9.3-alloc-free).
 [patch.crates-io]
-iceoryx2 = { git = "https://github.com/patdhlk/iceoryx2", rev = "c6a41fccda31668e53dc86d2a1fe95ba34af732d" }
+iceoryx2 = { git = "https://github.com/patdhlk/iceoryx2", rev = "da4fb6e51e7b753361437e0a4d4ed9d45a638503" }
+# The fork is the full iceoryx2 workspace, so its `iceoryx2` crate depends on the
+# vendored `iceoryx2-bb-posix` (path dep). taktora-executor depends on
+# `iceoryx2-bb-posix` directly from crates.io; without this second patch the two
+# resolve to *distinct* crate instances and `TimerFd`'s `SynchronousMultiplexing`
+# impl (crates.io) is rejected by the fork's `WaitSet::attach_notification`.
+# Pin both to the same git rev so there is a single `iceoryx2-bb-posix`.
+iceoryx2-bb-posix = { git = "https://github.com/patdhlk/iceoryx2", rev = "da4fb6e51e7b753361437e0a4d4ed9d45a638503" }
