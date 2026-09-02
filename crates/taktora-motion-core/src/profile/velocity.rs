@@ -51,19 +51,18 @@ impl VelocityMove {
         let v_old = self.vel;
         let dv = self.target_vel - v_old;
         let step = self.a_max * dt;
-        let acc;
-        if dv > step {
+        let acc = if dv > step {
             self.vel = v_old + step;
-            acc = self.a_max;
+            self.a_max
         } else if dv < -step {
             self.vel = v_old - step;
-            acc = -self.a_max;
+            -self.a_max
         } else {
             self.vel = self.target_vel;
-            acc = dv / dt;
-        }
+            dv / dt
+        };
         // Trapezoidal integration of position over the cycle.
-        self.pos += 0.5 * (v_old + self.vel) * dt;
+        self.pos += f64::midpoint(v_old, self.vel) * dt;
         AxisState {
             pos: self.pos,
             vel: self.vel,
