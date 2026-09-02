@@ -251,6 +251,10 @@ impl ZenohSessionLike for MockZenohSession {
         self.peer_count.load(Ordering::Acquire)
     }
 
+    // `ZenohSessionLike`'s methods are async because the real session awaits
+    // the network; the mock answers from memory, so there is nothing to await
+    // in these impls — `async` is the trait's contract, not slack.
+    #[allow(clippy::unused_async)]
     async fn publish(&self, routing: &ZenohRouting, payload: &[u8]) -> Result<(), SessionError> {
         if !matches!(*self.state.read().unwrap(), SessionState::Alive) {
             return Err(SessionError::NotAlive {
@@ -275,6 +279,7 @@ impl ZenohSessionLike for MockZenohSession {
         Ok(())
     }
 
+    #[allow(clippy::unused_async)] // see `publish`
     async fn subscribe(
         &self,
         routing: &ZenohRouting,
@@ -390,6 +395,7 @@ impl ZenohSessionLike for MockZenohSession {
         Ok(())
     }
 
+    #[allow(clippy::unused_async)] // see `publish`
     async fn declare_queryable(
         &self,
         routing: &ZenohRouting,

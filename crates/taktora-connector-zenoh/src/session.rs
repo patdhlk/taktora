@@ -130,7 +130,7 @@ impl<'a> ReplyFrame<'a> {
     }
 
     /// Encode a 1-byte end-of-stream terminator.
-    pub fn encode_end_of_stream(out: &mut [u8]) -> Result<usize, ReplyFrameError> {
+    pub const fn encode_end_of_stream(out: &mut [u8]) -> Result<usize, ReplyFrameError> {
         if out.is_empty() {
             return Err(ReplyFrameError::BufferTooSmall { need: 1, have: 0 });
         }
@@ -139,7 +139,7 @@ impl<'a> ReplyFrame<'a> {
     }
 
     /// Encode a 1-byte gateway-synthetic timeout terminator.
-    pub fn encode_timeout(out: &mut [u8]) -> Result<usize, ReplyFrameError> {
+    pub const fn encode_timeout(out: &mut [u8]) -> Result<usize, ReplyFrameError> {
         if out.is_empty() {
             return Err(ReplyFrameError::BufferTooSmall { need: 1, have: 0 });
         }

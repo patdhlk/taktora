@@ -279,6 +279,9 @@ impl MqttSessionLike for MockMqttSession {
         self.reconnect_attempts.load(Ordering::Acquire)
     }
 
+    // The trait returns `impl Future`; the mock completes synchronously, so
+    // there is nothing to await — `async` is the trait's contract, not slack.
+    #[allow(clippy::unused_async)]
     async fn publish(&self, routing: &MqttRouting, payload: &[u8]) -> Result<(), SessionError> {
         if !matches!(self.state(), MqttConnectionState::Connected) {
             return Err(SessionError::NotConnected {
@@ -305,6 +308,7 @@ impl MqttSessionLike for MockMqttSession {
         Ok(())
     }
 
+    #[allow(clippy::unused_async)] // see `publish`
     async fn subscribe(
         &self,
         filter: &MqttTopicFilter,

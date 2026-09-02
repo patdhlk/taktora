@@ -285,6 +285,10 @@ impl MockBusDriver {
 }
 
 impl BusDriver for MockBusDriver {
+    // `BusDriver`'s methods are async because the ethercrab driver awaits the
+    // wire; the mock answers from memory, so there is nothing to await in
+    // these impls — `async` is the trait's contract, not slack.
+    #[allow(clippy::unused_async)]
     async fn bring_up(&mut self) -> Result<BringUp, ConnectorError> {
         let mut state = self.lock();
         state.bring_up_calls += 1;
@@ -294,6 +298,7 @@ impl BusDriver for MockBusDriver {
         Ok(state.bring_up_response)
     }
 
+    #[allow(clippy::unused_async)] // see `bring_up`
     async fn cycle(&mut self) -> Result<u16, ConnectorError> {
         // Pre-increment to compute the target index. Check
         // cycle_err_after BEFORE recording cycle_kind / pushing kinds /
@@ -349,6 +354,7 @@ impl BusDriver for MockBusDriver {
         Ok(wkc)
     }
 
+    #[allow(clippy::unused_async)] // see `bring_up`
     async fn recover(&mut self) -> Result<BringUp, ConnectorError> {
         let mut state = self.lock();
         state.recover_calls += 1;
