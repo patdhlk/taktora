@@ -1,4 +1,5 @@
-//! `TEST_0830` / `REQ_0830` — `emit` generates a module into a caller `OUT_DIR`.
+//! `TEST_0839` — the build helper generates `network.rs` into a caller `OUT_DIR`
+//! and the module parses as Rust (`REQ_0830`).
 
 use std::fs;
 
@@ -37,7 +38,7 @@ fn emit_generates_network_module_into_out_dir() {
     );
 }
 
-/// `TEST_0831` / `REQ_0831` — `emit` reports the network.yaml as a
+/// `TEST_0840` / `REQ_0831` (partial) — `emit` reports the network.yaml as a
 /// rerun-if-changed dependency so a config edit triggers regeneration.
 /// (The per-vendored-ESI-file part of `REQ_0831` lands once ESI
 /// resolution exists; here only the YAML source is a dependency.)

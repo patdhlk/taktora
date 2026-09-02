@@ -6,7 +6,7 @@ Live under ``crates/ethercat-netcfg-cli/tests/``.
 
 .. test:: expand subcommand prints the build-equivalent module
    :id: TEST_0841
-   :status: open
+   :status: implemented
    :verifies: REQ_0832
 
    ``netcfg expand`` over a fixture prints to stdout a module

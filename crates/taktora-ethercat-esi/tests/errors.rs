@@ -1,3 +1,4 @@
+//! `TEST_0404` — parse errors carry line and column (a `Span`).
 //! `REQ_0506` — parse errors carry source position; value errors name the path.
 use taktora_ethercat_esi::{EsiError, parse};
 

@@ -1,3 +1,6 @@
+//! TEST_0170 — REQ_0060: zero heap allocations in steady-state dispatch
+//! (differential CountingAllocator measurement over five fixture executors).
+//!
 //! Zero-allocation dispatch — verification for REQ_0060.
 //!
 //! Uses `taktora_bounded_alloc::CountingAllocator` as the test

@@ -1,6 +1,7 @@
-//! `TEST_0832` / `REQ_0832` — `run_expand` reads a network.yaml and returns
-//! exactly the generated Rust module (byte-identical to driving
-//! `parse` + `generate` directly).
+//! `TEST_0841` — `netcfg expand` prints the build-equivalent generated module
+//! (`REQ_0832`): `run_expand` reads a network.yaml and returns exactly the
+//! generated Rust module (byte-identical to driving `parse` + `generate`
+//! directly).
 
 use std::fs;
 

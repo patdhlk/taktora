@@ -1,3 +1,7 @@
+//! TEST_0300 — `ZenohRouting` field validation: invalid `key_expr` values
+//! are rejected plugin-side before any iceoryx2 service exists, and the
+//! congestion-control / priority / reliability / express knobs round-trip.
+//!
 //! Tests for the `ZenohRouting` struct and `KeyExprOwned` validation.
 //!
 //! Verifies `REQ_0401` — routing carries `key_expr` + pub/sub `QoS` and rejects

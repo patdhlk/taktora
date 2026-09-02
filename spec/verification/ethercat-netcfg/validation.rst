@@ -67,7 +67,7 @@ Live under ``crates/ethercat-netcfg-codegen/tests/validation/``.
 
 .. test:: SM-watchdog bound and enable are validated at config time
    :id: TEST_0861
-   :status: open
+   :status: implemented
    :verifies: REQ_0845
 
    The :need:`REQ_0845` matrix. PASS: ESI output SM with the watchdog

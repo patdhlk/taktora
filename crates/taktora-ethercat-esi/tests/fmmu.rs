@@ -1,3 +1,4 @@
+//! `TEST_0865` — FMMU declarations parse in order with tolerated unknowns.
 //! `REQ_0848` — `<Fmmu>` declarations captured in the IR, declaration order
 //! preserved, unknown usages tolerated as `Other`.
 use taktora_ethercat_esi::{FmmuUsage, parse};

@@ -5,7 +5,7 @@ Live under ``crates/ethercat-esi-codegen-ethercrab/tests/``.
 
 .. test:: EL3001 backend output snapshot
    :id: TEST_0420
-   :status: open
+   :status: implemented
    :verifies: REQ_0521, REQ_0522
 
    Run parse → codegen → backend → prettyplease on the canonical
@@ -35,7 +35,7 @@ Live under ``crates/ethercat-esi-codegen-ethercrab/tests/``.
 
 .. test:: Generated registry covers every emitted device
    :id: TEST_0421
-   :status: open
+   :status: implemented
    :verifies: REQ_0525
 
    For an input set with N devices, the generated module's

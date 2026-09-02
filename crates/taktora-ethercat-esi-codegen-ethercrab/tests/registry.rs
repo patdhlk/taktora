@@ -1,3 +1,4 @@
+//! `TEST_0421` — generated registry covers every emitted device.
 //! Integration test for the device REGISTRY emitted by
 //! [`EthercrabBackend::emit_module_root`] (`REQ_0525`): a static table mapping
 //! each device's `Identity` to a `fn() -> Box<dyn EsiDevice>` factory, plus a

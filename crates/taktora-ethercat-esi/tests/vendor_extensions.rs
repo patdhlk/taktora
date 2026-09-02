@@ -1,3 +1,4 @@
+//! `TEST_0403` — vendor-specific elements survive as `RawXml` without failing the parse.
 //! `REQ_0505` — unrecognised device-level vendor extensions captured as `RawXml`.
 use taktora_ethercat_esi::parse;
 

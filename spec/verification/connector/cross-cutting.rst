@@ -9,7 +9,7 @@ Per-crate, no IPC, parallel-safe.
 .. test:: ExponentialBackoff invariants
    :id: TEST_0100
    :status: implemented
-   :verifies: REQ_0233
+   :verifies: REQ_0232, REQ_0233
 
    Property test (``proptest``) on ``ExponentialBackoff`` confirming:
    delays are monotonically non-decreasing until the cap is reached,
@@ -29,7 +29,7 @@ Per-crate, no IPC, parallel-safe.
 
 .. test:: MqttRouting wildcard demux predicate
    :id: TEST_0102
-   :status: open
+   :status: implemented
    :verifies: REQ_0254
 
    Unit-level coverage of the topic-match predicate independent of any

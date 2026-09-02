@@ -76,7 +76,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Cycle time configurable
    :id: TEST_0206
-   :status: open
+   :status: implemented
    :verifies: REQ_0316
 
    Unit test that ``EthercatConnectorOptions::cycle_time`` accepts
@@ -163,7 +163,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Inbound bridge saturation surfaces as DroppedInbound
    :id: TEST_0214
-   :status: open
+   :status: implemented
    :verifies: REQ_0324
 
    Mock-frame test: configure a tiny inbound-bridge capacity. Block
@@ -425,7 +425,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Startup SDOs written in order before PDO assignment
    :id: TEST_0869
-   :status: open
+   :status: implemented
    :verifies: REQ_0853
 
    Unit tests in ``taktora-connector-ethercat`` over the startup-SDO

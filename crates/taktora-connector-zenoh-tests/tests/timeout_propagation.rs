@@ -22,6 +22,9 @@ use taktora_executor::Executor;
 
 const N: usize = 256;
 
+/// TEST_0307 — query timeout: with a queryable that never replies, the
+/// gateway emits the synthetic `0x03` terminator and `ZenohQuerier::try_recv`
+/// observes exactly one `QuerierEvent::Timeout` for the in-flight `QueryId`.
 #[test]
 fn query_timeout_emits_synthetic_terminator() {
     // TEST_0307: with the mock hanging, the dispatcher's timeout fires

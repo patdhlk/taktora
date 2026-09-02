@@ -7,7 +7,7 @@ test scopes its own ``Node`` name.
 .. test:: ChannelWriter → ChannelReader round-trip
    :id: TEST_0120
    :status: implemented
-   :verifies: REQ_0205, REQ_0223
+   :verifies: REQ_0200, REQ_0205, REQ_0223
 
    End-to-end zero-copy round-trip through a real iceoryx2 service:
    ``writer.send(&value)`` followed by ``reader.try_recv()`` yields

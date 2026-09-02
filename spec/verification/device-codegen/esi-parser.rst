@@ -60,7 +60,7 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
 
 .. test:: Vendor-specific elements survive as RawXml
    :id: TEST_0403
-   :status: open
+   :status: implemented
    :verifies: REQ_0505
 
    Fixture file with a fabricated ``<Vendor:UnknownElement
@@ -72,7 +72,7 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
 
 .. test:: Parse errors carry line and column
    :id: TEST_0404
-   :status: open
+   :status: implemented
    :verifies: REQ_0506
 
    A deliberately malformed ESI fixture (unclosed tag at known
@@ -83,7 +83,7 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
 
 .. test:: Per-SM watchdog-trigger enable decodes from control-byte bit 6
    :id: TEST_0859
-   :status: open
+   :status: implemented
    :verifies: REQ_0843
 
    Unit tests in ``crates/taktora-ethercat-esi/tests/sm_watchdog.rs``
@@ -98,7 +98,7 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
 
 .. test:: FMMU declarations parse in order with tolerated unknowns
    :id: TEST_0865
-   :status: open
+   :status: implemented
    :verifies: REQ_0848
 
    Unit tests in ``crates/taktora-ethercat-esi/tests/fmmu.rs`` parse
@@ -110,7 +110,7 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
 
 .. test:: EEPROM source data decodes; bad hex is a located error
    :id: TEST_0866
-   :status: open
+   :status: implemented
    :verifies: REQ_0849
 
    Unit tests in ``crates/taktora-ethercat-esi/tests/eeprom.rs`` parse

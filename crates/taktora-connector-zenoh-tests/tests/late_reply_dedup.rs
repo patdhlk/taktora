@@ -26,6 +26,9 @@ use taktora_executor::Executor;
 
 const N: usize = 256;
 
+/// TEST_0307 — (post-terminator half) after the `0x03` timeout terminator,
+/// subsequent `try_recv` calls for that `QueryId` yield nothing, even when
+/// the upstream reply / end-of-stream callbacks fire late.
 #[test]
 fn late_reply_after_timeout_is_dropped() {
     let session = Arc::new(MockZenohSession::new());

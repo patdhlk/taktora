@@ -253,12 +253,16 @@ mod tests {
         assert_eq!(CanIface::new("can 0"), Err(CanIfaceError::InvalidChar));
     }
 
+    /// `TEST_0501` — 11-bit standard IDs reject construction above `0x7FF`
+    /// (`REQ_0601`).
     #[test]
     fn standard_id_caps_at_0x7ff() {
         assert!(CanId::standard(0x7FF).is_ok());
         assert_eq!(CanId::standard(0x800), Err(CanIdError::StandardOverflow));
     }
 
+    /// `TEST_0501` — 29-bit extended IDs reject construction above
+    /// `0x1FFF_FFFF` (`REQ_0601`).
     #[test]
     fn extended_id_caps_at_29_bits() {
         assert!(CanId::extended(0x1FFF_FFFF).is_ok());
@@ -268,6 +272,8 @@ mod tests {
         );
     }
 
+    /// `TEST_0501` — the `extended` flag is identity-bearing:
+    /// `CanId::standard(0x123) != CanId::extended(0x123)` (`REQ_0615`).
     #[test]
     fn standard_and_extended_with_same_value_are_distinct() {
         let s = CanId::standard(0x123).unwrap();
@@ -283,6 +289,9 @@ mod tests {
         assert_eq!(CanFrameKind::Fd.max_payload(), 64);
     }
 
+    /// `TEST_0501` — a `CanRouting` carrying all five fields (`iface`,
+    /// `can_id`, `mask`, `kind`, `fd_flags`) round-trips by value with
+    /// equality preserved (`REQ_0601`).
     #[test]
     fn routing_round_trips() {
         let iface = CanIface::new("vcan0").unwrap();

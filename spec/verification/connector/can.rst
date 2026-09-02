@@ -22,7 +22,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: CanRouting field round-trip
    :id: TEST_0501
-   :status: open
+   :status: implemented
    :verifies: REQ_0601, REQ_0615
 
    Property test (``proptest``) generating arbitrary
@@ -143,7 +143,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: Inbound bridge saturation surfaces as DroppedInbound
    :id: TEST_0510
-   :status: open
+   :status: implemented
    :verifies: REQ_0606, REQ_0608
 
    With ``inbound_bridge_capacity = 1`` and a deliberately
@@ -155,7 +155,7 @@ vcan && ip link set up vcan0``).
 .. test:: socketcan-integration feature gates the real socketcan dep
    :id: TEST_0511
    :status: implemented
-   :verifies: REQ_0603, REQ_0604
+   :verifies: REQ_0602, REQ_0603, REQ_0604
    :links: BB_0070, IMPL_0080
 
    Build the crate twice — once with default features, once with
@@ -173,7 +173,7 @@ vcan && ip link set up vcan0``).
 .. test:: Linux raw-socket smoke against vcan0
    :id: TEST_0512
    :status: implemented
-   :verifies: REQ_0502, REQ_0613, REQ_0614
+   :verifies: REQ_0502, REQ_0602, REQ_0613, REQ_0614, REQ_0615
    :links: BB_0070, IMPL_0080
 
    Layer-2 integration test (``socketcan-integration`` feature,

@@ -280,6 +280,9 @@ mod tests {
         );
     }
 
+    /// `TEST_0823` — a synthetic framework panic injected through
+    /// `guard_or_fatal` fires the fatal terminal exactly once with the
+    /// expected `FatalSite` (`PoolWorker`) and cause.
     #[test]
     fn guard_or_fatal_panic_fires_once_with_site_and_cause() {
         let (rec, dispatch) = recording_dispatch();
@@ -298,6 +301,9 @@ mod tests {
         assert_eq!(entries[0].1, "synthetic infra panic");
     }
 
+    /// `TEST_0823` — the `ExecutorRunLoop` site is verified at the
+    /// `guard_or_fatal` mechanism level (no deterministic run-loop
+    /// fault-injection seam exists).
     #[test]
     fn guard_or_fatal_propagates_run_loop_site() {
         // Covers the ExecutorRunLoop site via the same mechanism (a full
