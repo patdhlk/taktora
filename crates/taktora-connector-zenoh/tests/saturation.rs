@@ -88,7 +88,7 @@ fn inbound_bridge_drop_count_persists_after_drain() {
     assert_eq!(bridge.dropped_count(), 2);
 }
 
-/// TEST_0306 — (pub/sub-sample half) inbound bridge saturation on a
+/// `TEST_0306` — (pub/sub-sample half) inbound bridge saturation on a
 /// subscriber channel drops samples, surfaces the cumulative count, and
 /// signals `Degraded`.
 ///
@@ -142,7 +142,7 @@ fn subscriber_overflow_emits_degraded_transition() {
     }
 }
 
-/// TEST_0306 — (reply-chunk half) inbound bridge saturation on a querier
+/// `TEST_0306` — (reply-chunk half) inbound bridge saturation on a querier
 /// channel drops reply chunks, surfaces the cumulative count, and signals
 /// `Degraded`.
 ///

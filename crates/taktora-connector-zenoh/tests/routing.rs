@@ -1,4 +1,4 @@
-//! TEST_0300 — `ZenohRouting` field validation: invalid `key_expr` values
+//! `TEST_0300` — `ZenohRouting` field validation: invalid `key_expr` values
 //! are rejected plugin-side before any iceoryx2 service exists, and the
 //! congestion-control / priority / reliability / express knobs round-trip.
 //!
