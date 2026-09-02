@@ -193,19 +193,26 @@ impl CyclicFieldbus for MockCyclicFieldbus {
     type Routing = MockRouting;
     type Error = core::convert::Infallible;
 
-    async fn exchange(&mut self) -> Result<CycleQuality, Self::Error> {
-        for a in 0..self.n {
-            if !self.stale[a] {
-                self.advance_drive(a);
+    // `exchange` is async on the trait because a real bus awaits the cycle
+    // phase and the wire round; the virtual drives advance in memory, so the
+    // work happens eagerly and an already-resolved future is returned.
+    fn exchange(
+        &mut self,
+    ) -> impl core::future::Future<Output = Result<CycleQuality, Self::Error>> {
+        core::future::ready({
+            for a in 0..self.n {
+                if !self.stale[a] {
+                    self.advance_drive(a);
+                }
             }
-        }
-        let all_fresh = !self.stale.iter().any(|s| *s);
-        let q = CycleQuality {
-            cycle_index: self.cycle,
-            all_devices_fresh: all_fresh,
-        };
-        self.cycle += 1;
-        Ok(q)
+            let all_fresh = !self.stale.iter().any(|s| *s);
+            let q = CycleQuality {
+                cycle_index: self.cycle,
+                all_devices_fresh: all_fresh,
+            };
+            self.cycle += 1;
+            Ok(q)
+        })
     }
 
     fn read_input(&self, r: &MockRouting, dst: &mut [u8]) -> Validity {
