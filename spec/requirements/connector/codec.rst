@@ -44,8 +44,9 @@ How typed values become payload bytes, and back. This cluster
 
 .. req:: Codec encode error variant
    :id: REQ_0213
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0032
+   :links: IMPL_0010, IMPL_0030, TEST_0111
 
    When ``PayloadCodec::encode`` fails (buffer too small, serializer error),
    ``ChannelWriter::send`` shall return ``ConnectorError::Codec`` carrying
@@ -53,8 +54,9 @@ How typed values become payload bytes, and back. This cluster
 
 .. req:: Codec decode error variant
    :id: REQ_0214
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0032
+   :links: IMPL_0010, IMPL_0020, IMPL_0030, TEST_0112
 
    When ``PayloadCodec::decode`` fails on a received envelope,
    ``ChannelReader::try_recv`` shall return ``ConnectorError::Codec`` and

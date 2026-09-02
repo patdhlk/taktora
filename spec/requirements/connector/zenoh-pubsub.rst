@@ -43,8 +43,9 @@ The pub/sub half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: JsonCodec is the default codec for Zenoh
    :id: REQ_0402
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0043
+   :links: IMPL_0060, TEST_0302
 
    The Zenoh connector shall accept any ``PayloadCodec`` via its
    ``C`` generic parameter (re-affirming :need:`REQ_0211`), with
@@ -103,8 +104,9 @@ The pub/sub half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: Zenoh zero-copy publish via iceoryx2 loan
    :id: REQ_0407
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0043
+   :links: IMPL_0060, TEST_0302
 
    ``ChannelWriter::send`` on a Zenoh channel shall publish
    envelopes via ``Publisher::loan`` so that the codec writes the
@@ -112,8 +114,9 @@ The pub/sub half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: Zenoh gateway is byte-only on the inbound publish path
    :id: REQ_0408
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0043
+   :links: IMPL_0060, TEST_0302
 
    On the inbound leg (Zenoh peer → plugin), the gateway shall
    publish the raw payload bytes received from the Zenoh subscriber

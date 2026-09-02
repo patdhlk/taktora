@@ -57,8 +57,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Static PDO mapping per SubDevice
    :id: REQ_0314
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: BB_0033, IMPL_0050, TEST_0204
 
    The connector shall accept a static PDO-mapping description per
    SubDevice at build time, declared by the application crate via
@@ -114,8 +115,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Working-counter mismatch degrades health
    :id: REQ_0320
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0210
 
    When the working counter on a completed cycle is below the expected
    value, the gateway shall transition ``ConnectorHealth`` to ``Degraded``
@@ -123,8 +125,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Tokio sidecar contained inside the connector crate
    :id: REQ_0321
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: BB_0030, IMPL_0050, TEST_0211
 
    The EtherCAT gateway shall host the ethercrab TX/RX task on a tokio
    runtime contained inside ``taktora-connector-ethercat``. Tokio shall not
@@ -132,8 +135,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Bridge channels are bounded
    :id: REQ_0322
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: BB_0034, IMPL_0050, TEST_0212
 
    The outbound (taktora-executor → tokio) and inbound (tokio →
    taktora-executor) bridges between the plugin and the gateway sidecar
@@ -215,8 +219,9 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Per-channel routing registry on the gateway
    :id: REQ_0328
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0041
+   :links: IMPL_0050, TEST_0219, TEST_0220, TEST_0221
 
    The gateway shall maintain a registry mapping each open
    ``ChannelDescriptor`` to its ``EthercatRouting`` and direction

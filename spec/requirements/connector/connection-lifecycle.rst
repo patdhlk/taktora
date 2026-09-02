@@ -16,8 +16,9 @@ retries after a disconnect. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: ConnectorHealth state machine
    :id: REQ_0230
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0034
+   :links: IMPL_0010, TEST_0101
 
    The framework shall define ``ConnectorHealth`` as an enum with
    variants ``Up``, ``Connecting { since }``, ``Degraded { reason }``,
@@ -74,8 +75,9 @@ retries after a disconnect. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: ExponentialBackoff default policy
    :id: REQ_0233
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0034
+   :links: IMPL_0010, TEST_0100
 
    The framework shall ship an ``ExponentialBackoff`` implementation of
    ``ReconnectPolicy`` configurable with initial delay, max delay, growth
@@ -83,8 +85,9 @@ retries after a disconnect. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: HealthEvent emitted on every transition
    :id: REQ_0234
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0034
+   :links: IMPL_0010, TEST_0101
 
    Every transition between ``ConnectorHealth`` variants shall emit a
    ``HealthEvent`` on the connector's health channel.

@@ -43,8 +43,9 @@ The plugin-side public API and its typed routing contract. This cluster
 
 .. req:: create_writer / create_reader return concrete handles
    :id: REQ_0223
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0033
+   :links: IMPL_0040, TEST_0120
 
    ``Connector::create_writer<T>`` and ``Connector::create_reader<T>``
    shall return concrete generic types ``ChannelWriter<T, C, N>`` and

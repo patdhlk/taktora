@@ -26,8 +26,9 @@ the iceoryx2 service shape that carries it. This cluster ``:satisfies:``
 
 .. req:: Per-channel max payload size
    :id: REQ_0201
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0031
+   :links: BB_0010, IMPL_0010, TEST_0103, TEST_0125
 
    The framework shall allow each channel to declare its maximum payload
    size at service-creation time, carried in ``ChannelDescriptor``. A

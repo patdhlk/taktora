@@ -34,8 +34,9 @@ The query half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: ZenohQuerier maps QueryId to envelope correlation_id
    :id: REQ_0421
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0044
+   :links: BB_0043, IMPL_0060, TEST_0303
 
    ``ZenohQuerier::send(q: Q)`` shall mint a fresh ``QueryId`` for
    each call, populate the outbound envelope's ``correlation_id``
@@ -72,8 +73,9 @@ The query half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: Reply stream end-of-stream framed in payload
    :id: REQ_0424
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0044
+   :links: BB_0043, IMPL_0060, TEST_0303
 
    The end of a reply stream shall be signalled by a one-byte
    Zenoh-private frame discriminator at the start of the reply
@@ -113,8 +115,9 @@ The query half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: Codec applied to Q on send and to R on reply
    :id: REQ_0427
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0044
+   :links: IMPL_0060, TEST_0303
 
    ``ZenohQuerier::send`` shall encode ``Q`` via the connector's
    ``C: PayloadCodec`` into the envelope payload before SHM

@@ -17,8 +17,9 @@ The CAN-specific health surface. This cluster ``:satisfies:``
 
 .. req:: ConnectorHealth aggregates per-iface state via worst-of
    :id: REQ_0630
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0049
+   :links: BB_0072, IMPL_0080, TEST_0507
 
    The single externally-visible ``ConnectorHealth`` reported by
    ``CanConnector`` shall be the worst (least-healthy) of the
@@ -31,8 +32,9 @@ The CAN-specific health surface. This cluster ``:satisfies:``
 
 .. req:: Error frames consumed internally
    :id: REQ_0631
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0049
+   :links: BB_0072, IMPL_0080, TEST_0513
 
    The gateway shall enable the ``CAN_ERR_FLAG`` error-frame
    reporting mode on each owned interface via
@@ -44,8 +46,9 @@ The CAN-specific health surface. This cluster ``:satisfies:``
 
 .. req:: error-passive transitions to Degraded
    :id: REQ_0632
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0049
+   :links: IMPL_0080, TEST_0507
 
    When an interface reports an error-passive or error-warning
    condition via an error frame, the gateway shall transition
@@ -55,8 +58,9 @@ The CAN-specific health surface. This cluster ``:satisfies:``
 
 .. req:: bus-off transitions to Down and triggers reconnect
    :id: REQ_0633
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0049
+   :links: IMPL_0080, TEST_0506
 
    When an interface reports a bus-off condition via an error
    frame, the gateway shall transition that interface's sub-state
@@ -69,8 +73,9 @@ The CAN-specific health surface. This cluster ``:satisfies:``
 
 .. req:: ReconnectPolicy reused; ExponentialBackoff default
    :id: REQ_0634
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0049
+   :links: IMPL_0080, TEST_0506
 
    The CAN connector shall use the framework-level
    ``ReconnectPolicy`` trait (:need:`REQ_0232`) with
@@ -83,8 +88,9 @@ The CAN-specific health surface. This cluster ``:satisfies:``
 
 .. req:: HealthEvent emitted on every transition
    :id: REQ_0635
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0049
+   :links: IMPL_0080, TEST_0507
 
    Every transition between ``ConnectorHealth`` variants —
    including per-interface sub-state transitions that change the
@@ -94,8 +100,9 @@ The CAN-specific health surface. This cluster ``:satisfies:``
 
 .. req:: Error frames not exposed to plugin
    :id: REQ_0636
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0049
+   :links: IMPL_0080, TEST_0513
 
    No ``ChannelReader<T>`` shall ever observe a CAN error frame
    as a ``Received<T>`` value. Error-frame visibility is confined

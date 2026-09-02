@@ -35,8 +35,9 @@ feature directly.
 
 .. req:: CanConnector implements Connector
    :id: REQ_0600
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0070, BB_0071, IMPL_0080, TEST_0500
 
    The connector crate shall expose ``CanConnector<C: PayloadCodec>``
    that implements the ``Connector`` trait with
@@ -71,8 +72,9 @@ feature directly.
 
 .. req:: socketcan-integration cargo feature gates the real socketcan dep
    :id: REQ_0603
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0070, IMPL_0080, TEST_0511
 
    The ``socketcan`` crate shall be an optional dependency of
    ``taktora-connector-can``, activated only by a default-off
@@ -82,8 +84,9 @@ feature directly.
 
 .. req:: MockCanInterface ships unfeature-gated
    :id: REQ_0604
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0070, BB_0075, IMPL_0080, TEST_0511
 
    ``MockCanInterface`` — an in-process loopback implementation of
    the ``CanInterfaceLike`` trait — shall ship in the default

@@ -16,8 +16,9 @@ The gateway-side multiplexer. This cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: Multiple interfaces per gateway
    :id: REQ_0620
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0048
+   :links: BB_0072, IMPL_0080, TEST_0505
 
    A single ``CanGateway`` instance shall be capable of owning
    multiple Linux SocketCAN interfaces (e.g. ``can0``, ``can1``,
@@ -31,8 +32,9 @@ The gateway-side multiplexer. This cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: Routing identifies the interface
    :id: REQ_0621
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0048
+   :links: BB_0071, IMPL_0080, TEST_0505
 
    ``CanRouting::iface`` shall identify which gateway-owned
    SocketCAN interface a channel binds to. The gateway shall
@@ -43,8 +45,9 @@ The gateway-side multiplexer. This cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: Per-interface filter is the union of channel masks
    :id: REQ_0622
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0048
+   :links: BB_0074, IMPL_0080, TEST_0504
 
    For each owned interface, the gateway shall compute the union
    of ``(can_id, mask, extended)`` tuples drawn from every
@@ -56,8 +59,9 @@ The gateway-side multiplexer. This cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: Filter recomputed on channel add/remove
    :id: REQ_0623
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0048
+   :links: BB_0074, IMPL_0080, TEST_0504
 
    The per-interface filter (per :need:`REQ_0622`) shall be
    recomputed and re-applied whenever a ``ChannelReader`` is
@@ -67,8 +71,9 @@ The gateway-side multiplexer. This cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: Inbound demux to all matching readers
    :id: REQ_0624
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0048
+   :links: BB_0072, BB_0074, IMPL_0080, TEST_0505
 
    When a CAN frame arrives on an interface, the gateway shall
    publish the frame's data bytes (per :need:`REQ_0614`) onto the
@@ -80,8 +85,9 @@ The gateway-side multiplexer. This cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: Per-iface routing registry has stable iteration order
    :id: REQ_0625
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0048
+   :links: BB_0072, IMPL_0080, TEST_0514
 
    The gateway shall maintain a per-interface routing registry
    mapping each open ``ChannelDescriptor`` to its ``CanRouting``
