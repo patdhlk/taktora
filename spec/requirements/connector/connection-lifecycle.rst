@@ -6,7 +6,7 @@ retries after a disconnect. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. feat:: Connection lifecycle
    :id: FEAT_0034
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0030
 
    The observable health state of every connector and the policy by which
@@ -27,8 +27,9 @@ retries after a disconnect. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: subscribe_health returns a Channel of HealthEvent
    :id: REQ_0231
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0034
+   :links: IMPL_0040, TEST_0308
 
    ``Connector::subscribe_health()`` shall return an observable handle
    over the connector's ``HealthEvent`` stream so callers can wire
@@ -66,8 +67,9 @@ retries after a disconnect. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: ReconnectPolicy trait
    :id: REQ_0232
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0034
+   :links: BB_0001, IMPL_0010, TEST_0100
 
    The framework shall define a ``ReconnectPolicy`` trait with
    ``next_delay() -> Duration`` and ``reset()`` for connectors whose
@@ -94,8 +96,9 @@ retries after a disconnect. This cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. req:: Stack-internal-reconnect connectors emit health uniformly
    :id: REQ_0235
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0034
+   :links: BB_0042, TEST_0308, TEST_0309
 
    Connectors whose underlying protocol stack manages reconnect internally
    (e.g. tonic-managed gRPC channels) shall not be required to use

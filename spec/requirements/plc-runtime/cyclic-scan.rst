@@ -8,7 +8,7 @@ timer-slack guarantees that bound long-run cyclic precision.
 
 .. feat:: Cyclic scan execution
    :id: FEAT_0011
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0010
 
    Periodic execution of a scheduled item at a configured scan period —

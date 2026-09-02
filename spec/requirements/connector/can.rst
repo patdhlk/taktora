@@ -45,8 +45,9 @@ feature directly.
 
 .. req:: CanRouting carries iface, can_id, mask, kind, fd_flags
    :id: REQ_0601
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0071, IMPL_0080, TEST_0501
 
    The ``CanRouting`` struct shall identify one channel by Linux
    network interface name (``iface``, bounded ASCII string of
@@ -60,8 +61,9 @@ feature directly.
 
 .. req:: Linux is the supported host OS for real I/O
    :id: REQ_0602
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0070, IMPL_0080, TEST_0511, TEST_0512
 
    The CAN gateway shall open SocketCAN interfaces via the Linux
    ``PF_CAN`` socket family, requiring the ``CAP_NET_RAW``
@@ -108,8 +110,9 @@ feature directly.
 
 .. req:: CAN bridge channels are bounded
    :id: REQ_0606
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0073, IMPL_0080, TEST_0510
 
    The outbound (taktora-executor → tokio) and inbound (tokio →
    taktora-executor) bridges between the plugin and the CAN gateway
@@ -128,8 +131,9 @@ feature directly.
 
 .. req:: Inbound bridge saturation drops frames and signals Degraded
    :id: REQ_0608
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0073, IMPL_0080, TEST_0510
 
    When the inbound bridge channel is full, the gateway shall
    (1) increment the per-channel inbound-drop counter exposed via

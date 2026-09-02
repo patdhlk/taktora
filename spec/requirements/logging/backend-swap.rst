@@ -9,7 +9,7 @@ touching any caller site, riding on the ``log`` crate's own
 
 .. feat:: Backend-swap surface
    :id: FEAT_0073
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0071
 
    The mechanism by which an integrator replaces the DLT backend with

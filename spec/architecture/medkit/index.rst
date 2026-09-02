@@ -811,7 +811,7 @@ provider seam.
 
 .. building-block:: SSE replay ring + keep-alive
    :id: BB_0120
-   :status: open
+   :status: implemented
    :implements: REQ_0961, REQ_0966
 
    A bounded (100-event) replay ring retained alongside the change-event
@@ -826,7 +826,7 @@ provider seam.
 
 .. building-block:: ActionSink write seam + operations surface
    :id: BB_0121
-   :status: open
+   :status: implemented
    :implements: REQ_0969, REQ_0970, REQ_0971, REQ_0972, REQ_0973, REQ_0974, REQ_0975
 
    The command-side seam, mirroring the read ``Provider`` seam. In
@@ -844,7 +844,7 @@ provider seam.
 
 .. building-block:: Read-family completion
    :id: BB_0122
-   :status: open
+   :status: implemented
    :implements: REQ_0976, REQ_0977, REQ_0978, REQ_0979
 
    The surfaces that bring the read side to contract fidelity (:need:`ADR_0127`).
@@ -860,7 +860,7 @@ provider seam.
 
 .. building-block:: Build identity — capture crate + injection seam
    :id: BB_0123
-   :status: open
+   :status: implemented
    :implements: REQ_0990
 
    A leaf ``publish = false`` crate ``taktora-build-info`` plus the seam that

@@ -7,7 +7,7 @@ the iceoryx2 service shape that carries it. This cluster ``:satisfies:``
 
 .. feat:: Envelope transport
    :id: FEAT_0031
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0030
 
    The on-wire form of every message crossing the plugin↔gateway boundary
@@ -16,8 +16,9 @@ the iceoryx2 service shape that carries it. This cluster ``:satisfies:``
 
 .. req:: ConnectorEnvelope is a POD type
    :id: REQ_0200
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0031
+   :links: BB_0010, IMPL_0020, TEST_0120
 
    The framework shall define ``ConnectorEnvelope`` as a ``#[repr(C)]``
    plain-old-data type that derives ``ZeroCopySend`` (iceoryx2) and

@@ -7,7 +7,7 @@ systems.
 
 .. feat:: Real-time worker scheduling
    :id: FEAT_0015
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0010
 
    Worker threads can be pinned and prioritized for predictable latency on

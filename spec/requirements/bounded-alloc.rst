@@ -20,7 +20,7 @@ Umbrella feature
 
 .. feat:: Bounded global allocator
    :id: FEAT_0040
-   :status: open
+   :status: implemented
 
    A reusable ``#[global_allocator]`` implementation that draws every
    allocation from a statically-sized, pre-allocated arena with hard

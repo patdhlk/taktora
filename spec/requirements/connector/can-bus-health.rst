@@ -6,7 +6,7 @@ The CAN-specific health surface. This cluster ``:satisfies:``
 
 .. feat:: Bus health, error frames, and reconnect
    :id: FEAT_0049
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0046
 
    The CAN-specific health surface: per-interface state aggregated

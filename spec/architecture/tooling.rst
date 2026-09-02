@@ -111,7 +111,7 @@ Implementation footprint
 
 .. impl:: Coverage tooling — scripts/coverage.sh + ci-coverage.yml
    :id: IMPL_0092
-   :status: open
+   :status: implemented
    :refines: REQ_0991, REQ_0992, REQ_0993, REQ_0994, REQ_0995, REQ_0996, REQ_0997, REQ_0998, REQ_0999, REQ_1000, REQ_1001
 
    The realising artefacts, all in-repo:

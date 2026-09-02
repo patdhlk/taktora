@@ -47,14 +47,97 @@ the consumer crate pulls in the emitted module via ``include!``.
 5. Building blocks
 ------------------
 
-The SM-watchdog resolution and validation building block is the only
-arc42 building block named in this v1 slice; the broader parse / codegen
-pipeline is described by the capability-cluster features
-(:need:`FEAT_0081` – :need:`FEAT_0085`) and their decisions.
+One building block per crate of the pipeline — parse layer, codegen
+layer, build-script glue, CLI — mirroring the per-crate decomposition of
+the device-driver toolchain (:need:`BB_0060` – :need:`BB_0066`), plus the
+SM-watchdog resolution slice (:need:`BB_0096`), which cuts across the
+parse and codegen layers and is kept as its own block because it carries
+the safety argument of :need:`AOU_0016`. Each block records the crate's
+job, public surface, and the dependencies it is and is not allowed to
+carry; the capability-cluster features (:need:`FEAT_0081` –
+:need:`FEAT_0085`) and their decisions describe the *why*.
+
+.. building-block:: ethercat-netcfg (parse layer)
+   :id: BB_0124
+   :status: open
+   :implements: FEAT_0081, REQ_0820, REQ_0821, REQ_0822, REQ_0823, REQ_0824, REQ_0834
+
+   The parse crate. Turns one ``network.yaml`` document into the typed
+   ``NetworkConfig`` IR — bus config, device instances, channel
+   bindings — via the single public entry point
+   ``pub fn parse(yaml: &str) -> Result<NetworkConfig, NetcfgError>``
+   (:need:`REQ_0820`, :need:`REQ_0821`). Rejects a multi-bus document
+   (:need:`REQ_0822`) and resolves channel → device references by stable
+   label, never by bus address (:need:`REQ_0823`). ESI references must
+   be local, vendored files; an ``http(s)://`` reference is a parse error
+   (:need:`REQ_0834`), so the build never fetches. Depends on
+   ``taktora-ethercat-esi`` and ``taktora-fieldbus-od-core`` (re-exporting
+   ``Identity``) plus ``serde`` / ``serde_norway``; it carries no
+   dependency on the connector runtime (:need:`REQ_0824`). Build-host
+   tool, ``std``. Source: ``crates/taktora-ethercat-netcfg/src/``.
+
+.. building-block:: ethercat-netcfg-codegen (codegen layer)
+   :id: BB_0125
+   :status: open
+   :implements: FEAT_0082, REQ_0825, REQ_0826, REQ_0827, REQ_0828, REQ_0829, REQ_0836, REQ_0837, REQ_0838
+
+   The code generator. ``pub fn generate(&NetworkConfig) -> Result<String,
+   CodegenError>`` turns the IR into ``prettyplease``-formatted Rust
+   source for the ``taktora-connector-ethercat`` runtime: the static
+   ``SubDeviceMap`` / ``PDO_MAP`` tables (:need:`REQ_0825`), named
+   ``EthercatRouting`` and channel-name constants (:need:`REQ_0826`),
+   configured addresses assigned by bus position unless overridden
+   (:need:`REQ_0827`), the expected working counter derived from PDO
+   directions (:need:`REQ_0828`), and the bring-up identity table for
+   the physical-bus assertions (:need:`REQ_0838`, codegen half). It is
+   also where the derivable-fault validation lives — overlapping slices,
+   out-of-image or zero-length slices, dangling labels and collisions are
+   hard errors (:need:`REQ_0836`), unmapped process-image gaps warn
+   (:need:`REQ_0837`) — so a bad configuration fails at ``cargo build``,
+   not on the bus. Output is byte-deterministic for a given IR
+   (:need:`REQ_0829`). The runtime types are named textually, so this
+   crate depends on ``taktora-ethercat-netcfg``, ``proc-macro2`` /
+   ``quote`` / ``syn`` / ``prettyplease`` and never on
+   ``taktora-connector-ethercat``. Source:
+   ``crates/taktora-ethercat-netcfg-codegen/src/``.
+
+.. building-block:: ethercat-netcfg-build (build-script glue)
+   :id: BB_0126
+   :status: open
+   :implements: FEAT_0083, REQ_0830, REQ_0831
+
+   The ``build.rs`` entry point. A consumer's build script calls
+   ``run(yaml_path)``, a thin wrapper over the unit-testable
+   ``emit(yaml_path, out_dir) -> Result<Emitted, BuildError>`` that reads
+   the YAML, drives :need:`BB_0124` and :need:`BB_0125`, writes
+   ``$OUT_DIR/network.rs`` for the consumer to ``include!``
+   (:need:`REQ_0830`), and prints the ``cargo:rerun-if-changed``
+   directives so a config edit regenerates the module (:need:`REQ_0831`;
+   today the YAML only — the per-vendored-ESI dependency is a tracked
+   gap). Errors from every layer are surfaced as one ``BuildError``.
+   Source: ``crates/taktora-ethercat-netcfg-build/src/``; consumers:
+   ``examples/ethercat-stepper``, ``examples/ethercat-wago-coupler``.
+
+.. building-block:: ethercat-netcfg-cli (netcfg front end)
+   :id: BB_0127
+   :status: open
+   :implements: FEAT_0084, REQ_0832, REQ_0833, REQ_0835
+
+   The ``netcfg`` command-line front end: a thin ``clap`` binary over a
+   library core that returns ``String``s rather than printing, so every
+   subcommand is unit-testable. ``netcfg expand`` prints the
+   build-equivalent generated module for inspection (:need:`REQ_0832`,
+   byte-identical to :need:`BB_0126`'s output); ``netcfg fetch`` vendors
+   ESI files next to the config and pins them by SHA-256 and revision in
+   a JSON lockfile (:need:`REQ_0833`, :need:`REQ_0835` — local sources
+   today; a remote fetch path is a tracked gap); ``netcfg verify``
+   re-checks the pins. Depends on the parse and codegen crates plus
+   ``clap`` / ``serde_json`` / ``sha2``; never on the connector runtime.
+   Source: ``crates/taktora-ethercat-netcfg-cli/src/``.
 
 .. building-block:: ethercat-netcfg SM-watchdog resolution and validation
    :id: BB_0096
-   :status: open
+   :status: implemented
    :implements: FEAT_0085
    :refines: REQ_0844, REQ_0845
 

@@ -6,7 +6,7 @@ Codegen crate requirements for :need:`FEAT_0082` — translating the
 
 .. feat:: Network-config codegen
    :id: FEAT_0082
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0080
 
    A codegen crate translating the ``NetworkConfig`` IR into a
@@ -16,8 +16,9 @@ Codegen crate requirements for :need:`FEAT_0082` — translating the
 
 .. req:: Emit static SubDeviceMap PDO tables
    :id: REQ_0825
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0082
+   :links: BB_0125, TEST_0834
 
    Codegen shall emit a ``pub static PDO_MAP: &[SubDeviceMap]`` whose
    entries carry each device's computed configured address, mapped
@@ -27,8 +28,9 @@ Codegen crate requirements for :need:`FEAT_0082` — translating the
 
 .. req:: Emit named routing and channel-name constants
    :id: REQ_0826
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0082
+   :links: BB_0125, TEST_0835
 
    Codegen shall emit, per channel binding, a named ``EthercatRouting``
    constant carrying the resolved subdevice address, direction, bit
@@ -38,8 +40,9 @@ Codegen crate requirements for :need:`FEAT_0082` — translating the
 
 .. req:: Configured addresses assigned by bus position
    :id: REQ_0827
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0082
+   :links: BB_0125, TEST_0836
 
    Codegen shall assign each device's configured station address as
    ``0x1000 + n`` where ``n`` is its zero-based position in the
@@ -49,8 +52,9 @@ Codegen crate requirements for :need:`FEAT_0082` — translating the
 
 .. req:: Working-counter expectation derived, never overridden
    :id: REQ_0828
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0082
+   :links: BB_0125, TEST_0837
 
    The ``expected_wkc`` for each SubDevice shall be derived solely from
    its mapped PDO directions (the canonical 0/1/2/3 rule). The toolchain
@@ -59,8 +63,9 @@ Codegen crate requirements for :need:`FEAT_0082` — translating the
 
 .. req:: Generated output is byte-deterministic
    :id: REQ_0829
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0082
+   :links: BB_0125, TEST_0838
 
    The same ``network.yaml`` plus the same pinned ESI inputs shall
    produce a byte-identical generated module across machines and

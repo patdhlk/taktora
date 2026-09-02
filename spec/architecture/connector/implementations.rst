@@ -12,7 +12,7 @@ spec text that needed amendment during implementation.
 
 .. impl:: taktora-connector-core crate
    :id: IMPL_0010
-   :status: open
+   :status: implemented
    :implements: BB_0001
    :refines: REQ_0201, REQ_0210, REQ_0213, REQ_0214, REQ_0221, REQ_0222, REQ_0230, REQ_0232, REQ_0233, REQ_0234
 
@@ -48,7 +48,7 @@ spec text that needed amendment during implementation.
 
 .. impl:: taktora-connector-transport-iox crate
    :id: IMPL_0020
-   :status: open
+   :status: implemented
    :implements: BB_0002
    :refines: REQ_0200, REQ_0202, REQ_0203, REQ_0204, REQ_0205, REQ_0206, REQ_0214
 
@@ -89,7 +89,7 @@ spec text that needed amendment during implementation.
 
 .. impl:: taktora-connector-codec crate
    :id: IMPL_0030
-   :status: open
+   :status: implemented
    :implements: BB_0003
    :refines: REQ_0210, REQ_0212, REQ_0213, REQ_0214
 

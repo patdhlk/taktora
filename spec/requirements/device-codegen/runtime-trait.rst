@@ -17,8 +17,9 @@ connector adapter consumes, in the tiny ``ethercat-esi-rt`` crate
 
 .. req:: EsiDevice trait shape
    :id: REQ_0530
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0054
+   :links: BB_0063, TEST_0430
 
    The crate shall define an **object-safe** (``dyn``-compatible)
    ``EsiDevice`` trait with ``fn identity(&self) -> Identity``,
@@ -103,8 +104,9 @@ connector adapter consumes, in the tiny ``ethercat-esi-rt`` crate
 
 .. req:: Process image access via bitvec BitSlice
    :id: REQ_0534
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0054
+   :links: BB_0063, TEST_0430
 
    ``decode_inputs`` and ``encode_outputs`` shall operate on
    ``bitvec::slice::BitSlice<u8, Lsb0>`` references covering the

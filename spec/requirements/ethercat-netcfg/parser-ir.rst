@@ -16,8 +16,9 @@ Parser crate requirements for :need:`FEAT_0081` — reading
 
 .. req:: YAML parse to typed network IR
    :id: REQ_0820
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0081
+   :links: BB_0124, TEST_0830
 
    The crate shall expose a parse entry point that deserialises a
    ``network.yaml`` document into a typed ``NetworkConfig`` IR via
@@ -27,8 +28,9 @@ Parser crate requirements for :need:`FEAT_0081` — reading
 
 .. req:: IR carries bus config, device instances, and channel bindings
    :id: REQ_0821
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0081
+   :links: BB_0124, TEST_0830
 
    The IR shall represent: a ``BusConfig`` (cycle time, distributed-clocks
    flag, ``max_subdevices`` / ``max_pdi_bytes`` compile-time bounds,
@@ -42,8 +44,9 @@ Parser crate requirements for :need:`FEAT_0081` — reading
 
 .. req:: One file describes exactly one bus
    :id: REQ_0822
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0081
+   :links: BB_0124, TEST_0831
 
    One ``network.yaml`` document shall describe exactly one EtherCAT
    bus — one connector, one NIC, one process image. Multi-bus documents
@@ -53,8 +56,9 @@ Parser crate requirements for :need:`FEAT_0081` — reading
 
 .. req:: Devices referenced by stable label, not address
    :id: REQ_0823
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0081
+   :links: BB_0124, TEST_0832
 
    Each device instance shall carry a stable string ``label``. Channel
    bindings shall reference their device by ``label``, never by raw

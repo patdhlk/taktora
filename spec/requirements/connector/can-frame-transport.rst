@@ -6,7 +6,7 @@ cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. feat:: CAN frame transport (classical + FD)
    :id: FEAT_0047
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0046
 
    The on-wire form of CAN traffic crossing the plugin↔gateway
@@ -87,8 +87,9 @@ cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: CAN ID extended flag preserved end-to-end
    :id: REQ_0615
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0047
+   :links: BB_0071, IMPL_0080, TEST_0501, TEST_0512
 
    The ``CanRouting::can_id.extended`` boolean shall be preserved
    end-to-end between plugin and gateway: outbound, the gateway

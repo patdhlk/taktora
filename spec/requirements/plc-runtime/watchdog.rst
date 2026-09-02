@@ -6,7 +6,7 @@ deadline-missed events at the dispatch layer.
 
 .. feat:: Cycle-time watchdog
    :id: FEAT_0014
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0010
 
    Visibility into deadline-missed events at the dispatch layer.

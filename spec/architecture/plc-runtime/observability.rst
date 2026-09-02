@@ -113,7 +113,7 @@ both a raw push sample and an aggregated pull snapshot:
 
 .. building-block:: Per-task cycle statistics
    :id: BB_0050
-   :status: open
+   :status: implemented
    :implements: REQ_0100, REQ_0105, REQ_0106
    :refines: ADR_0060
 
@@ -142,7 +142,7 @@ both a raw push sample and an aggregated pull snapshot:
 
 .. building-block:: Statistics snapshot view
    :id: BB_0051
-   :status: open
+   :status: implemented
    :implements: REQ_0103, REQ_0105, REQ_0106
    :refines: ADR_0060
 
@@ -161,7 +161,7 @@ both a raw push sample and an aggregated pull snapshot:
 
 .. impl:: Stats module — taktora-executor/src/stats/
    :id: IMPL_0070
-   :status: open
+   :status: implemented
    :implements: BB_0050, BB_0051
    :refines: REQ_0100
 
@@ -276,7 +276,7 @@ both a raw push sample and an aggregated pull snapshot:
 
 .. building-block:: taktora-stats crate
    :id: BB_0053
-   :status: open
+   :status: implemented
    :implements: REQ_0104, REQ_0105
    :refines: ADR_0062
 

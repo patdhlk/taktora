@@ -15,8 +15,9 @@ codegen into a consuming crate's ``build.rs``.
 
 .. req:: Generate into OUT_DIR for include
    :id: REQ_0830
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0083
+   :links: BB_0126, TEST_0839
 
    The build helper shall read the configured ``network.yaml``, run
    parse + codegen, and write one Rust module into ``OUT_DIR`` for the

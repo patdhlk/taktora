@@ -6,7 +6,7 @@ The query half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. feat:: Zenoh queries
    :id: FEAT_0044
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0042
 
    The query half of the Zenoh connector — Zenoh's signature
@@ -89,8 +89,9 @@ The query half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: Query timeout sourced from options, overridable per-querier
    :id: REQ_0425
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0044
+   :links: BB_0043, TEST_0307
 
    The default per-query timeout shall be sourced from
    ``ZenohConnectorOptions::query_timeout``. ``ZenohQuerier`` shall
@@ -131,8 +132,9 @@ The query half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: Reply-side inbound saturation drops chunks and signals Degraded
    :id: REQ_0428
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0044
+   :links: BB_0044, TEST_0306
 
    When the inbound bridge for the reply path (gateway → plugin
    on a querier channel) is full, the gateway shall

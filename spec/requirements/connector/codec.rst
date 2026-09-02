@@ -6,7 +6,7 @@ How typed values become payload bytes, and back. This cluster
 
 .. feat:: Codec abstraction
    :id: FEAT_0032
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0030
 
    How typed values become payload bytes, and back. Codec selection is a
@@ -25,8 +25,9 @@ How typed values become payload bytes, and back. This cluster
 
 .. req:: Codec is a generic parameter on connectors
    :id: REQ_0211
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0032
+   :links: BB_0020, BB_0041, TEST_0301, TEST_0957
 
    Each ``Connector`` implementation shall expose its codec as a generic
    parameter (``MqttConnector<C: PayloadCodec>``), monomorphised at

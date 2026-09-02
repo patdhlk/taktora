@@ -7,7 +7,7 @@ build their own.
 
 .. feat:: Scan-cycle observability
    :id: FEAT_0021
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0010
 
    First-class statistics on cycle-time behaviour — percentiles, jitter,

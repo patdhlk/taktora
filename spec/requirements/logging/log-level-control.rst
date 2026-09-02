@@ -8,7 +8,7 @@ applies without restart.
 
 .. feat:: Runtime per-context log-level control
    :id: FEAT_0075
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0072
 
    DLT clients (``dlt-control``, DLT Viewer's injection panel) can

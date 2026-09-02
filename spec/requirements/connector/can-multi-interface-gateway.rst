@@ -5,7 +5,7 @@ The gateway-side multiplexer. This cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. feat:: Multi-interface gateway and per-channel filtering
    :id: FEAT_0048
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0046
 
    The gateway-side multiplexer: one gateway instance can own
