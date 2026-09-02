@@ -545,3 +545,17 @@ they verify to ``implemented`` and link these tests.
    ``BuildInfo`` captured with git metadata absent yields ``"unknown"`` for every
    git-derived field and ``false`` for ``git_dirty`` without panicking, holding
    the no-``.git`` fallback of :need:`REQ_0990`.
+
+Execution results
+-----------------
+
+Which of the cases above actually ran, and passed, against a given commit
+is recorded by the test-execution records tooling (:need:`FEAT_0122`): the
+medkit tests carry ``@need-ids:`` markers naming the case they exercise,
+and the CI build ingests their ``cargo-nextest`` results as ``test-case``
+needs on the page below, emitting ``test-execution-record.json`` alongside.
+
+.. toctree::
+   :maxdepth: 1
+
+   test-results

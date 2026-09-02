@@ -1,0 +1,21 @@
+{
+  "TEST_0900": {"id": "TEST_0900", "type": "test", "docname": "verification/medkit/index", "verifies": ["REQ_0914", "REQ_0915"]},
+  "TEST_0903": {"id": "TEST_0903", "type": "test", "docname": "verification/medkit/index", "verifies": ["REQ_0912"]},
+  "TEST_0904": {"id": "TEST_0904", "type": "test", "docname": "verification/medkit/index", "verifies": ["REQ_0910"]},
+  "TEST_0909": {"id": "TEST_0909", "type": "test", "docname": "verification/medkit/index", "verifies": ["REQ_0920"]},
+  "TEST_0936": {"id": "TEST_0936", "type": "test", "docname": "verification/medkit/wire-compat", "verifies": ["REQ_0965"]},
+  "TEST_0100": {"id": "TEST_0100", "type": "test", "docname": "verification/connector/cross-cutting", "verifies": ["REQ_0233"]},
+  "TEST_0914": {"id": "TEST_0914", "type": "test", "status": "rejected", "docname": "verification/medkit/index", "verifies": ["REQ_0925"]},
+  "REQ_0914": {"id": "REQ_0914", "type": "req", "docname": "requirements/medkit/index"},
+  "TF_MEDKIT": {"id": "TF_MEDKIT", "type": "test-file", "docname": "verification/medkit/test-results"},
+  "TC_1": {"id": "TC_1", "type": "test-case", "docname": "verification/medkit/test-results",
+           "case_name": "tests::round_trips", "classname": "taktora-medkit-model", "result": "passed", "time": "0.004"},
+  "TC_2": {"id": "TC_2", "type": "test-case", "docname": "verification/medkit/test-results",
+           "case_name": "root_advertises_extensions", "classname": "taktora-medkit-gateway-axum-tests::wire_compat", "result": "passed", "time": "0.120"},
+  "TC_3": {"id": "TC_3", "type": "test-case", "docname": "verification/medkit/test-results",
+           "case_name": "tests::health_rolls_up_worst_wins", "classname": "taktora-medkit-gateway", "result": "passed", "time": "0.001"},
+  "TC_4": {"id": "TC_4", "type": "test-case", "docname": "verification/medkit/test-results",
+           "case_name": "tests::healthy_tree_and_unknown_roll_up_ok", "classname": "taktora-medkit-gateway", "result": "failure", "time": "0.002"},
+  "TC_5": {"id": "TC_5", "type": "testcase", "docname": "verification/medkit/test-results",
+           "case_name": "tests::grouping_after_rename", "classname": "taktora-medkit-manifest", "result": "passed", "time": "0.003"}
+}
