@@ -285,84 +285,93 @@ impl MockBusDriver {
 }
 
 impl BusDriver for MockBusDriver {
-    // `BusDriver`'s methods are async because the ethercrab driver awaits the
-    // wire; the mock answers from memory, so there is nothing to await in
-    // these impls — `async` is the trait's contract, not slack.
-    #[allow(clippy::unused_async)]
-    async fn bring_up(&mut self) -> Result<BringUp, ConnectorError> {
-        let mut state = self.lock();
-        state.bring_up_calls += 1;
-        if let Some(reason) = state.bring_up_fails.take() {
-            return Err(ConnectorError::Down { reason });
-        }
-        Ok(state.bring_up_response)
+    // `BusDriver` returns `impl Future` because the ethercrab driver awaits the
+    // wire; the mock answers from memory, so each method does its work eagerly
+    // and hands back an already-resolved future.
+    fn bring_up(
+        &mut self,
+    ) -> impl core::future::Future<Output = Result<BringUp, ConnectorError>> + Send + '_ {
+        core::future::ready((|| -> Result<BringUp, ConnectorError> {
+            let mut state = self.lock();
+            state.bring_up_calls += 1;
+            if let Some(reason) = state.bring_up_fails.take() {
+                return Err(ConnectorError::Down { reason });
+            }
+            Ok(state.bring_up_response)
+        })())
     }
 
-    #[allow(clippy::unused_async)] // see `bring_up`
-    async fn cycle(&mut self) -> Result<u16, ConnectorError> {
-        // Pre-increment to compute the target index. Check
-        // cycle_err_after BEFORE recording cycle_kind / pushing kinds /
-        // draining wkc_sequence so a programmed error counts as one
-        // cycle but produces no other visible side-effects on this
-        // call. Splitting the critical sections (rather than folding
-        // the err check into the original one) keeps the WKC + kind
-        // recording cleanly skipped on the failure path.
-        let err = {
-            let mut state = self.lock();
-            state.cycle_calls += 1;
-            if let Some((target, _)) = state.cycle_err_after.as_ref() {
-                if state.cycle_calls == *target {
-                    state.cycle_err_after.take().map(|(_, reason)| reason)
+    fn cycle(
+        &mut self,
+    ) -> impl core::future::Future<Output = Result<u16, ConnectorError>> + Send + '_ {
+        core::future::ready((|| -> Result<u16, ConnectorError> {
+            // Pre-increment to compute the target index. Check
+            // cycle_err_after BEFORE recording cycle_kind / pushing kinds /
+            // draining wkc_sequence so a programmed error counts as one
+            // cycle but produces no other visible side-effects on this
+            // call. Splitting the critical sections (rather than folding
+            // the err check into the original one) keeps the WKC + kind
+            // recording cleanly skipped on the failure path.
+            let err = {
+                let mut state = self.lock();
+                state.cycle_calls += 1;
+                if let Some((target, _)) = state.cycle_err_after.as_ref() {
+                    if state.cycle_calls == *target {
+                        state.cycle_err_after.take().map(|(_, reason)| reason)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
-            } else {
-                None
-            }
-        };
-        if let Some(reason) = err {
-            return Err(ConnectorError::Down { reason });
-        }
-        let (wkc, loopback) = {
-            let mut state = self.lock();
-            let kind = state.cycle_kind;
-            state.cycle_kinds.push(kind);
-            let wkc = state
-                .wkc_sequence
-                .pop_front()
-                .unwrap_or(state.default_cycle_wkc);
-            (wkc, state.loopback)
-        };
-        if loopback {
-            // Two short critical sections: snapshot outputs, then
-            // write them into inputs. Splitting the locks keeps each
-            // critical section bounded.
-            let outputs_snapshot: Vec<(u16, Vec<u8>)> = {
-                let guard = self.subdevice_outputs.lock().expect("not poisoned");
-                guard.iter().map(|(a, b)| (*a, b.clone())).collect()
             };
-            let mut inputs = self.subdevice_inputs.lock().expect("not poisoned");
-            for (addr, bytes) in outputs_snapshot {
-                let entry = inputs.entry(addr).or_default();
-                if entry.len() != bytes.len() {
-                    entry.resize(bytes.len(), 0);
-                }
-                entry.copy_from_slice(&bytes);
+            if let Some(reason) = err {
+                return Err(ConnectorError::Down { reason });
             }
-            drop(inputs);
-        }
-        Ok(wkc)
+            let (wkc, loopback) = {
+                let mut state = self.lock();
+                let kind = state.cycle_kind;
+                state.cycle_kinds.push(kind);
+                let wkc = state
+                    .wkc_sequence
+                    .pop_front()
+                    .unwrap_or(state.default_cycle_wkc);
+                (wkc, state.loopback)
+            };
+            if loopback {
+                // Two short critical sections: snapshot outputs, then
+                // write them into inputs. Splitting the locks keeps each
+                // critical section bounded.
+                let outputs_snapshot: Vec<(u16, Vec<u8>)> = {
+                    let guard = self.subdevice_outputs.lock().expect("not poisoned");
+                    guard.iter().map(|(a, b)| (*a, b.clone())).collect()
+                };
+                let mut inputs = self.subdevice_inputs.lock().expect("not poisoned");
+                for (addr, bytes) in outputs_snapshot {
+                    let entry = inputs.entry(addr).or_default();
+                    if entry.len() != bytes.len() {
+                        entry.resize(bytes.len(), 0);
+                    }
+                    entry.copy_from_slice(&bytes);
+                }
+                drop(inputs);
+            }
+            Ok(wkc)
+        })())
     }
 
-    #[allow(clippy::unused_async)] // see `bring_up`
-    async fn recover(&mut self) -> Result<BringUp, ConnectorError> {
-        let mut state = self.lock();
-        state.recover_calls += 1;
-        match state.recovery_sequence.pop_front() {
-            Some(Ok(b)) => Ok(b),
-            Some(Err(reason)) => Err(ConnectorError::Down { reason }),
-            None => Ok(state.bring_up_response),
-        }
+    fn recover(
+        &mut self,
+    ) -> impl core::future::Future<Output = Result<BringUp, ConnectorError>> + Send + '_ {
+        core::future::ready({
+            let mut state = self.lock();
+            state.recover_calls += 1;
+            match state.recovery_sequence.pop_front() {
+                Some(Ok(b)) => Ok(b),
+                Some(Err(reason)) => Err(ConnectorError::Down { reason }),
+                None => Ok(state.bring_up_response),
+            }
+        })
     }
 
     fn with_subdevice_outputs_mut<R>(
