@@ -59,6 +59,7 @@ fn capability_names(doc: &Value) -> Vec<&str> {
 }
 
 /// `TEST_0954` — an app detail document advertises the full SOVD catalogue.
+// @need-ids: TEST_0954
 #[tokio::test]
 async fn app_detail_carries_capability_catalogue() {
     let addr = spawn().await;
@@ -115,6 +116,7 @@ async fn app_detail_carries_capability_catalogue() {
 
 /// `TEST_0954` — a function detail document carries the narrower per-kind set:
 /// its catalogue omits the families functions do not expose (`locks`, `status`).
+// @need-ids: TEST_0954
 #[tokio::test]
 async fn function_detail_carries_narrower_catalogue() {
     let addr = spawn().await;

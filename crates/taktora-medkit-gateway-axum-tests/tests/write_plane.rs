@@ -79,6 +79,7 @@ async fn spawn() -> SocketAddr {
 }
 
 /// `TEST_0943` — the operations catalogue lists and details configured ops.
+// @need-ids: TEST_0943
 #[tokio::test]
 async fn operations_catalogue_lists_and_details() {
     let addr = spawn().await;
@@ -97,6 +98,7 @@ async fn operations_catalogue_lists_and_details() {
 }
 
 /// `TEST_0944` — the full async execution lifecycle over the wire.
+// @need-ids: TEST_0944
 #[tokio::test]
 async fn execution_lifecycle_over_http() {
     let addr = spawn().await;
@@ -128,6 +130,7 @@ async fn execution_lifecycle_over_http() {
 }
 
 /// `TEST_0945` — an unknown operation is `404` on both detail and start.
+// @need-ids: TEST_0945
 #[tokio::test]
 async fn unknown_operation_is_404() {
     let addr = spawn().await;

@@ -77,6 +77,7 @@ async fn spawn_static() -> SocketAddr {
 }
 
 /// `TEST_0919` — the triggers subscription CRUD surface works end to end.
+// @need-ids: TEST_0919
 #[tokio::test]
 async fn triggers_crud_round_trip() {
     let addr = spawn_static().await;
@@ -242,6 +243,7 @@ async fn open_sse(addr: SocketAddr) -> TcpStream {
 
 /// `TEST_0920` — raising then clearing a fault yields `fault_raised` then
 /// `fault_cleared` SSE frames whose data object matches the golden shape.
+// @need-ids: TEST_0920
 #[tokio::test]
 async fn fault_raise_and_clear_stream_as_sse() {
     let phase = Arc::new(AtomicUsize::new(0));
@@ -303,6 +305,7 @@ async fn fault_raise_and_clear_stream_as_sse() {
 }
 
 /// `TEST_0921` — a health transition (Ok -> Error) emits a `health_changed` frame.
+// @need-ids: TEST_0921
 #[tokio::test]
 async fn health_transition_streams_health_changed() {
     let phase = Arc::new(AtomicUsize::new(0));

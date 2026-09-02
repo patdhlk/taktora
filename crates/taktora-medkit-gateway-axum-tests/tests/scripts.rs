@@ -79,6 +79,7 @@ async fn spawn() -> SocketAddr {
 }
 
 /// `TEST_0948` — the full scripts lifecycle (upload + executions) over the wire.
+// @need-ids: TEST_0948
 #[tokio::test]
 async fn scripts_lifecycle_over_http() {
     let addr = spawn().await;

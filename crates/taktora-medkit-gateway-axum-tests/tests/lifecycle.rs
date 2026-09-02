@@ -79,6 +79,7 @@ async fn spawn() -> SocketAddr {
 }
 
 /// `TEST_0950` — the lifecycle-status surface over the wire.
+// @need-ids: TEST_0950
 #[tokio::test]
 async fn lifecycle_status_over_http() {
     let addr = spawn().await;

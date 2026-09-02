@@ -7,6 +7,7 @@ use taktora_medkit_binding_executor::ExecutorBinding;
 use taktora_medkit_model::{EntityKind, Health};
 use taktora_medkit_provider::Provider;
 
+// @need-ids: TEST_0912
 #[test]
 fn binding_satisfies_provider_seam() {
     let binding = ExecutorBinding::with_tasks(["ctrl", "io"]);

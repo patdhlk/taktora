@@ -7,6 +7,7 @@ use taktora_medkit_binding_connector::{MedkitProvider, map_health};
 use taktora_medkit_model::{EntityKind, Health};
 use taktora_medkit_provider::Provider;
 
+// @need-ids: TEST_0915
 #[test]
 fn health_kinds_map_to_worst_wins_ladder() {
     assert_eq!(map_health(ConnectorHealthKind::Up), Health::Ok);
@@ -15,6 +16,7 @@ fn health_kinds_map_to_worst_wins_ladder() {
     assert_eq!(map_health(ConnectorHealthKind::Down), Health::Error);
 }
 
+// @need-ids: TEST_0915
 #[test]
 fn fresh_binding_emits_raw_component_and_no_faults() {
     let binding = MedkitProvider::new("component:ethercat0", "EtherCAT bus 0");

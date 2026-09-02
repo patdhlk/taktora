@@ -43,6 +43,7 @@ fn fault(
     .find(|f| f.fault_code == code)
 }
 
+// @need-ids: TEST_0915, TEST_0916
 #[test]
 fn up_degraded_down_up_drives_dtc_lifecycle_through_gateway() {
     let binding = MedkitProvider::new(COMPONENT, "EtherCAT bus 0");
@@ -87,6 +88,7 @@ fn up_degraded_down_up_drives_dtc_lifecycle_through_gateway() {
     assert_eq!(fault(&view, DTC_DEGRADED).unwrap().status, "HEALED");
 }
 
+// @need-ids: TEST_0915, TEST_0916
 #[test]
 fn repeated_degraded_increments_occurrence_count_through_gateway() {
     let binding = MedkitProvider::new(COMPONENT, "EtherCAT bus 0");

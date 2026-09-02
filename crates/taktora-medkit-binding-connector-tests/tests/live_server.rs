@@ -65,6 +65,7 @@ async fn get_json(addr: SocketAddr, path: &str) -> Value {
     serde_json::from_str(body).unwrap_or_else(|e| panic!("parse body of {path}: {e}\n{body}"))
 }
 
+// @need-ids: TEST_0917
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn component_and_dtcs_surface_through_running_gateway() {
     let addr = spawn().await;
@@ -108,6 +109,7 @@ async fn component_and_dtcs_surface_through_running_gateway() {
     assert_eq!(detail["item"]["status"]["testFailed"], Value::from("1"));
 }
 
+// @need-ids: TEST_0917
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn confirmed_dtc_freeze_frame_reachable_under_fault_detail() {
     // `TEST_0918` — the confirmed DTC's freeze-frame is reachable through the
@@ -139,6 +141,7 @@ async fn confirmed_dtc_freeze_frame_reachable_under_fault_detail() {
     assert!(frame["x-medkit"]["captured_at"].is_string());
 }
 
+// @need-ids: TEST_0917
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn confirmed_dtc_freeze_frame_reachable_under_data() {
     let addr = spawn().await;
