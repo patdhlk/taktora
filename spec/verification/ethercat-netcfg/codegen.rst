@@ -6,7 +6,7 @@ snapshot-based. Live under ``crates/ethercat-netcfg-codegen/tests/``.
 
 .. test:: Generated module emits the expected static PDO_MAP
    :id: TEST_0834
-   :status: open
+   :status: implemented
    :verifies: REQ_0825
 
    Golden-file test: codegen over the WAGO fixture produces a
@@ -16,7 +16,7 @@ snapshot-based. Live under ``crates/ethercat-netcfg-codegen/tests/``.
 
 .. test:: Generated routing and channel-name constants match the bindings
    :id: TEST_0835
-   :status: open
+   :status: implemented
    :verifies: REQ_0826
 
    For each channel binding in the fixture, the generated module exposes
@@ -26,7 +26,7 @@ snapshot-based. Live under ``crates/ethercat-netcfg-codegen/tests/``.
 
 .. test:: Configured addresses follow bus position, override honoured
    :id: TEST_0836
-   :status: open
+   :status: implemented
    :verifies: REQ_0827
 
    A three-device fixture generates addresses ``0x1000``, ``0x1001``,
@@ -37,7 +37,7 @@ snapshot-based. Live under ``crates/ethercat-netcfg-codegen/tests/``.
 
 .. test:: expected_wkc is derived from PDO directions
    :id: TEST_0837
-   :status: open
+   :status: implemented
    :verifies: REQ_0828
 
    Property test over fixtures: a TxPDO-only device generates
@@ -48,7 +48,7 @@ snapshot-based. Live under ``crates/ethercat-netcfg-codegen/tests/``.
 
 .. test:: Generated output is byte-deterministic
    :id: TEST_0838
-   :status: open
+   :status: implemented
    :verifies: REQ_0829
 
    Codegen runs twice over the same fixture and pinned ESI inputs; the

@@ -34,7 +34,7 @@ land.
 
 .. test:: Pub/sub end-to-end against MockZenohSession
    :id: TEST_0302
-   :status: open
+   :status: implemented
    :verifies: REQ_0402, REQ_0407, REQ_0408, REQ_0445
 
    Drive a ``ChannelWriter::send(value)`` through
@@ -46,7 +46,7 @@ land.
 
 .. test:: Query round-trip against MockZenohSession
    :id: TEST_0303
-   :status: open
+   :status: implemented
    :verifies: REQ_0420, REQ_0421, REQ_0422, REQ_0423, REQ_0424, REQ_0426, REQ_0427
 
    End-to-end query test: plugin A calls

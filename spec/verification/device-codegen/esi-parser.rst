@@ -6,7 +6,7 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
 
 .. test:: parse() accepts a representative Beckhoff EL3001 ESI
    :id: TEST_0400
-   :status: open
+   :status: implemented
    :verifies: REQ_0500, REQ_0504
 
    Loads a canonical Beckhoff ``EL3001`` ESI XML fixture from
@@ -124,7 +124,7 @@ Per-crate, no I/O beyond test fixtures, parallel-safe. Live under
 
 .. test:: MDP catalog and slots parse from synthetic and real modular ESI
    :id: TEST_0867
-   :status: open
+   :status: implemented
    :verifies: REQ_0850
 
    Unit tests in ``crates/taktora-ethercat-esi/tests/modules.rs`` parse

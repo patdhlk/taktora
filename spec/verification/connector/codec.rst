@@ -3,7 +3,7 @@ Codec tests
 
 .. test:: JsonCodec round-trip property test
    :id: TEST_0110
-   :status: open
+   :status: implemented
    :verifies: REQ_0210, REQ_0212
 
    ``proptest``-driven round-trip for a representative struct:
@@ -14,7 +14,7 @@ Codec tests
 
 .. test:: Codec encode error on undersized buffer
    :id: TEST_0111
-   :status: open
+   :status: implemented
    :verifies: REQ_0213
 
    Encoding a value larger than the provided buffer returns
@@ -31,7 +31,7 @@ Codec tests
 
 .. test:: Codec decode error propagation
    :id: TEST_0112
-   :status: open
+   :status: implemented
    :verifies: REQ_0214
 
    Receiving a payload that fails ``decode<T>`` (e.g. truncated JSON,

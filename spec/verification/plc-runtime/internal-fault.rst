@@ -34,7 +34,7 @@ guarantee (:need:`REQ_0124`).
 
 .. test:: Item panic is contained, not aborted
    :id: TEST_0825
-   :status: open
+   :status: implemented
    :verifies: REQ_0124
 
    Regression guard for the inner layer. A user item that panics in
