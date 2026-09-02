@@ -205,7 +205,7 @@ impl<B: CodegenBackend> Builder<B> {
             .map(|entry| {
                 entry.map_err(|err| BuildError::Io {
                     path: err.path().to_path_buf(),
-                    source: err.into_error(),
+                    source: err.into(),
                 })
             })
             .collect::<Result<_, _>>()?;
