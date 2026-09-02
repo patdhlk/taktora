@@ -189,10 +189,16 @@ Test-execution records
 
 .. test:: CI regenerates and publishes the record
    :id: TEST_0986
-   :status: open
+   :status: implemented
    :verifies: REQ_1016
 
    On a code-changing pull request, CI runs the medkit ``cargo-nextest`` leg
    and the spec build, then uploads ``test-execution-record.json`` as a
    workflow artifact. Verified by the first CI run once the pipeline lands
    (evidence: actions run id + PR number, recorded here on introduction).
+
+   Executed 2026-09-02: first run of ``ci-test-records`` on PR #192
+   (GitHub Actions run ``33660308677``, commit ``e165da9``) — nextest leg,
+   extension unit tests, strict spec build and upload all green; artifact
+   ``test-execution-record`` (2571 bytes) published with the record's
+   ``build`` / ``summary`` block in the job summary.

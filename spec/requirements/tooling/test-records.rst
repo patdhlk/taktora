@@ -10,7 +10,7 @@ commit back to the validation evidence for that commit.
 
 .. feat:: Test-execution records
    :id: FEAT_0122
-   :status: open
+   :status: implemented
 
    **Motivation.** Build identity (:need:`REQ_0990`) tells a deployed binary
    *which commit* it is. It does not tell anyone *whether that commit's tests
@@ -125,7 +125,7 @@ commit back to the validation evidence for that commit.
 
 .. req:: CI regenerates and publishes the record
    :id: REQ_1016
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0122
    :links: IMPL_0093, TEST_0986
 
