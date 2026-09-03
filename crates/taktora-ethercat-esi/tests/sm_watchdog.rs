@@ -1,3 +1,4 @@
+//! `TEST_0859` — per-SM watchdog-trigger enable decodes from control-byte bit 6.
 //! `REQ_0843` — the per-SM watchdog-trigger enable bit (control byte bit 6,
 //! `0x40`) is decoded into [`SyncManager::watchdog_trigger_enable`].
 //!

@@ -251,54 +251,66 @@ impl ZenohSessionLike for MockZenohSession {
         self.peer_count.load(Ordering::Acquire)
     }
 
-    async fn publish(&self, routing: &ZenohRouting, payload: &[u8]) -> Result<(), SessionError> {
-        if !matches!(*self.state.read().unwrap(), SessionState::Alive) {
-            return Err(SessionError::NotAlive {
-                reason: "mock session not alive".into(),
-            });
-        }
-        let key = routing.key_expr().as_str().to_owned();
-        // Clone the Arc<dyn Fn> handles under the lock, then release the
-        // lock before invoking them.  This avoids holding a MutexGuard
-        // across the callbacks (which could cause lock ordering issues or
-        // trigger clippy::significant_drop_tightening).
-        let sinks: Vec<SharedSink> = self
-            .subscribers
-            .lock()
-            .unwrap()
-            .get(&key)
-            .map(|entries| entries.iter().map(|e| e.sink.clone()).collect())
-            .unwrap_or_default();
-        for sink in sinks {
-            sink(payload);
-        }
-        Ok(())
+    // `ZenohSessionLike` returns `impl Future` because the real session awaits
+    // the network; the mock answers from memory, so publish / subscribe /
+    // declare_queryable do their work eagerly and hand back an
+    // already-resolved future (`query` genuinely awaits and stays async).
+    fn publish(
+        &self,
+        routing: &ZenohRouting,
+        payload: &[u8],
+    ) -> impl std::future::Future<Output = Result<(), SessionError>> + Send {
+        std::future::ready((|| -> Result<(), SessionError> {
+            if !matches!(*self.state.read().unwrap(), SessionState::Alive) {
+                return Err(SessionError::NotAlive {
+                    reason: "mock session not alive".into(),
+                });
+            }
+            let key = routing.key_expr().as_str().to_owned();
+            // Clone the Arc<dyn Fn> handles under the lock, then release the
+            // lock before invoking them.  This avoids holding a MutexGuard
+            // across the callbacks (which could cause lock ordering issues or
+            // trigger clippy::significant_drop_tightening).
+            let sinks: Vec<SharedSink> = self
+                .subscribers
+                .lock()
+                .unwrap()
+                .get(&key)
+                .map(|entries| entries.iter().map(|e| e.sink.clone()).collect())
+                .unwrap_or_default();
+            for sink in sinks {
+                sink(payload);
+            }
+            Ok(())
+        })())
     }
 
-    async fn subscribe(
+    fn subscribe(
         &self,
         routing: &ZenohRouting,
         sink: PayloadSink,
-    ) -> Result<SubscriptionHandle, SessionError> {
-        let key = routing.key_expr().as_str().to_owned();
-        let id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
-        // Convert the caller's Box<dyn Fn> into an Arc<dyn Fn> so the sink
-        // can be cheaply cloned during publish dispatch.
-        let shared: SharedSink = Arc::from(sink);
-        let entry = SubscriberEntry { id, sink: shared };
-        self.subscribers
-            .lock()
-            .unwrap()
-            .entry(key.clone())
-            .or_default()
-            .push(entry);
+    ) -> impl std::future::Future<Output = Result<SubscriptionHandle, SessionError>> + Send {
+        std::future::ready({
+            let key = routing.key_expr().as_str().to_owned();
+            let id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
+            // Convert the caller's Box<dyn Fn> into an Arc<dyn Fn> so the sink
+            // can be cheaply cloned during publish dispatch.
+            let shared: SharedSink = Arc::from(sink);
+            let entry = SubscriberEntry { id, sink: shared };
+            self.subscribers
+                .lock()
+                .unwrap()
+                .entry(key.clone())
+                .or_default()
+                .push(entry);
 
-        let guard = SubscriptionGuard {
-            id,
-            key,
-            subscribers: self.subscribers.clone(),
-        };
-        Ok(SubscriptionHandle(Box::new(guard)))
+            let guard = SubscriptionGuard {
+                id,
+                key,
+                subscribers: self.subscribers.clone(),
+            };
+            Ok(SubscriptionHandle(Box::new(guard)))
+        })
     }
 
     async fn query(
@@ -390,29 +402,31 @@ impl ZenohSessionLike for MockZenohSession {
         Ok(())
     }
 
-    async fn declare_queryable(
+    fn declare_queryable(
         &self,
         routing: &ZenohRouting,
         on_query: QuerySink,
-    ) -> Result<QueryableHandle, SessionError> {
-        let key = routing.key_expr().as_str().to_owned();
-        let id = self.next_qable_id.fetch_add(1, Ordering::Relaxed);
-        // Convert the caller's Box<dyn Fn> into an Arc<dyn Fn> so the
-        // sink can be cheaply cloned during query dispatch.
-        let shared: QueryableSink = Arc::from(on_query);
-        let entry = QueryableEntry { id, sink: shared };
-        self.queryables
-            .lock()
-            .unwrap()
-            .entry(key.clone())
-            .or_default()
-            .push(entry);
+    ) -> impl std::future::Future<Output = Result<QueryableHandle, SessionError>> + Send {
+        std::future::ready({
+            let key = routing.key_expr().as_str().to_owned();
+            let id = self.next_qable_id.fetch_add(1, Ordering::Relaxed);
+            // Convert the caller's Box<dyn Fn> into an Arc<dyn Fn> so the
+            // sink can be cheaply cloned during query dispatch.
+            let shared: QueryableSink = Arc::from(on_query);
+            let entry = QueryableEntry { id, sink: shared };
+            self.queryables
+                .lock()
+                .unwrap()
+                .entry(key.clone())
+                .or_default()
+                .push(entry);
 
-        let guard = QueryableGuard {
-            id,
-            key,
-            queryables: Arc::clone(&self.queryables),
-        };
-        Ok(QueryableHandle(Box::new(guard)))
+            let guard = QueryableGuard {
+                id,
+                key,
+                queryables: Arc::clone(&self.queryables),
+            };
+            Ok(QueryableHandle(Box::new(guard)))
+        })
     }
 }

@@ -1,3 +1,4 @@
+//! `TEST_0440` — the builder writes a parseable Rust module to the out dir.
 //! Integration tests for the ESI build-script helper.
 //!
 //! Tests drive the testable seam [`Builder::run`] directly with temp dirs so

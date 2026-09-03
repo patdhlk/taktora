@@ -84,6 +84,7 @@ const LOCKS: &str = "/api/v1/components/sensor/locks";
 
 /// `TEST_0925` — acquire (`201`, contract-shaped `Lock`) → extend (`204`) →
 /// release (`204`) round-trip with the `X-Client-Id` holder header.
+// @need-ids: TEST_0925
 #[tokio::test]
 async fn acquire_extend_release_round_trip() {
     let addr = spawn().await;
@@ -137,6 +138,7 @@ async fn acquire_extend_release_round_trip() {
 
 /// `TEST_0926` — a second client without `break_lock` gets `409`; with
 /// `break_lock` the held lock is evicted and the supervisor acquires.
+// @need-ids: TEST_0926
 #[tokio::test]
 async fn conflict_then_break_lock_override() {
     let addr = spawn().await;
@@ -183,6 +185,7 @@ async fn conflict_then_break_lock_override() {
 
 /// `TEST_0927` — ownership is enforced by `X-Client-Id`: a non-owner cannot
 /// extend (`409`); a missing header is `400`.
+// @need-ids: TEST_0927
 #[tokio::test]
 async fn ownership_and_client_id_enforced() {
     let addr = spawn().await;

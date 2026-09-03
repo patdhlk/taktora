@@ -1,0 +1,32 @@
+[
+  {
+    "filepath": "/repo/crates/taktora-medkit-model/src/lib.rs",
+    "lineno": 680,
+    "tagged_scope": "fn round_trips() {\n    assert!(true);\n}",
+    "need_ids": ["TEST_0900"]
+  },
+  {
+    "filepath": "/repo/crates/taktora-medkit-gateway-axum-tests/tests/wire_compat.rs",
+    "lineno": 105,
+    "tagged_scope": "async fn root_advertises_extensions() {\n    todo!()\n}",
+    "need_ids": ["TEST_0936"]
+  },
+  {
+    "filepath": "/repo/crates/taktora-medkit-gateway/src/lib.rs",
+    "lineno": 174,
+    "tagged_scope": "fn health_rolls_up_worst_wins() {}",
+    "need_ids": ["TEST_0903"]
+  },
+  {
+    "filepath": "/repo/crates/taktora-medkit-gateway/src/lib.rs",
+    "lineno": 190,
+    "tagged_scope": "fn healthy_tree_and_unknown_roll_up_ok() {}",
+    "need_ids": ["TEST_0903"]
+  },
+  {
+    "filepath": "/repo/crates/taktora-medkit-manifest/src/lib.rs",
+    "lineno": 404,
+    "tagged_scope": "fn renamed_since_marking() {}",
+    "need_ids": ["TEST_0909"]
+  }
+]

@@ -135,6 +135,8 @@ mod startup_tests {
     use super::*;
     use crate::options::{StartupSdo, SubDeviceMap};
 
+    /// `TEST_0869` — one SDO write per `StartupSdo`, addressed to the map's
+    /// `SubDevice`, in declaration order (`REQ_0853`).
     #[test]
     fn startup_writes_carry_map_address_and_order() {
         static STARTUP: &[StartupSdo] = &[
@@ -170,6 +172,8 @@ mod startup_tests {
         );
     }
 
+    /// `TEST_0869` — an empty `startup_sdos` list produces zero startup SDO
+    /// writes (`REQ_0853`).
     #[test]
     fn empty_startup_sdos_produce_no_writes() {
         let map = SubDeviceMap::new(0x1003, &[], &[], 3);

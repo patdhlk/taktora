@@ -7,7 +7,7 @@ other restarting, and the trust boundary for v1. This cluster ``:satisfies:``
 
 .. feat:: Liveness, lifecycle and trust
    :id: FEAT_0096
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0092
 
    A mandatory ``SystemViewModel`` heartbeat carries a monotonic counter and a

@@ -218,6 +218,8 @@ pub fn struct_ident_string(device: &esi::EsiDevice, collides: bool) -> String {
 mod tests {
     use super::*;
 
+    /// `TEST_0410` — name sanitisation handles ESI naming edge cases (`REQ_0511`):
+    /// this and the following `sanitise_ident` cases pin the mapping table.
     #[test]
     fn sanitises_dash_to_underscore() {
         assert_eq!(sanitise_ident("EL3001-0000"), "EL3001_0000");

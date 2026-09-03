@@ -81,6 +81,7 @@ async fn spawn() -> SocketAddr {
 }
 
 /// `TEST_0949` — the full software-update lifecycle over the wire (global paths).
+// @need-ids: TEST_0949
 #[tokio::test]
 async fn update_lifecycle_over_http() {
     let addr = spawn().await;

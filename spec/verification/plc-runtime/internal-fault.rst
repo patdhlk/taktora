@@ -7,7 +7,7 @@ guarantee (:need:`REQ_0124`).
 
 .. test:: Framework panic routes to fatal handler
    :id: TEST_0823
-   :status: open
+   :status: implemented
    :verifies: REQ_0123, REQ_0125
 
    In-process boundary test. A recording terminal (instead of aborting)
@@ -24,7 +24,7 @@ guarantee (:need:`REQ_0124`).
 
 .. test:: Default fail-fast aborts the process
    :id: TEST_0824
-   :status: open
+   :status: implemented
    :verifies: REQ_0123
 
    Subprocess test. A child process with the **default** (no-op) fatal
@@ -34,7 +34,7 @@ guarantee (:need:`REQ_0124`).
 
 .. test:: Item panic is contained, not aborted
    :id: TEST_0825
-   :status: open
+   :status: implemented
    :verifies: REQ_0124
 
    Regression guard for the inner layer. A user item that panics in

@@ -10,8 +10,8 @@ two crates that carry the most logic.
 
 .. building-block:: taktora-connector-core
    :id: BB_0001
-   :status: open
-   :implements: REQ_0220, REQ_0221, REQ_0222
+   :status: implemented
+   :implements: REQ_0220, REQ_0221, REQ_0222, REQ_0232
 
    Pure trait definitions and shared types. No IPC, no protocol code.
    Public surface: ``Connector`` trait, ``PayloadCodec`` trait,
@@ -21,7 +21,7 @@ two crates that carry the most logic.
 
 .. building-block:: taktora-connector-transport-iox
    :id: BB_0002
-   :status: open
+   :status: implemented
    :implements: REQ_0200, REQ_0205, REQ_0206
 
    Concrete envelope (``ConnectorEnvelope<const N: usize>``) and
@@ -32,7 +32,7 @@ two crates that carry the most logic.
 
 .. building-block:: taktora-connector-codec
    :id: BB_0003
-   :status: open
+   :status: implemented
    :implements: REQ_0210, REQ_0212, REQ_0215, REQ_0989
 
    Concrete ``PayloadCodec`` implementations. ``JsonCodec`` ships
@@ -44,7 +44,7 @@ two crates that carry the most logic.
 
 .. building-block:: taktora-connector-mqtt
    :id: BB_0004
-   :status: open
+   :status: implemented
    :implements: REQ_0250, REQ_0251, REQ_0258
 
    MQTT plugin (``MqttConnector<C>`` implementing ``Connector``) and
@@ -115,7 +115,7 @@ two crates that carry the most logic.
 
 .. building-block:: ConnectorEnvelope (sub-block of BB_0002)
    :id: BB_0010
-   :status: open
+   :status: implemented
    :implements: REQ_0200, REQ_0201, REQ_0202, REQ_0203, REQ_0204
 
    The on-wire form. ``#[repr(C)]`` POD type with a fixed header
@@ -142,7 +142,7 @@ two crates that carry the most logic.
 
 .. building-block:: ServiceFactory (sub-block of BB_0002)
    :id: BB_0011
-   :status: open
+   :status: implemented
    :implements: REQ_0206
 
    Derives iceoryx2 service names deterministically from a
@@ -158,8 +158,8 @@ two crates that carry the most logic.
 
 .. building-block:: MqttConnector (sub-block of BB_0004, plugin side)
    :id: BB_0020
-   :status: open
-   :implements: REQ_0250, REQ_0251
+   :status: implemented
+   :implements: REQ_0211, REQ_0224, REQ_0250, REQ_0251
 
    ``MqttConnector<C: PayloadCodec>``. Implements ``Connector`` with
    ``type Routing = MqttRouting``. ``create_writer`` /
@@ -168,7 +168,7 @@ two crates that carry the most logic.
 
 .. building-block:: MqttGateway (sub-block of BB_0004, gateway side)
    :id: BB_0021
-   :status: open
+   :status: implemented
    :implements: REQ_0258, REQ_0259, REQ_0260, REQ_0261
 
    Hosts ``rumqttc::AsyncClient`` + ``EventLoop`` on a tokio runtime,
@@ -178,7 +178,7 @@ two crates that carry the most logic.
 
 .. building-block:: Tokio bridge (sub-block of BB_0021)
    :id: BB_0022
-   :status: open
+   :status: implemented
    :implements: REQ_0259, REQ_0260, REQ_0261
 
    Two bounded channel pairs that translate between taktora-executor's
@@ -224,7 +224,7 @@ two crates that carry the most logic.
 
 .. building-block:: PDO mapping (sub-block of BB_0030)
    :id: BB_0033
-   :status: open
+   :status: implemented
    :implements: REQ_0314, REQ_0315
 
    Module that accepts a static PDO-mapping description per SubDevice
@@ -247,7 +247,7 @@ two crates that carry the most logic.
 
 .. building-block:: taktora-connector-zenoh
    :id: BB_0040
-   :status: open
+   :status: implemented
    :implements: REQ_0400, REQ_0420, REQ_0440, REQ_0444
 
    Zenoh plugin (``ZenohConnector<C>`` implementing ``Connector``)
@@ -260,8 +260,8 @@ two crates that carry the most logic.
 
 .. building-block:: ZenohConnector (sub-block of BB_0040, plugin side)
    :id: BB_0041
-   :status: open
-   :implements: REQ_0400, REQ_0401, REQ_0420
+   :status: implemented
+   :implements: REQ_0211, REQ_0224, REQ_0400, REQ_0401, REQ_0420
 
    Plugin-side ``ZenohConnector<C: PayloadCodec>``. Implements
    ``Connector`` with ``type Routing = ZenohRouting`` and adds
@@ -274,8 +274,8 @@ two crates that carry the most logic.
 
 .. building-block:: ZenohGateway (sub-block of BB_0040, gateway side)
    :id: BB_0042
-   :status: open
-   :implements: REQ_0403, REQ_0426, REQ_0440, REQ_0442
+   :status: implemented
+   :implements: REQ_0235, REQ_0403, REQ_0426, REQ_0440, REQ_0442
 
    Gateway-side executable item that owns one ``zenoh::Session``
    created via ``zenoh::open(config)`` (or a ``MockZenohSession``
@@ -290,8 +290,8 @@ two crates that carry the most logic.
 
 .. building-block:: Zenoh query handles (sub-block of BB_0041)
    :id: BB_0043
-   :status: open
-   :implements: REQ_0420, REQ_0421, REQ_0422, REQ_0423, REQ_0424
+   :status: implemented
+   :implements: REQ_0420, REQ_0421, REQ_0422, REQ_0423, REQ_0424, REQ_0425
 
    ``ZenohQuerier<Q, R, C, N>`` and ``ZenohQueryable<Q, R, C, N>``.
    The non-trait query handle types. ``ZenohQuerier::send`` mints
@@ -308,7 +308,7 @@ two crates that carry the most logic.
 .. building-block:: Tokio bridge for zenoh (sub-block of BB_0042)
    :id: BB_0044
    :status: open
-   :implements: REQ_0403, REQ_0404, REQ_0405, REQ_0406
+   :implements: REQ_0403, REQ_0404, REQ_0405, REQ_0406, REQ_0428
 
    Two bounded channel pairs that translate between taktora-executor's
    WaitSet thread and the tokio runtime owning ``zenoh::Session``.
@@ -335,7 +335,7 @@ two crates that carry the most logic.
 
 .. building-block:: CanConnector (sub-block of BB_0070, plugin side)
    :id: BB_0071
-   :status: open
+   :status: implemented
    :implements: REQ_0600, REQ_0601, REQ_0612, REQ_0615, REQ_0621
 
    Plugin-side ``CanConnector<C: PayloadCodec>``. Implements
@@ -351,7 +351,7 @@ two crates that carry the most logic.
 
 .. building-block:: CanGateway (sub-block of BB_0070, gateway side)
    :id: BB_0072
-   :status: open
+   :status: implemented
    :implements: REQ_0613, REQ_0614, REQ_0620, REQ_0624, REQ_0625, REQ_0630, REQ_0631
 
    Gateway-side executable item that owns one ``CanInterfaceLike``
@@ -385,7 +385,7 @@ two crates that carry the most logic.
 
 .. building-block:: Per-iface filter compiler (sub-block of BB_0072)
    :id: BB_0074
-   :status: open
+   :status: implemented
    :implements: REQ_0622, REQ_0623, REQ_0624
 
    Pure-logic helper that maps the per-interface registry of
@@ -404,7 +404,7 @@ two crates that carry the most logic.
 
 .. building-block:: MockCanInterface (sub-block of BB_0070)
    :id: BB_0075
-   :status: open
+   :status: implemented
    :implements: REQ_0604
 
    In-process loopback implementation of ``CanInterfaceLike``,
@@ -421,7 +421,7 @@ two crates that carry the most logic.
 
 .. building-block:: taktora-connector-ui-contract crate
    :id: BB_0045
-   :status: open
+   :status: implemented
    :implements: REQ_0857, REQ_0869, REQ_0873, REQ_0874, REQ_0875
 
    The language-neutral schema shared by server and client so they
@@ -437,7 +437,7 @@ two crates that carry the most logic.
 
 .. building-block:: taktora-connector-ui crate (server)
    :id: BB_0046
-   :status: open
+   :status: implemented
    :implements: REQ_0855, REQ_0856, REQ_0857, REQ_0860, REQ_0861, REQ_0862, REQ_0863, REQ_0865, REQ_0866, REQ_0867, REQ_0870, REQ_0871, REQ_0872, REQ_0879, REQ_0883, REQ_0884
 
    The server side: ``UiConnector<C: PayloadCodec>`` implementing the
@@ -482,7 +482,7 @@ two crates that carry the most logic.
 
 .. building-block:: taktora-connector-ui-client crate
    :id: BB_0048
-   :status: open
+   :status: implemented
    :implements: REQ_0864, REQ_0876, REQ_0877, REQ_0880, REQ_0881, REQ_0882
 
    The Rust reference consumer (no executor dependency). Discovers live

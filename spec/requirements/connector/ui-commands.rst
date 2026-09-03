@@ -7,7 +7,7 @@ cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. feat:: UI command channel
    :id: FEAT_0094
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0092
 
    A command is an acceptance-ack request-response: the View sends an

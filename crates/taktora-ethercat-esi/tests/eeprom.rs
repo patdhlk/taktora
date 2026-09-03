@@ -1,3 +1,4 @@
+//! `TEST_0866` — EEPROM source data decodes; bad hex is a located error.
 //! `REQ_0849` — `<Eeprom>` SII source data captured: hex payloads decoded to
 //! bytes, no SII interpretation, unknown children kept as `RawXml`.
 use taktora_ethercat_esi::{EsiError, parse};

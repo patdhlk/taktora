@@ -57,6 +57,9 @@ mod tests {
         MqttTopic::new(s).unwrap()
     }
 
+    /// TEST_0102 — MQTT wildcard demux predicate: every (subscription
+    /// filter, incoming topic) pair is asserted against the MQTT 3.1.1
+    /// `+` / `#` semantics, independent of any broker or iceoryx2 service.
     #[test]
     fn matching_table() {
         // (filter, topic, expected)

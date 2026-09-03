@@ -68,6 +68,9 @@ fn object_safety_smoke() {
     let _: &dyn EsiDevice = &dev;
 }
 
+/// `TEST_0420` — golden snapshot of the generated module (EL3001-like and the
+/// other `esi/*.xml` devices).
+///
 /// The generated module must match the committed golden snapshot byte-for-byte
 /// (modulo trailing whitespace), so codegen drift is caught in review.
 ///

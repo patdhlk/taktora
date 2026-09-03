@@ -1,3 +1,4 @@
+//! `TEST_0411` — revision collision produces distinct, order-independent idents.
 //! Integration tests for the ESI codegen layer: collision policy (`REQ_0512`)
 //! and the `generate` orchestration over a parsed fixture.
 

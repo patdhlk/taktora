@@ -1,3 +1,7 @@
+//! TEST_0301 — `ZenohConnector` implements `Connector` with
+//! `Routing = ZenohRouting` and `Codec = C` (compile-time associated-type
+//! check plus `create_querier` / `create_queryable` concrete return types).
+//!
 //! Surface-level tests for `ZenohConnector` against `MockZenohSession`.
 //!
 //! End-to-end pub/sub round-trip is exercised in `tests/end_to_end.rs`

@@ -88,6 +88,7 @@ async fn spawn() -> SocketAddr {
 
 /// `TEST_0951` — the log read surface filters by severity/context, and the log
 /// configuration round-trips through the write seam.
+// @need-ids: TEST_0951
 #[tokio::test]
 async fn logs_read_and_configuration_over_http() {
     let addr = spawn().await;

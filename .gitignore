@@ -8,6 +8,10 @@
 /spec/_build/
 /spec/.venv/
 
+# pytest and bytecode caches from the local Sphinx extension tests (spec/_ext).
+/spec/.pytest_cache/
+__pycache__/
+
 # Node deps for the spec/scripts/ tooling (mermaid validator). The
 # package-lock.json IS committed for reproducibility; node_modules is not.
 /spec/scripts/node_modules/

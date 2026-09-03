@@ -170,7 +170,7 @@ prettyplease      = "0.2"
 encoding_rs       = "0.8"
 humantime         = "2"
 clap              = { version = "4", features = ["derive"] }
-glob              = "0.3"
+glob              = "0.3.4" # From<GlobError> for io::Error (esi-build); into_error() deprecated
 libm              = "0.2"
 axum              = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tower-http        = { version = "0.6", default-features = false }

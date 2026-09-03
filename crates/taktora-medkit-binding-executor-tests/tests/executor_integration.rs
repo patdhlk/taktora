@@ -56,6 +56,7 @@ fn build(binding: &Arc<ExecutorBinding>) -> Executor {
         .unwrap()
 }
 
+// @need-ids: TEST_0913
 #[test]
 fn running_task_is_healthy_and_times_update() {
     let binding = Arc::new(ExecutorBinding::with_tasks(["ctrl"]));
@@ -90,6 +91,7 @@ fn running_task_is_healthy_and_times_update() {
     assert_eq!(snap.data["executor"]["executor"]["task_count"], 1);
 }
 
+// @need-ids: TEST_0913
 #[test]
 fn erroring_task_degrades_to_error_health() {
     let binding = Arc::new(ExecutorBinding::with_tasks(["boom"]));

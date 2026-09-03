@@ -18,8 +18,9 @@ The pub/sub half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: ZenohConnector implements Connector
    :id: REQ_0400
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0043
+   :links: BB_0040, BB_0041, TEST_0301
 
    The connector crate shall expose ``ZenohConnector<C: PayloadCodec>``
    that implements the ``Connector`` trait with
@@ -27,8 +28,9 @@ The pub/sub half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: ZenohRouting carries key_expr and pub/sub QoS fields
    :id: REQ_0401
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0043
+   :links: BB_0041, TEST_0300
 
    The ``ZenohRouting`` struct shall carry the Zenoh key expression
    (``key_expr: KeyExprOwned``), congestion control mode
@@ -43,8 +45,9 @@ The pub/sub half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: JsonCodec is the default codec for Zenoh
    :id: REQ_0402
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0043
+   :links: IMPL_0060, TEST_0302
 
    The Zenoh connector shall accept any ``PayloadCodec`` via its
    ``C`` generic parameter (re-affirming :need:`REQ_0211`), with
@@ -86,8 +89,9 @@ The pub/sub half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: Inbound bridge saturation drops samples and signals Degraded
    :id: REQ_0406
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0043
+   :links: BB_0044, TEST_0306
 
    When the inbound bridge channel is full, the gateway shall
    (1) increment the per-channel inbound-drop counter exposed via
@@ -103,8 +107,9 @@ The pub/sub half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: Zenoh zero-copy publish via iceoryx2 loan
    :id: REQ_0407
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0043
+   :links: IMPL_0060, TEST_0302
 
    ``ChannelWriter::send`` on a Zenoh channel shall publish
    envelopes via ``Publisher::loan`` so that the codec writes the
@@ -112,8 +117,9 @@ The pub/sub half of the Zenoh connector. This cluster ``:satisfies:``
 
 .. req:: Zenoh gateway is byte-only on the inbound publish path
    :id: REQ_0408
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0043
+   :links: IMPL_0060, TEST_0302
 
    On the inbound leg (Zenoh peer → plugin), the gateway shall
    publish the raw payload bytes received from the Zenoh subscriber

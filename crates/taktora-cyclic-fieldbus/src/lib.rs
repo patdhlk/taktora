@@ -86,14 +86,19 @@ mod trait_tests {
         type Routing = (); // single device, single byte each direction
         type Error = core::convert::Infallible;
 
-        async fn exchange(&mut self) -> Result<CycleQuality, Self::Error> {
-            self.inp = self.out.wrapping_add(1); // virtual device echoes out+1
-            let q = CycleQuality {
-                cycle_index: self.cycle,
-                all_devices_fresh: true,
-            };
-            self.cycle += 1;
-            Ok(q)
+        // Nothing to await in a virtual device; return a ready future.
+        fn exchange(
+            &mut self,
+        ) -> impl core::future::Future<Output = Result<CycleQuality, Self::Error>> {
+            core::future::ready({
+                self.inp = self.out.wrapping_add(1); // virtual device echoes out+1
+                let q = CycleQuality {
+                    cycle_index: self.cycle,
+                    all_devices_fresh: true,
+                };
+                self.cycle += 1;
+                Ok(q)
+            })
         }
         fn read_input(&self, _r: &(), dst: &mut [u8]) -> Validity {
             dst[0] = self.inp;

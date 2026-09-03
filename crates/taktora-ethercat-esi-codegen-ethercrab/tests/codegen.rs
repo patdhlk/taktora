@@ -1,3 +1,4 @@
+//! `TEST_0420` — EL3001 backend output: one device struct and one identity const per device.
 //! Integration test: parse the bullet-1 `el3001_like` fixture, run the full
 //! codegen pipeline through [`EthercrabBackend`], and assert the emitted source
 //! has the expected struct, identity constant, and `decode_inputs` reads.

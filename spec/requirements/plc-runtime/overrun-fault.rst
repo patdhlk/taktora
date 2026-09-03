@@ -7,7 +7,7 @@ reported as timestamps via ``ExecutionMonitor``.
 
 .. feat:: Cycle-overrun fault primitive
    :id: FEAT_0018
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0010
 
    Deadline violations transition the runtime — at task or executor scope —

@@ -8,8 +8,8 @@ Per-crate, no IPC, parallel-safe.
 
 .. test:: ExponentialBackoff invariants
    :id: TEST_0100
-   :status: open
-   :verifies: REQ_0233
+   :status: implemented
+   :verifies: REQ_0232, REQ_0233
 
    Property test (``proptest``) on ``ExponentialBackoff`` confirming:
    delays are monotonically non-decreasing until the cap is reached,
@@ -19,7 +19,7 @@ Per-crate, no IPC, parallel-safe.
 
 .. test:: ConnectorHealth state-machine transitions
    :id: TEST_0101
-   :status: open
+   :status: implemented
    :verifies: REQ_0230, REQ_0234
 
    Unit test asserting that every valid transition between
@@ -29,7 +29,7 @@ Per-crate, no IPC, parallel-safe.
 
 .. test:: MqttRouting wildcard demux predicate
    :id: TEST_0102
-   :status: open
+   :status: implemented
    :verifies: REQ_0254
 
    Unit-level coverage of the topic-match predicate independent of any
@@ -39,7 +39,7 @@ Per-crate, no IPC, parallel-safe.
 
 .. test:: ChannelDescriptor validation
    :id: TEST_0103
-   :status: open
+   :status: implemented
    :verifies: REQ_0201, REQ_0221
 
    Asserts that constructing a ``ChannelDescriptor`` with an empty

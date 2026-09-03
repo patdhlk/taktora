@@ -78,6 +78,7 @@ async fn spawn() -> SocketAddr {
 }
 
 /// `TEST_0947` — the full bulk-data lifecycle over the wire.
+// @need-ids: TEST_0947
 #[tokio::test]
 async fn bulk_data_lifecycle_over_http() {
     let addr = spawn().await;

@@ -15,8 +15,9 @@ generation of bring-up assertions for physical-bus facts.
 
 .. req:: Hard build errors for derivable faults
    :id: REQ_0836
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0085
+   :links: BB_0125, TEST_0844, TEST_0845
 
    Codegen shall fail the build on: two routings overlapping the same
    bit range in the same SubDevice and direction without
@@ -29,8 +30,9 @@ generation of bring-up assertions for physical-bus facts.
 
 .. req:: Warn on unmapped process-image gaps
    :id: REQ_0837
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0085
+   :links: BB_0125, TEST_0846
 
    Codegen shall emit a non-fatal warning for unmapped bit ranges within
    a device's process image. Gaps are legal and often intentional, but

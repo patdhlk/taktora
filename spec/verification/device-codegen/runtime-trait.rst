@@ -5,8 +5,8 @@ Live under ``crates/ethercat-esi-rt/tests/``.
 
 .. test:: EsiDevice trait shape compiles for a hand-written device
    :id: TEST_0430
-   :status: open
-   :verifies: REQ_0530
+   :status: implemented
+   :verifies: REQ_0530, REQ_0534
 
    Hand-written test impl of ``EsiDevice`` for a minimal
    ``MockDevice`` validates the trait surface compiles

@@ -98,6 +98,7 @@ async fn spawn() -> SocketAddr {
 
 /// `TEST_0952` — the cyclic-subscription CRUD surface works end to end and pins
 /// the subscription to its entity (cross-entity access is a `404`).
+// @need-ids: TEST_0952
 #[tokio::test]
 async fn cyclic_subscriptions_crud_round_trip() {
     let addr = spawn().await;
@@ -192,6 +193,7 @@ fn sse_data_frames(text: &str) -> Vec<Value> {
 
 /// `TEST_0952` — the per-subscription SSE stream samples the entity's data on its
 /// cadence and pushes each sample as a `data:` frame.
+// @need-ids: TEST_0952
 #[tokio::test]
 async fn cyclic_subscription_samples_data_over_sse() {
     let addr = spawn().await;

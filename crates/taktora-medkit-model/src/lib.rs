@@ -568,6 +568,7 @@ mod tests {
     /// `TEST_0905` — entity collection envelopes (top-level lists + relationship
     /// sub-resources) round-trip the corpus exactly: `items`, optional `_links`,
     /// and `x-medkit.total_count` (`REQ_0911`, `REQ_0914`).
+    // @need-ids: TEST_0905
     #[test]
     fn entity_collections_match_golden() {
         for fixture in [
@@ -592,6 +593,7 @@ mod tests {
     /// the default, filtered, app-scoped, and component-aggregated shapes:
     /// `snake_case` `fault_code` items plus the `x-medkit` count/aggregation
     /// extension (`REQ_0911`, `REQ_0915`).
+    // @need-ids: TEST_0905
     #[test]
     fn fault_lists_match_golden() {
         for fixture in [
@@ -608,6 +610,7 @@ mod tests {
     /// DTC status sub-object, `extended_data_records`, and the `snapshots`
     /// freeze-frame with its `x-medkit` capture metadata (`REQ_0911`,
     /// `REQ_0915`). The freeze-frame payload is modelled as `serde_json::Value`.
+    // @need-ids: TEST_0905
     #[test]
     fn fault_detail_matches_golden() {
         assert_golden_snapshot::<FaultDetail<Value>>("fault_get_with_freezeframe.json");
@@ -615,6 +618,7 @@ mod tests {
 
     /// `TEST_0905` — the fault-stream event payload round-trips exactly
     /// (`REQ_0911`).
+    // @need-ids: TEST_0905
     #[test]
     fn fault_event_matches_golden() {
         assert_golden_snapshot::<FaultEvent>("faults_stream_event.json");
@@ -622,6 +626,7 @@ mod tests {
 
     /// `TEST_0905` — the generic error envelope round-trips exactly
     /// (`REQ_0911`).
+    // @need-ids: TEST_0905
     #[test]
     fn error_envelope_matches_golden() {
         assert_golden_snapshot::<GenericError>("error_not_found.json");
@@ -630,6 +635,7 @@ mod tests {
     /// `TEST_0905` — the served fault shapes carry the contract's mandatory keys
     /// and casing, and none of the scaffold's legacy names survive serialization
     /// (`REQ_0911`).
+    // @need-ids: TEST_0905
     #[test]
     fn fault_shapes_use_contract_keys() {
         let detail_path = concat!(
@@ -679,6 +685,7 @@ mod tests {
     }
 
     /// `TEST_0900` — the collection envelope helper round-trips and counts items.
+    // @need-ids: TEST_0900
     #[test]
     fn collection_helper_round_trips() {
         let collection: Collection<Entity> = Collection::new(vec![Entity {

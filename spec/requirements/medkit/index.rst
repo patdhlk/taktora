@@ -67,8 +67,9 @@ Requirements
 
 .. req:: Worst-wins health rollup
    :id: REQ_0912
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0100
+   :links: BB_0106, BB_0109, TEST_0902, TEST_0903
 
    Each entity's aggregated health shall be the worst (most severe) health of
    itself and all entities it contains. Rolling a child into a fault state

@@ -448,6 +448,9 @@ mod tests {
         (rec, Arc::new(dispatch))
     }
 
+    /// `TEST_0823` — `InlineSubmit` site: a synthetic framework panic driven
+    /// end-to-end through a real inline `Pool` fires the fatal terminal
+    /// exactly once with the expected site and cause.
     #[test]
     fn inline_pool_panic_fires_fatal_with_inline_submit_site() {
         let (rec, fatal) = recording_fatal();
@@ -460,6 +463,9 @@ mod tests {
         assert_eq!(entries[0].1, "synthetic infra panic");
     }
 
+    /// `TEST_0823` — `PoolWorker` site: a synthetic framework panic driven
+    /// end-to-end through a real threaded `Pool` fires the fatal terminal
+    /// exactly once with the expected site and cause.
     #[test]
     fn threaded_pool_panic_fires_fatal_with_pool_worker_site() {
         let (rec, fatal) = recording_fatal();
@@ -480,6 +486,9 @@ mod tests {
     #[cfg(unix)]
     const ABORT_CHILD_ENV: &str = "TAKTORA_EXECUTOR_ABORT_CHILD";
 
+    /// `TEST_0824` — default fail-fast: a child process with the default
+    /// (no-op) fatal handler dies via `SIGABRT` on a framework-boundary
+    /// panic — neither a clean exit nor a hang.
     #[cfg(unix)]
     #[test]
     fn pool_panic_aborts_process_with_sigabrt() {

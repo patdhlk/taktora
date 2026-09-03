@@ -1113,6 +1113,7 @@ mod tests {
 
     /// `TEST_0906` — top-level lists and relationship sub-resources resolve with
     /// the right envelope (no `_links` on lists; `self` + back-link on relations).
+    // @need-ids: TEST_0906
     #[test]
     fn lists_and_relationships_resolve() {
         let view = view();
@@ -1137,6 +1138,7 @@ mod tests {
     }
 
     /// `TEST_0906` — subcomponents back-links via the `parent` key, not `component`.
+    // @need-ids: TEST_0906
     #[test]
     fn subcomponents_links_via_parent() {
         let links = view()
@@ -1149,6 +1151,7 @@ mod tests {
     }
 
     /// `TEST_0906` — an unknown entity id is a not-found error, not a panic.
+    // @need-ids: TEST_0906
     #[test]
     fn unknown_entity_is_not_found() {
         let err = view()
@@ -1159,6 +1162,7 @@ mod tests {
     }
 
     /// `TEST_0906` — fault filtering and the per-scope `x-medkit` extension keys.
+    // @need-ids: TEST_0906
     #[test]
     fn fault_scopes_and_filters() {
         let view = view();
@@ -1186,6 +1190,7 @@ mod tests {
     }
 
     /// `TEST_0906` — fault detail derives the camelCase DTC status sub-object.
+    // @need-ids: TEST_0906
     #[test]
     fn fault_detail_derives_status() {
         let detail = view().fault_detail(EntityKind::App, "gw", "BRAKE").unwrap();
@@ -1198,6 +1203,7 @@ mod tests {
     /// `TEST_0918` — a fault carrying environment data in the snapshot surfaces a
     /// non-empty freeze-frame under `fault_detail`; one without falls back to the
     /// occurrence-only shape (back-compat) — `REQ_0929`.
+    // @need-ids: TEST_0918
     #[test]
     fn fault_detail_surfaces_freeze_frame_environment() {
         use taktora_medkit_model::{FreezeFrame, FreezeFrameMeta};
@@ -1256,6 +1262,7 @@ mod tests {
     }
 
     /// `TEST_0906` — data navigates the topic path and 404s past the leaf.
+    // @need-ids: TEST_0906
     #[test]
     fn data_navigates_topic_path() {
         let view = view();
@@ -1273,6 +1280,7 @@ mod tests {
     }
 
     /// `TEST_0906` — the ISO-8601 formatter matches the contract timestamp shape.
+    // @need-ids: TEST_0906
     #[test]
     fn iso8601_formats_epoch() {
         assert_eq!(iso8601(1_782_661_500.75), "2026-06-28T15:45:00.750Z");
@@ -1322,6 +1330,7 @@ mod tests {
     /// `TEST_0910` — applying a manifest injects the declared skeleton, re-parents
     /// the raw entities, and surfaces the declared structure under the
     /// relationship sub-resources (`REQ_0920`, `REQ_0921`).
+    // @need-ids: TEST_0910
     #[test]
     fn manifest_reparents_into_declared_structure() {
         let snapshot = MockProvider::new()
@@ -1369,6 +1378,7 @@ mod tests {
 
     /// `TEST_0911` — an empty (or absent) manifest leaves the flat provider
     /// grouping untouched, with no panic (`REQ_0922`).
+    // @need-ids: TEST_0911
     #[test]
     fn empty_manifest_falls_back_to_flat() {
         let snapshot = MockProvider::new()

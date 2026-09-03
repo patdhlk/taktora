@@ -23,7 +23,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: EthercatRouting field round-trip
    :id: TEST_0201
-   :status: open
+   :status: implemented
    :verifies: REQ_0311
 
    Unit test constructing ``EthercatRouting`` values with the four
@@ -55,7 +55,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Static PDO map accepted from options
    :id: TEST_0204
-   :status: open
+   :status: implemented
    :verifies: REQ_0314
 
    Unit test that ``EthercatConnectorOptions::with_pdo_mapping``
@@ -76,7 +76,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Cycle time configurable
    :id: TEST_0206
-   :status: open
+   :status: implemented
    :verifies: REQ_0316
 
    Unit test that ``EthercatConnectorOptions::cycle_time`` accepts
@@ -86,7 +86,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Missed ticks are skipped not queued
    :id: TEST_0207
-   :status: open
+   :status: implemented
    :verifies: REQ_0317
 
    Mock-frame test: stall the gateway's tokio sidecar for 5 cycles
@@ -108,7 +108,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Up requires OP and matching working counter
    :id: TEST_0209
-   :status: open
+   :status: implemented
    :verifies: REQ_0319
 
    Mock-frame test: drive the gateway to OP with the mock reporting
@@ -119,7 +119,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Working-counter mismatch transitions to Degraded
    :id: TEST_0210
-   :status: open
+   :status: implemented
    :verifies: REQ_0320
 
    Mock-frame test: configure a degradation threshold of N=3 cycles;
@@ -130,7 +130,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Tokio sidecar contained inside connector crate
    :id: TEST_0211
-   :status: open
+   :status: implemented
    :verifies: REQ_0321
 
    Structural test using ``cargo tree``: assert that
@@ -142,7 +142,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Bridge channels are bounded with configurable capacity
    :id: TEST_0212
-   :status: open
+   :status: implemented
    :verifies: REQ_0322
 
    Unit test that ``EthercatConnectorOptions::outbound_capacity``
@@ -163,7 +163,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Inbound bridge saturation surfaces as DroppedInbound
    :id: TEST_0214
-   :status: open
+   :status: implemented
    :verifies: REQ_0324
 
    Mock-frame test: configure a tiny inbound-bridge capacity. Block
@@ -186,7 +186,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: PDI bit-slice byte-aligned round-trip
    :id: TEST_0216
-   :status: open
+   :status: implemented
    :verifies: REQ_0326, REQ_0327
 
    Pure-logic test of the ``pdi`` module. For a representative
@@ -201,7 +201,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: PDI bit-slice unaligned round-trip
    :id: TEST_0217
-   :status: open
+   :status: implemented
    :verifies: REQ_0326, REQ_0327
 
    Property test for the same round-trip as :need:`TEST_0216` but
@@ -212,7 +212,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Adjacent PDI bit slices do not interfere
    :id: TEST_0218
-   :status: open
+   :status: implemented
    :verifies: REQ_0326
 
    Construct two ``EthercatRouting`` declarations whose bit slices
@@ -224,7 +224,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Per-channel routing registry has stable iteration order
    :id: TEST_0219
-   :status: open
+   :status: implemented
    :verifies: REQ_0328
 
    When the application registers N channel descriptors in order
@@ -236,7 +236,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Outbound end-to-end (plugin send → PDI slice via mock)
    :id: TEST_0220
-   :status: open
+   :status: implemented
    :verifies: REQ_0326, REQ_0328
 
    With a ``MockBusDriver`` configured for a single SubDevice at
@@ -252,7 +252,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Inbound end-to-end (PDI slice via mock → plugin recv)
    :id: TEST_0221
-   :status: open
+   :status: implemented
    :verifies: REQ_0327, REQ_0328
 
    With a ``MockBusDriver`` preloaded with inputs bytes at a known
@@ -265,7 +265,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Loopback round-trip (plugin → mock → plugin)
    :id: TEST_0222
-   :status: open
+   :status: implemented
    :verifies: REQ_0326, REQ_0327
 
    Compose :need:`TEST_0220` and :need:`TEST_0221` via a ``MockBusDriver``
@@ -280,7 +280,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Asymmetric expected_wkc summing
    :id: TEST_0223
-   :status: open
+   :status: implemented
    :verifies: REQ_0329
 
    Table-driven unit test in
@@ -291,7 +291,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: DC cycle path branches on options.distributed_clocks
    :id: TEST_0224
-   :status: open
+   :status: implemented
    :verifies: REQ_0330
 
    Mock-driven unit test asserting ``MockBusDriver`` records
@@ -301,7 +301,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Recovery state machine drives BusDriver::recover per policy
    :id: TEST_0225
-   :status: open
+   :status: implemented
    :verifies: REQ_0331, REQ_0332
 
    Integration test in
@@ -314,7 +314,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Health transitions during recovery
    :id: TEST_0226
-   :status: open
+   :status: implemented
    :verifies: REQ_0333
 
    Integration test asserting the exact emitted ``HealthEvent``
@@ -338,7 +338,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: OP wait-loop pacing decisions
    :id: TEST_0857
-   :status: open
+   :status: implemented
    :verifies: REQ_0841
 
    Unit tests in
@@ -353,7 +353,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Bring-up failure surfaces as terminal Down
    :id: TEST_0858
-   :status: open
+   :status: implemented
    :verifies: REQ_0842
 
    Integration test in
@@ -366,7 +366,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: SM-watchdog tick maths against the AOU_0016 bound
    :id: TEST_0862
-   :status: open
+   :status: implemented
    :verifies: REQ_0846
 
    Unit tests in
@@ -411,7 +411,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Health subscriptions broadcast to every subscriber
    :id: TEST_0864
-   :status: open
+   :status: implemented
    :verifies: REQ_0847
 
    Per-connector integration tests in
@@ -425,7 +425,7 @@ exercised without hardware. Bench tests run only when invoked as
 
 .. test:: Startup SDOs written in order before PDO assignment
    :id: TEST_0869
-   :status: open
+   :status: implemented
    :verifies: REQ_0853
 
    Unit tests in ``taktora-connector-ethercat`` over the startup-SDO

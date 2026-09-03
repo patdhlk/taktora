@@ -1,3 +1,5 @@
+//! `TEST_0861` — SM-watchdog bound and enable are validated at config time
+//! (`REQ_0845`).
 //! SM-watchdog config-time validation matrix (`REQ_0845`, `TEST_0861`).
 //!
 //! For every device carrying output (rx) PDOs, `parse`/`resolve` enforces

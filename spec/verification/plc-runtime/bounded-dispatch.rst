@@ -11,7 +11,7 @@ Zero-allocation dispatch
 
 .. test:: Zero allocations in steady-state dispatch
    :id: TEST_0170
-   :status: open
+   :status: implemented
    :verifies: REQ_0060
 
    **Goal.** Confirm that **steady-state** iterations of

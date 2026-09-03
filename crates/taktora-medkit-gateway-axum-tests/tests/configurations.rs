@@ -77,6 +77,7 @@ async fn spawn() -> SocketAddr {
 }
 
 /// `TEST_0946` — the full configuration lifecycle over the wire.
+// @need-ids: TEST_0946
 #[tokio::test]
 async fn configuration_lifecycle_over_http() {
     let addr = spawn().await;

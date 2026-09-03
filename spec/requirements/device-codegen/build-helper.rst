@@ -14,8 +14,9 @@ codegen with one ``build.rs`` invocation and one ``include!`` line.
 
 .. req:: Builder API shape
    :id: REQ_0540
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0055
+   :links: BB_0064, TEST_0440
 
    ``ethercat-esi-build`` shall expose
    ``Builder::new().glob(<pattern>).backend(<backend>).out_file(<name>).build()``
@@ -24,8 +25,9 @@ codegen with one ``build.rs`` invocation and one ``include!`` line.
 
 .. req:: Output written to OUT_DIR
    :id: REQ_0541
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0055
+   :links: BB_0064, TEST_0440
 
    The helper shall write the generated module to
    ``$OUT_DIR/<out_file>`` so consumers wire it in with

@@ -172,3 +172,15 @@ outgoing = "implements"
 [needs.links.verifies]
 incoming = "is verified by"
 outgoing = "verifies"
+
+# ubCode (`ubc check`) parser configuration — directives contributed by the
+# local Sphinx extensions under spec/_ext, declared so the linter does not
+# report them as unknown. sphinx-needs reads only the [needs] tables above.
+
+[parse.extend_directives.test-results-if-present]
+argument = true
+options = true
+content = true
+content_required = false
+description = "sphinx-test-reports `test-file` that degrades to a note when the JUnit is absent (test_records extension, FEAT_0122)"
+extension = "test_records"

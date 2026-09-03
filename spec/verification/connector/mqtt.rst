@@ -13,7 +13,7 @@ noop locally.
 .. test:: MqttConnector implements Connector
    :id: TEST_0957
    :status: implemented
-   :verifies: REQ_0250
+   :verifies: REQ_0211, REQ_0220, REQ_0250
 
    Compile-time API-surface check plus a runtime smoke over
    ``MockMqttSession``: ``MqttConnector<JsonCodec>`` satisfies
@@ -27,7 +27,7 @@ noop locally.
 .. test:: MqttRouting carries topic, qos, retained
    :id: TEST_0958
    :status: implemented
-   :verifies: REQ_0251
+   :verifies: REQ_0222, REQ_0224, REQ_0251
 
    Unit tests asserting ``MqttRouting`` satisfies the ``Routing`` marker
    bounds (``Clone + Send + Sync + Debug + 'static``), exposes ``topic()``

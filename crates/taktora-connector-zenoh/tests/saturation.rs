@@ -88,6 +88,10 @@ fn inbound_bridge_drop_count_persists_after_drain() {
     assert_eq!(bridge.dropped_count(), 2);
 }
 
+/// `TEST_0306` — (pub/sub-sample half) inbound bridge saturation on a
+/// subscriber channel drops samples, surfaces the cumulative count, and
+/// signals `Degraded`.
+///
 /// `REQ_0406`: subscriber-side inbound saturation. Driving the
 /// per-channel bridge into overflow accounts the drops via
 /// `ZenohHealthMonitor::record_inbound_drop`, which emits a single
@@ -138,6 +142,10 @@ fn subscriber_overflow_emits_degraded_transition() {
     }
 }
 
+/// `TEST_0306` — (reply-chunk half) inbound bridge saturation on a querier
+/// channel drops reply chunks, surfaces the cumulative count, and signals
+/// `Degraded`.
+///
 /// `REQ_0428`: reply-stream inbound saturation. The same drop +
 /// Degraded contract holds for the gateway → plugin reply path of a
 /// querier channel ([`BridgedCorrelatedPublish`]).

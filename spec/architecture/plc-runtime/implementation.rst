@@ -7,7 +7,7 @@ The concrete Rust changes that realise the pre-allocated dispatch scratch
 
 .. impl:: Zero-alloc dispatch — executor.rs + graph.rs refactor
    :id: IMPL_0001
-   :status: open
+   :status: implemented
    :implements: BB_0023
    :refines: REQ_0060
 

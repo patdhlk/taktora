@@ -119,6 +119,7 @@ fn ids(collection: &Value) -> Vec<String> {
 
 /// `TEST_0910` — a manifest re-parents the raw entities so the declared structure
 /// surfaces through the HTTP relationship sub-resources.
+// @need-ids: TEST_0910
 #[tokio::test]
 async fn manifest_groups_raw_entities() {
     let addr = spawn(raw_provider(), Some(manifest())).await;
@@ -153,6 +154,7 @@ async fn manifest_groups_raw_entities() {
 
 /// `TEST_0911` — without a manifest the grouping stays flat: no Areas, and the
 /// component nesting sub-resources are empty rather than panicking.
+// @need-ids: TEST_0911
 #[tokio::test]
 async fn absent_manifest_stays_flat() {
     let addr = spawn(raw_provider(), None).await;

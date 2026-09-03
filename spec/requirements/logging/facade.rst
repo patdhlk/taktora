@@ -8,7 +8,7 @@ The thin facade crate that all taktora crates emit through. It owns the
 
 .. feat:: taktora-log facade crate
    :id: FEAT_0071
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0070
 
    A thin facade crate (``taktora-log``) that re-exports the ``log``

@@ -7,7 +7,7 @@ equivalent of a PLC cause-effect network.
 
 .. feat:: Deterministic logic sequencing
    :id: FEAT_0013
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0010
 
    Items compose into chains and DAGs with explicit ordering and abort

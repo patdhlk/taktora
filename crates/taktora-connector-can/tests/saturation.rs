@@ -1,3 +1,6 @@
+//! `TEST_0510` — inbound bridge saturation surfaces as a single `Degraded`
+//! health transition carrying the running drop count (`REQ_0606`, `REQ_0608`).
+//!
 //! Inbound-saturation coverage for the CAN connector (`REQ_0608`).
 //!
 //! The bridge-unit contract lives next to the type (see

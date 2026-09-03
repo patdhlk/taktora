@@ -125,6 +125,7 @@ async fn get_json(addr: SocketAddr, path: &str) -> (u16, Value) {
 }
 
 /// `TEST_0906` — read-core families shape-match the captured contract corpus.
+// @need-ids: TEST_0906
 #[tokio::test]
 async fn read_core_matches_golden_shapes() {
     let addr = spawn(GatewayConfig::default()).await;
@@ -190,6 +191,7 @@ async fn read_core_matches_golden_shapes() {
 }
 
 /// `TEST_0906` — an unknown entity yields the contract's `GenericError` 404.
+// @need-ids: TEST_0906
 #[tokio::test]
 async fn unknown_entity_is_contract_404() {
     let addr = spawn(GatewayConfig::default()).await;
@@ -200,6 +202,7 @@ async fn unknown_entity_is_contract_404() {
 }
 
 /// `TEST_0906` — `data` reads navigate the topic path; DELETE on a fault is 204.
+// @need-ids: TEST_0906
 #[tokio::test]
 async fn data_and_delete_behaviour() {
     let addr = spawn(GatewayConfig::default()).await;
@@ -231,6 +234,7 @@ async fn data_and_delete_behaviour() {
 
 /// `TEST_0907` — every deferred family answers `501` (not `404`) with a
 /// contract-shaped body. At least one route per family is asserted.
+// @need-ids: TEST_0907
 #[tokio::test]
 async fn deferred_families_return_501() {
     let addr = spawn(GatewayConfig::default()).await;
@@ -280,6 +284,7 @@ async fn deferred_families_return_501() {
 }
 
 /// `TEST_0908` — CORS is advertised and the token-bucket rate limit throttles.
+// @need-ids: TEST_0908
 #[tokio::test]
 async fn transport_hardening() {
     // CORS: a permissive default advertises an allow-origin header.
@@ -328,6 +333,7 @@ fn captured_build_info() -> BuildInfo {
 /// `TEST_0956` — build identity captured at compile time and injected through
 /// the `with_build_info` seam surfaces under `vendor_info` at `/version-info`,
 /// typed and additive.
+// @need-ids: TEST_0956
 #[tokio::test]
 async fn version_info_reports_injected_build_identity() {
     let build = captured_build_info();
@@ -358,6 +364,7 @@ async fn version_info_reports_injected_build_identity() {
 /// `TEST_0956` — with no injected identity the document stays well-formed: git
 /// fields report `"unknown"` and the tree reads clean (the no-`.git` fallback
 /// shape, `REQ_0990`).
+// @need-ids: TEST_0956
 #[tokio::test]
 async fn version_info_defaults_to_unknown_without_injection() {
     let addr = spawn(GatewayConfig::default()).await;

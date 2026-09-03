@@ -7,7 +7,7 @@ beyond test fixtures, parallel-safe. Live under
 
 .. test:: parse() accepts a representative WAGO network.yaml
    :id: TEST_0830
-   :status: open
+   :status: implemented
    :verifies: REQ_0820, REQ_0821
 
    Loads a canonical ``network.yaml`` fixture describing a WAGO 750-354
@@ -20,7 +20,7 @@ beyond test fixtures, parallel-safe. Live under
 
 .. test:: Multi-bus document is rejected
    :id: TEST_0831
-   :status: open
+   :status: implemented
    :verifies: REQ_0822
 
    A fixture declaring two top-level buses in one document parses to an
@@ -29,7 +29,7 @@ beyond test fixtures, parallel-safe. Live under
 
 .. test:: Channels resolve to devices by label, stable under reorder
    :id: TEST_0832
-   :status: open
+   :status: implemented
    :verifies: REQ_0823
 
    A fixture whose channels reference devices by ``label`` parses

@@ -6,7 +6,7 @@ How typed values become payload bytes, and back. This cluster
 
 .. feat:: Codec abstraction
    :id: FEAT_0032
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0030
 
    How typed values become payload bytes, and back. Codec selection is a
@@ -25,8 +25,9 @@ How typed values become payload bytes, and back. This cluster
 
 .. req:: Codec is a generic parameter on connectors
    :id: REQ_0211
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0032
+   :links: BB_0020, BB_0041, TEST_0301, TEST_0957
 
    Each ``Connector`` implementation shall expose its codec as a generic
    parameter (``MqttConnector<C: PayloadCodec>``), monomorphised at
@@ -44,8 +45,9 @@ How typed values become payload bytes, and back. This cluster
 
 .. req:: Codec encode error variant
    :id: REQ_0213
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0032
+   :links: IMPL_0010, IMPL_0030, TEST_0111
 
    When ``PayloadCodec::encode`` fails (buffer too small, serializer error),
    ``ChannelWriter::send`` shall return ``ConnectorError::Codec`` carrying
@@ -53,8 +55,9 @@ How typed values become payload bytes, and back. This cluster
 
 .. req:: Codec decode error variant
    :id: REQ_0214
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0032
+   :links: IMPL_0010, IMPL_0020, IMPL_0030, TEST_0112
 
    When ``PayloadCodec::decode`` fails on a received envelope,
    ``ChannelReader::try_recv`` shall return ``ConnectorError::Codec`` and
