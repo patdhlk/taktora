@@ -29,7 +29,7 @@ state, with the convention:
 
 .. tsr:: Per-integrity-level allocation quotas
    :id: TSR_0002
-   :status: draft
+   :status: implemented
    :asil: B(D)
    :refines: AFSR_0003
 
@@ -38,12 +38,14 @@ state, with the convention:
    deny allocation from the safety-critical pool.
 
    :Allocates to: ``taktora-bounded-alloc``
-   :Today: EXT — current allocator has a single global pool. Requires
-       API extension to take an integrity-level argument at allocator-init.
+   :Today: Satisfied by ``PartitionedBoundedAllocator`` — independent
+       safety-critical and quality-managed block pools with explicit
+       per-level routing (``alloc_in``); QM-pool exhaustion cannot deny
+       the SC pool. Verified by ``TEST_0130``.
 
 .. tsr:: Integrity-level declaration and process isolation
    :id: TSR_0003
-   :status: draft
+   :status: implemented
    :asil: B(D)
    :refines: AFSR_0001
 
@@ -53,8 +55,10 @@ state, with the convention:
    QM-grade items to run in a separate OS process.
 
    :Allocates to: ``taktora-executor``
-   :Today: NEW — neither the trait nor the registration API today
-       carries an integrity-level field.
+   :Today: Satisfied by ``IntegrityLevel`` + ``ExecutableItem::integrity_level``
+       + ``ExecutorBuilder::integrity_level``; ``add`` / ``add_chain`` /
+       ``add_graph`` reject mixed levels with ``ExecutorError::MixedIntegrity``.
+       Verified by ``TEST_0131``.
 
 .. tsr:: Missed-deadline detection within one cycle
    :id: TSR_0004
@@ -113,12 +117,14 @@ state, with the convention:
    segment.
 
    :Allocates to: ``taktora-connector-transport-iox``
-   :Today: Single-publisher is the iceoryx2 default for PublishSubscribe
-       services; the transport-iox factory does not override.
+   :Today: The transport-iox factory now sets single-publisher
+       (``max_publishers(1)``) and the buffer/history QoS explicitly, and
+       a static ``ChannelSpec`` topology is created once at init with
+       undeclared services rejected. Verified by ``TEST_0132``.
 
 .. tsr:: Envelope sequence + CRC integrity
    :id: TSR_0008
-   :status: draft
+   :status: implemented
    :asil: B(D)
    :refines: AFSR_0002, AFSR_0004
 
@@ -128,12 +134,15 @@ state, with the convention:
    surfacing it to the reader.
 
    :Allocates to: ``taktora-connector-transport-iox``
-   :Today: EXT — current ``ConnectorEnvelope<N>`` carries a
-       ``CorrelationId`` but no sequence counter or CRC.
+   :Today: Satisfied by the ``crc32`` envelope header field (wire
+       version 2): a CRC over header + payload is computed on send and
+       verified on receive; a mismatch drops the frame and raises a
+       ``HealthEvent(Degraded)`` without surfacing it. Verified by
+       ``TEST_0133``.
 
 .. tsr:: Cross-process hosting mode
    :id: TSR_0009
-   :status: draft
+   :status: implemented
    :asil: B(D)
    :refines: AFSR_0001, AFSR_0002
 
@@ -143,11 +152,14 @@ state, with the convention:
    read/write capability.
 
    :Allocates to: ``taktora-executor``, ``taktora-connector-host``
-   :Today: NEW — current executor hosts all items in one process.
+   :Today: Satisfied by per-process ``IntegrityLevel``-pinned executors
+       that communicate only over iceoryx2 shared memory — see the
+       ``integrity-cross-process`` two-process example. Verified by
+       ``TEST_0134``.
 
 .. tsr:: Heartbeat for Element B monitor
    :id: TSR_0010
-   :status: draft
+   :status: implemented
    :asil: B(D)
    :refines: AFSR_0004
 
@@ -156,7 +168,30 @@ state, with the convention:
    integrator's diverse monitor (Element B per :doc:`decomposition`).
 
    :Allocates to: ``taktora-executor``, ``taktora-connector-host``
-   :Today: NEW — no liveness heartbeat exists today.
+   :Today: Satisfied by ``ExecutorBuilder::heartbeat`` +
+       ``Observer::on_heartbeat`` (the dispatch-loop wait is bounded by
+       the heartbeat deadline) and the connector-host
+       ``HeartbeatHealthBridge`` that forwards ticks onto the
+       ``HealthEvent`` path. Verified by ``TEST_0135``.
+
+.. tsr:: Cold-start integrity-verification admission gate
+   :id: TSR_0011
+   :status: implemented
+   :asil: B(D)
+   :refines: AFSR_0005
+
+   The executor shall verify that the spatial-isolation context is
+   intact before admitting a safety-critical item into the runnable set
+   on each cold start; a failed verification shall refuse admission and
+   surface a fault without dispatching any item.
+
+   :Allocates to: ``taktora-executor``
+   :Today: Satisfied by ``ExecutorBuilder::admission_check`` +
+       ``AdmissionContext`` / ``AdmissionOutcome``: the ordered
+       verify → admit → ``RUNNING`` startup runs before dispatch, and a
+       rejection yields ``ExecutorError::AdmissionRejected`` +
+       ``Observer::on_admission_rejected`` with nothing dispatched.
+       Verified by ``TEST_0136``.
 
 TSR coverage summary
 --------------------
@@ -166,15 +201,13 @@ TSR coverage summary
    :columns: id, title, status, refines
    :show_filters:
 
-* 5 ``implemented`` — TSR_0001, TSR_0004, TSR_0005, TSR_0006, TSR_0007.
-* 2 ``draft`` (extension to existing crate) — TSR_0002, TSR_0008.
-* 3 ``draft`` (new component) — TSR_0003, TSR_0009, TSR_0010.
+* 10 ``implemented`` — TSR_0001..TSR_0005, TSR_0007..TSR_0011.
+* 1 ``approved`` — TSR_0006 (pending a measured FTTI/2 latency test).
 
-**AFSR coverage.** This batch refines AFSR_0001..AFSR_0004 onto 10 TSRs.
-AFSR_0005 (startup integrity verification) is intentionally deferred to
-the follow-on implementation plan that owns TSR_0003 (process
-isolation), since startup verification is the natural admission-time
-companion to the process-isolation invariant.
+**AFSR coverage.** This concept refines AFSR_0001..AFSR_0005 onto 11
+TSRs. AFSR_0005 (startup integrity verification) is refined by TSR_0011,
+the cold-start admission gate — the admission-time companion to the
+TSR_0003 process-isolation invariant.
 
-The five ``draft`` TSRs are the substance of the context-based isolation
-work item and are the subject of a follow-on taktora implementation plan.
+Covering ``test::`` cases for the context-based isolation work item live
+in :doc:`verification`.

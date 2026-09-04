@@ -41,6 +41,7 @@ live in :doc:`../architecture/safety` under the architecture tree.
    tsc
    ffi
    aou
+   verification
 
 Safety artefacts at a glance
 ----------------------------
