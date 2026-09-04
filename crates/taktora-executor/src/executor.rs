@@ -1283,6 +1283,46 @@ enum RunMode<'a> {
 }
 
 impl Executor {
+    /// Bound `timeout` by the heartbeat deadline so the `WaitSet` wakes in
+    /// time to emit the next tick (`TSR_0010`). Returns `timeout` unchanged
+    /// when no heartbeat is configured. Alloc-free.
+    #[inline]
+    fn heartbeat_bounded_timeout(&self, timeout: Duration) -> Duration {
+        let Some(hb_state) = self.heartbeat_state.as_ref() else {
+            return timeout;
+        };
+        let now_nanos = self.cyclic_clock.now_nanos();
+        let heartbeat_timeout = if now_nanos >= hb_state.next_due_nanos {
+            Duration::ZERO
+        } else {
+            Duration::from_nanos(hb_state.next_due_nanos - now_nanos)
+        };
+        timeout.min(heartbeat_timeout)
+    }
+
+    /// Emit a heartbeat tick via [`Observer::on_heartbeat`] when
+    /// `now_nanos` has reached the next deadline, then advance the deadline
+    /// by one period (catching up without an unbounded burst). Alloc-free:
+    /// [`crate::heartbeat::HeartbeatTick`] is `Copy` on the stack.
+    #[inline]
+    fn emit_heartbeat_if_due(&mut self, now_nanos: u64) {
+        let Some(hb_state) = self.heartbeat_state.as_mut() else {
+            return;
+        };
+        if now_nanos < hb_state.next_due_nanos {
+            return;
+        }
+        hb_state.seq = hb_state.seq.wrapping_add(1);
+        let tick = crate::heartbeat::HeartbeatTick {
+            seq: hb_state.seq,
+            at_nanos: now_nanos,
+        };
+        self.observer.on_heartbeat(&tick);
+        hb_state.next_due_nanos = hb_state
+            .next_due_nanos
+            .saturating_add(hb_state.period_nanos);
+    }
+
     fn run_inner(&mut self, mut mode: RunMode<'_>) -> Result<(), ExecutorError> {
         // NOTE: Once `Stoppable::stop()` has been called, `self.stoppable.is_stopped()`
         // remains true permanently. Calling `run()` again after a stop will return
@@ -1600,15 +1640,7 @@ impl Executor {
                     // Heartbeat deadline: fold into timeout so the WaitSet wakes
                     // in time to emit the tick. Works on both Linux (timerfd path)
                     // and macOS (self-computed-timeout fallback).
-                    if let Some(hb_state) = &self.heartbeat_state {
-                        let now_nanos = self.cyclic_clock.now_nanos();
-                        let heartbeat_timeout = if now_nanos >= hb_state.next_due_nanos {
-                            Duration::ZERO
-                        } else {
-                            Duration::from_nanos(hb_state.next_due_nanos - now_nanos)
-                        };
-                        timeout = timeout.min(heartbeat_timeout);
-                    }
+                    timeout = self.heartbeat_bounded_timeout(timeout);
                     waitset.wait_and_process_once_with_timeout(
                         |attachment_id: WaitSetAttachmentId<ipc::Service>| {
                             // `attachment_map` is a standalone local re-borrowed
@@ -1702,19 +1734,7 @@ impl Executor {
             // Heartbeat tick: emit if now >= next_due, then advance next_due by
             // period (catching up without unbounded burst). Alloc-free: HeartbeatTick
             // is Copy on the stack.
-            if let Some(hb_state) = &mut self.heartbeat_state {
-                if now_nanos >= hb_state.next_due_nanos {
-                    hb_state.seq = hb_state.seq.wrapping_add(1);
-                    let tick = crate::heartbeat::HeartbeatTick {
-                        seq: hb_state.seq,
-                        at_nanos: now_nanos,
-                    };
-                    self.observer.on_heartbeat(&tick);
-                    hb_state.next_due_nanos = hb_state
-                        .next_due_nanos
-                        .saturating_add(hb_state.period_nanos);
-                }
-            }
+            self.emit_heartbeat_if_due(now_nanos);
 
             // Funnel the post-callback decision (interrupt / item error /
             // stop request / run-mode termination) through one helper that
