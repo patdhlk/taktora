@@ -72,6 +72,14 @@ pub enum ExecutorError {
         /// The level the rejected item declared.
         found: crate::IntegrityLevel,
     },
+
+    /// Cold-start admission check refused to admit the executor (`AFSR_0005`).
+    /// The executor did NOT enter `RUNNING` — no tasks were dispatched.
+    #[error("admission rejected: {reason}")]
+    AdmissionRejected {
+        /// The reason for rejection, provided by the admission check.
+        reason: String,
+    },
 }
 
 impl ExecutorError {

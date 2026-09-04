@@ -31,6 +31,7 @@ core_affinity = { workspace = true, optional = true }
 # published manifest carries no internal dev-dep that release-plz's
 # topological publish sort would mis-order (see issue #27 / release-plz#2697).
 proptest            = { workspace = true }
+parking_lot         = { workspace = true }
 
 [features]
 default      = []

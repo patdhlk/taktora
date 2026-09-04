@@ -143,6 +143,9 @@ fn clone_executor_error(e: &ExecutorError) -> ExecutorError {
             expected: *expected,
             found: *found,
         },
+        ExecutorError::AdmissionRejected { reason } => ExecutorError::AdmissionRejected {
+            reason: reason.clone(),
+        },
     }
 }
 

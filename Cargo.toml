@@ -146,6 +146,7 @@ bitflags          = "2"
 bitvec            = "1"
 crossbeam-channel = "0.5"
 crossbeam-utils   = "0.8"
+parking_lot       = "0.12"
 num_cpus          = "1"
 log               = { version = "0.4.21", features = ["kv", "std"] }
 tracing           = "0.1"

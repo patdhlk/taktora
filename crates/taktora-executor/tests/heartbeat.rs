@@ -1,7 +1,8 @@
 #![allow(missing_docs)]
 #![allow(clippy::doc_markdown)]
 use core::time::Duration;
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use taktora_executor::{Executor, HeartbeatTick, ItemFlow, Observer, item_with_triggers};
 
 /// Captures heartbeat ticks for verification.
@@ -18,14 +19,14 @@ impl HeartbeatCapture {
     }
 
     fn take_ticks(&self) -> Vec<HeartbeatTick> {
-        let mut guard = self.ticks.lock().unwrap();
+        let mut guard = self.ticks.lock();
         core::mem::take(&mut *guard)
     }
 }
 
 impl Observer for HeartbeatCapture {
     fn on_heartbeat(&self, tick: &HeartbeatTick) {
-        self.ticks.lock().unwrap().push(*tick);
+        self.ticks.lock().push(*tick);
     }
 }
 

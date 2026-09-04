@@ -16,6 +16,7 @@
 //! See the workspace `README.md` for a quick-start.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod admission;
 mod attachment_map;
 mod chain;
 mod channel;
@@ -49,6 +50,7 @@ mod thread_attrs;
 mod timerfd;
 mod trigger;
 
+pub use admission::{AdmissionContext, AdmissionFault, AdmissionOutcome};
 pub use channel::{Channel, EVENT_SUFFIX, NotifyOutcome, Publisher, Subscriber};
 pub use clock::{MockClock, MonotonicClock, SystemClock};
 pub use condition::{Conditional, wrap_with_condition};

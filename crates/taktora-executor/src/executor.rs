@@ -245,6 +245,11 @@ pub struct Executor {
     /// (in cyclic-clock nanos), and the running sequence counter. Updated
     /// every tick on the `WaitSet` thread; never accessed from workers.
     heartbeat_state: Option<HeartbeatState>,
+
+    /// Cold-start admission check (`AFSR_0005`). `None` → no check; `Some(f)` →
+    /// invoke `f` once at cold-start to verify spatial isolation before entering
+    /// `RUNNING`. Propagated from [`ExecutorBuilder::admission_check`].
+    admission_check: Option<crate::admission::AdmissionCheckFn>,
 }
 
 /// Heartbeat state bundled into one optional field on [`Executor`].
@@ -860,6 +865,10 @@ pub struct ExecutorBuilder {
     /// at least every `period`. Typical automotive safety use: `≤ FTTI/2`
     /// (`≤ 50 ms`).
     heartbeat_period: Option<Duration>,
+    /// Cold-start admission check (`AFSR_0005`). `None` → no check (default,
+    /// backward-compatible); `Some(f)` → invoke `f` once at cold-start to verify
+    /// spatial isolation before entering `RUNNING`.
+    admission_check: Option<crate::admission::AdmissionCheckFn>,
 }
 
 impl Default for ExecutorBuilder {
@@ -877,6 +886,7 @@ impl Default for ExecutorBuilder {
             clock: None,
             dispatch_mode: crate::DispatchMode::default(),
             cyclic_clock: None,
+            admission_check: None,
         }
     }
 }
@@ -987,6 +997,46 @@ impl ExecutorBuilder {
     #[must_use]
     pub const fn heartbeat(mut self, period: Duration) -> Self {
         self.heartbeat_period = Some(period);
+        self
+    }
+
+    /// Configure a cold-start admission check that verifies spatial isolation
+    /// before the executor enters `RUNNING` (`AFSR_0005`).
+    ///
+    /// The check is invoked exactly once per `run` / `run_for` / `run_n` /
+    /// `run_until` call, before [`Observer::on_executor_up`] and before any
+    /// task dispatches. If the check returns
+    /// [`crate::admission::AdmissionOutcome::Rejected`], no tasks are
+    /// dispatched, and the `run` call returns
+    /// [`crate::ExecutorError::AdmissionRejected`].
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use taktora_executor::{Executor, IntegrityLevel};
+    ///
+    /// let mut exec = Executor::builder()
+    ///     .integrity_level(IntegrityLevel::SafetyCritical)
+    ///     .admission_check(|ctx| {
+    ///         // Integrator-provided spatial-isolation check.
+    ///         // Real implementations would verify allocator lock,
+    ///         // channel topology, etc.
+    ///         ctx.verify_isolation()
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    ///
+    /// Default: `None` (no admission check).
+    #[must_use]
+    pub fn admission_check<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&crate::admission::AdmissionContext) -> crate::admission::AdmissionOutcome
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.admission_check = Some(Box::new(f));
         self
     }
 
@@ -1140,6 +1190,7 @@ impl ExecutorBuilder {
             cyclic_clock,
             integrity_level: self.integrity_level,
             heartbeat_state,
+            admission_check: self.admission_check,
         };
 
         Ok(exec)
@@ -1241,6 +1292,26 @@ impl Executor {
         // Runner owns the Executor and consumes it.
         if self.running.swap(true, Ordering::SeqCst) {
             return Err(ExecutorError::AlreadyRunning);
+        }
+
+        // Cold-start admission check (`AFSR_0005`). Invoked once per `run`
+        // call, before `on_executor_up` and before any task dispatches. A
+        // rejected admission prevents entry to `RUNNING`.
+        if let Some(ref check) = self.admission_check {
+            let ctx =
+                crate::admission::AdmissionContext::new(self.integrity_level, self.tasks.len());
+            match check(&ctx) {
+                crate::admission::AdmissionOutcome::Admitted => {
+                    self.observer.on_admission_admitted();
+                }
+                crate::admission::AdmissionOutcome::Rejected(fault) => {
+                    self.observer.on_admission_rejected(&fault);
+                    self.running.store(false, Ordering::SeqCst);
+                    return Err(ExecutorError::AdmissionRejected {
+                        reason: fault.reason,
+                    });
+                }
+            }
         }
 
         self.observer.on_executor_up();

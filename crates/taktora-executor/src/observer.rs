@@ -1,5 +1,5 @@
 //! `Observer` trait — lifecycle hooks invoked by the executor.
-
+use crate::admission::AdmissionFault;
 use crate::error::ExecutorError;
 use crate::fault::{ExecutorFaultReason, FaultReason};
 use crate::heartbeat::HeartbeatTick;
@@ -56,6 +56,18 @@ impl UserEvent {
 pub trait Observer: Send + Sync {
     /// Called once just before the dispatch loop begins.
     fn on_executor_up(&self) {}
+    /// Called once when the admission check completes successfully
+    /// (`AFSR_0005`). Fires before [`Observer::on_executor_up`] during
+    /// cold-start admission, only when an admission check is configured via
+    /// [`crate::ExecutorBuilder::admission_check`].
+    fn on_admission_admitted(&self) {}
+
+    /// Called once when the admission check rejects the executor
+    /// (`AFSR_0005`). The executor does NOT proceed to `RUNNING` — no tasks
+    /// dispatch, and [`crate::Executor::run`] returns
+    /// [`crate::ExecutorError::AdmissionRejected`].
+    fn on_admission_rejected(&self, _fault: &AdmissionFault) {}
+
     /// Called once just after the dispatch loop finishes cleanly.
     fn on_executor_down(&self) {}
     /// Called when the dispatch loop returns an error.
