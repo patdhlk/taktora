@@ -234,6 +234,11 @@ pub struct Executor {
     /// dispatch timing. Defaults to
     /// [`MonotonicCyclicClock`](crate::MonotonicCyclicClock).
     pub(crate) cyclic_clock: std::sync::Arc<dyn crate::CyclicClock>,
+
+    /// Pinned integrity level (`TSR_0003`). Propagated from
+    /// [`ExecutorBuilder::integrity_level`]; `None` means no enforcement
+    /// (mixed levels allowed).
+    pub(crate) integrity_level: Option<crate::IntegrityLevel>,
 }
 
 // SAFETY: `IxListener<ipc::Service>` is `!Send` for the same Rc-based
@@ -325,6 +330,14 @@ impl Executor {
         // period) before the task joins the table — the natural validation
         // point, where the decls are first available, for every DispatchMode.
         validate_decls(&id, &decls)?;
+
+        // TSR_0003: reject integrity mismatch when the executor is pinned.
+        if let Some(expected) = self.integrity_level {
+            let found = item.integrity_level();
+            if found != expected {
+                return Err(ExecutorError::MixedIntegrity { expected, found });
+            }
+        }
 
         let mut item_box: Box<dyn ExecutableItem> = Box::new(item);
         let app_id = item_box.app_id();
@@ -648,6 +661,17 @@ impl Executor {
         // applied to the head item's decls (which gate the whole chain).
         validate_decls(&id, &decls)?;
 
+        // TSR_0003: reject any item in the chain whose integrity differs from
+        // the executor pin.
+        if let Some(expected) = self.integrity_level {
+            for item in &items {
+                let found = item.integrity_level();
+                if found != expected {
+                    return Err(ExecutorError::MixedIntegrity { expected, found });
+                }
+            }
+        }
+
         // Warn if non-head items declared triggers (those will be ignored).
         for (i, body) in items.iter_mut().enumerate().skip(1) {
             let mut spurious = TriggerDeclarer::new_internal();
@@ -812,6 +836,9 @@ pub struct ExecutorBuilder {
     /// Scheduling clock for the absolute grid. `None` → resolved to
     /// [`MonotonicCyclicClock`](crate::MonotonicCyclicClock) in `build()`.
     cyclic_clock: Option<std::sync::Arc<dyn crate::CyclicClock>>,
+    /// Pinned integrity level (`TSR_0003`). `None` → no enforcement (mixed
+    /// levels allowed); `Some(level)` → every added item must match `level`.
+    integrity_level: Option<crate::IntegrityLevel>,
 }
 
 impl Default for ExecutorBuilder {
@@ -824,6 +851,7 @@ impl Default for ExecutorBuilder {
             iteration_budget: None,
             fatal_handler: None,
             stats_window: None,
+            integrity_level: None,
             clock: None,
             dispatch_mode: crate::DispatchMode::default(),
             cyclic_clock: None,
@@ -897,6 +925,17 @@ impl ExecutorBuilder {
     #[must_use]
     pub fn cyclic_clock(mut self, clock: std::sync::Arc<dyn crate::CyclicClock>) -> Self {
         self.cyclic_clock = Some(clock);
+        self
+    }
+
+    /// Pin the executor to a specific integrity level. Any item whose
+    /// [`crate::ExecutableItem::integrity_level`] differs from `level` will
+    /// be rejected at `add` time with
+    /// [`crate::ExecutorError::MixedIntegrity`]. Default: `None` (no
+    /// enforcement, mixed levels allowed).
+    #[must_use]
+    pub const fn integrity_level(mut self, level: crate::IntegrityLevel) -> Self {
+        self.integrity_level = Some(level);
         self
     }
 
@@ -1038,6 +1077,7 @@ impl ExecutorBuilder {
             clock,
             dispatch_mode: self.dispatch_mode,
             cyclic_clock,
+            integrity_level: self.integrity_level,
         };
 
         Ok(exec)
@@ -2842,6 +2882,17 @@ impl ExecutorGraphBuilder<'_> {
         // discarded in `GraphBuilder::collect_root_decls` — so validating the root
         // decls is sufficient.
         validate_decls(&id, &decls)?;
+
+        // TSR_0003: reject any vertex whose integrity differs from the
+        // executor pin.
+        if let Some(expected) = self.executor.integrity_level {
+            for item in &g.items {
+                let found = item.integrity_level();
+                if found != expected {
+                    return Err(ExecutorError::MixedIntegrity { expected, found });
+                }
+            }
+        }
         let scan_period = scan_period_from_decls(&decls);
 
         // Box the graph for address stability — per-vertex dispatch

@@ -3,6 +3,7 @@
 use crate::context::Context;
 use crate::control_flow::ExecuteResult;
 use crate::error::ExecutorError;
+use crate::integrity::IntegrityLevel;
 use crate::trigger::TriggerDeclarer;
 
 /// Trait implemented by every unit of work the executor schedules.
@@ -36,6 +37,15 @@ pub trait ExecutableItem: Send + 'static {
     fn app_instance_id(&self) -> Option<u32> {
         None
     }
+
+    /// Integrity level this item declares. Defaults to
+    /// [`IntegrityLevel::QualityManaged`]. When an executor is pinned to a
+    /// specific level via [`crate::ExecutorBuilder::integrity_level`],
+    /// any item whose declared level differs from the pin is rejected at
+    /// `add` time.
+    fn integrity_level(&self) -> IntegrityLevel {
+        IntegrityLevel::QualityManaged
+    }
 }
 
 // ── Blanket impl for boxed trait objects ─────────────────────────────────────
@@ -61,6 +71,10 @@ impl ExecutableItem for Box<dyn ExecutableItem> {
 
     fn app_instance_id(&self) -> Option<u32> {
         (**self).app_instance_id()
+    }
+
+    fn integrity_level(&self) -> crate::IntegrityLevel {
+        (**self).integrity_level()
     }
 }
 
