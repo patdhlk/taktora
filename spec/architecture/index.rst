@@ -13,6 +13,7 @@ detailed-design notes that predate the arc42 adoption.
 
    connector/index
    plc-runtime/index
+   orchestration/index
    bounded-alloc
    device-codegen/index
    canopen-codegen/index
