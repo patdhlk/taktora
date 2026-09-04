@@ -49,6 +49,29 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
+// ── IntegrityLevel ─────────────────────────────────────────────────────────
+
+/// Integrity level for partitioned quota isolation (`TSR_0002`).
+///
+/// Determines which sub-pool a `PartitionedBoundedAllocator` routes
+/// an allocation to. `SafetyCritical` allocations are isolated from
+/// `QualityManaged` allocations, so that exhaustion of one pool
+/// cannot deny memory to the other.
+///
+/// When used as the global allocator, the active level is determined
+/// by thread-local context (when the `std` feature is enabled) or
+/// defaults to `QualityManaged` (when `std` is off).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum IntegrityLevel {
+    /// Safety-critical integrity level. Allocations at this level are
+    /// isolated from quality-managed allocations.
+    SafetyCritical,
+    /// Quality-managed integrity level (default). Allocations at this
+    /// level are isolated from safety-critical allocations.
+    #[default]
+    QualityManaged,
+}
+
 // ── Block ──────────────────────────────────────────────────────────────────
 
 /// One arena block. `align(64)` is the maximum `layout.align()` the
@@ -360,6 +383,375 @@ macro_rules! bounded_allocator {
             { $block_size },
             { ($max_blocks as usize).div_ceil(64) },
         >::new()
+    };
+}
+
+// ── PartitionedBoundedAllocator ────────────────────────────────────────────
+
+/// Partitioned bounded allocator with separate quota pools for
+/// safety-critical and quality-managed integrity levels (`TSR_0002`).
+///
+/// Composed of two independent `BoundedAllocator` sub-pools, one
+/// sized for `IntegrityLevel::SafetyCritical` allocations and one for
+/// `IntegrityLevel::QualityManaged` allocations. Exhaustion of one
+/// pool cannot deny memory to the other — fail-closed isolation.
+///
+/// # Generic parameters
+///
+/// * `SC_BLOCKS` — maximum simultaneously-live blocks for the
+///   safety-critical pool.
+/// * `QM_BLOCKS` — maximum simultaneously-live blocks for the
+///   quality-managed pool.
+/// * `BLOCK_SIZE` — maximum bytes per allocation (shared by both
+///   pools). Should be a multiple of 64 to avoid intra-block padding.
+/// * `SC_BITMAP_WORDS` — must be `(SC_BLOCKS + 63) / 64`.
+/// * `QM_BITMAP_WORDS` — must be `(QM_BLOCKS + 63) / 64`.
+///
+/// Use [`declare_partitioned_global_allocator!`] or
+/// [`partitioned_bounded_allocator!`] to compute bitmap word counts
+/// automatically.
+///
+/// # Example
+///
+/// ```ignore
+/// use taktora_bounded_alloc::{IntegrityLevel, PartitionedBoundedAllocator};
+///
+/// static ALLOC: PartitionedBoundedAllocator<256, 256, 1024, 4, 4> =
+///     PartitionedBoundedAllocator::new();
+///
+/// unsafe {
+///     let layout = Layout::from_size_align_unchecked(64, 8);
+///     let ptr_sc = ALLOC.alloc_in(IntegrityLevel::SafetyCritical, layout);
+///     let ptr_qm = ALLOC.alloc_in(IntegrityLevel::QualityManaged, layout);
+///     // ...
+///     ALLOC.dealloc_in(IntegrityLevel::SafetyCritical, ptr_sc, layout);
+///     ALLOC.dealloc_in(IntegrityLevel::QualityManaged, ptr_qm, layout);
+/// }
+/// ```
+pub struct PartitionedBoundedAllocator<
+    const SC_BLOCKS: usize,
+    const QM_BLOCKS: usize,
+    const BLOCK_SIZE: usize,
+    const SC_BITMAP_WORDS: usize,
+    const QM_BITMAP_WORDS: usize,
+> {
+    /// Safety-critical sub-pool.
+    sc_pool: BoundedAllocator<SC_BLOCKS, BLOCK_SIZE, SC_BITMAP_WORDS>,
+    /// Quality-managed sub-pool.
+    qm_pool: BoundedAllocator<QM_BLOCKS, BLOCK_SIZE, QM_BITMAP_WORDS>,
+}
+
+impl<
+    const SC_BLOCKS: usize,
+    const QM_BLOCKS: usize,
+    const BLOCK_SIZE: usize,
+    const SC_BITMAP_WORDS: usize,
+    const QM_BITMAP_WORDS: usize,
+> PartitionedBoundedAllocator<SC_BLOCKS, QM_BLOCKS, BLOCK_SIZE, SC_BITMAP_WORDS, QM_BITMAP_WORDS>
+{
+    /// Construct a fresh partitioned allocator. Intended for use as a
+    /// `static` initialiser.
+    ///
+    /// Both sub-pools (safety-critical and quality-managed) are
+    /// initialised with all blocks free.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            sc_pool: BoundedAllocator::new(),
+            qm_pool: BoundedAllocator::new(),
+        }
+    }
+
+    /// Allocate from the pool corresponding to the given integrity
+    /// level.
+    ///
+    /// Returns a pointer to a region of at least `layout.size()` bytes
+    /// aligned to `layout.align()`, or null on failure (pool
+    /// exhaustion, oversize, or excessive alignment).
+    ///
+    /// Fails closed per REQ_0300-0304 independently for each pool.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure the returned pointer is eventually freed via
+    /// [`Self::dealloc_in`] or [`Self::dealloc`] with the same
+    /// `layout`.
+    #[allow(unsafe_code)]
+    pub unsafe fn alloc_in(&self, level: IntegrityLevel, layout: Layout) -> *mut u8 {
+        // SAFETY: Caller guarantees that the returned pointer will be
+        // freed via dealloc_in or dealloc with the same layout.
+        unsafe {
+            match level {
+                IntegrityLevel::SafetyCritical => self.sc_pool.alloc(layout),
+                IntegrityLevel::QualityManaged => self.qm_pool.alloc(layout),
+            }
+        }
+    }
+
+    /// Deallocate a pointer previously returned by [`Self::alloc_in`]
+    /// from the pool corresponding to the given integrity level.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure `ptr` was returned by a previous
+    /// `alloc_in(level, ...)` call with the same `level` and matching
+    /// `layout`, and has not been freed yet.
+    #[allow(unsafe_code)]
+    pub unsafe fn dealloc_in(&self, level: IntegrityLevel, ptr: *mut u8, layout: Layout) {
+        // SAFETY: Caller guarantees ptr was returned by alloc_in with
+        // the same level and layout, and has not been freed yet.
+        unsafe {
+            match level {
+                IntegrityLevel::SafetyCritical => self.sc_pool.dealloc(ptr, layout),
+                IntegrityLevel::QualityManaged => self.qm_pool.dealloc(ptr, layout),
+            }
+        }
+    }
+    ///
+    /// Checks if `ptr` falls within the safety-critical arena; if not,
+    /// it must belong to the quality-managed pool.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure `ptr` was returned by a previous
+    /// `alloc_in(...)` call with matching `layout`, and has not been
+    /// freed yet.
+    #[allow(unsafe_code)]
+    pub unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // Check if the pointer falls within the SC pool's arena.
+        let sc_arena_start = self.sc_pool.arena.as_ptr().cast::<u8>() as usize;
+        let sc_arena_end = sc_arena_start + self.sc_pool.capacity_bytes();
+        let ptr_addr = ptr as usize;
+
+        // SAFETY: Caller guarantees ptr was returned by alloc_in with
+        // matching layout and has not been freed yet. We correctly
+        // identify the owning pool via pointer range check.
+        unsafe {
+            if ptr_addr >= sc_arena_start && ptr_addr < sc_arena_end {
+                self.sc_pool.dealloc(ptr, layout);
+            } else {
+                self.qm_pool.dealloc(ptr, layout);
+            }
+        }
+    }
+
+    /// Engage lock-after-init mode on both sub-pools. Every subsequent
+    /// allocation call panics immediately. One-way: there is no
+    /// `unlock` method.
+    pub fn lock(&self) {
+        self.sc_pool.lock();
+        self.qm_pool.lock();
+    }
+
+    /// Is the allocator locked? Both sub-pools must be locked to
+    /// return `true`.
+    #[must_use]
+    pub fn is_locked(&self) -> bool {
+        self.sc_pool.is_locked() && self.qm_pool.is_locked()
+    }
+
+    /// Total successful `alloc_in` calls to the safety-critical pool
+    /// since process start.
+    #[must_use]
+    pub fn sc_alloc_count(&self) -> usize {
+        self.sc_pool.alloc_count()
+    }
+
+    /// Total `dealloc_in` calls to the safety-critical pool since
+    /// process start.
+    #[must_use]
+    pub fn sc_dealloc_count(&self) -> usize {
+        self.sc_pool.dealloc_count()
+    }
+
+    /// High-water mark of simultaneously-live blocks in the
+    /// safety-critical pool.
+    #[must_use]
+    pub fn sc_peak_blocks_used(&self) -> usize {
+        self.sc_pool.peak_blocks_used()
+    }
+
+    /// Currently-live block count in the safety-critical pool.
+    #[must_use]
+    pub fn sc_live_blocks(&self) -> usize {
+        self.sc_pool.live_blocks()
+    }
+
+    /// Total successful `alloc_in` calls to the quality-managed pool
+    /// since process start.
+    #[must_use]
+    pub fn qm_alloc_count(&self) -> usize {
+        self.qm_pool.alloc_count()
+    }
+
+    /// Total `dealloc_in` calls to the quality-managed pool since
+    /// process start.
+    #[must_use]
+    pub fn qm_dealloc_count(&self) -> usize {
+        self.qm_pool.dealloc_count()
+    }
+
+    /// High-water mark of simultaneously-live blocks in the
+    /// quality-managed pool.
+    #[must_use]
+    pub fn qm_peak_blocks_used(&self) -> usize {
+        self.qm_pool.peak_blocks_used()
+    }
+
+    /// Currently-live block count in the quality-managed pool.
+    #[must_use]
+    pub fn qm_live_blocks(&self) -> usize {
+        self.qm_pool.live_blocks()
+    }
+
+    /// Total arena bytes (both pools).
+    #[must_use]
+    pub const fn capacity_bytes(&self) -> usize {
+        SC_BLOCKS * BLOCK_SIZE + QM_BLOCKS * BLOCK_SIZE
+    }
+}
+
+impl<
+    const SC_BLOCKS: usize,
+    const QM_BLOCKS: usize,
+    const BLOCK_SIZE: usize,
+    const SC_BITMAP_WORDS: usize,
+    const QM_BITMAP_WORDS: usize,
+> Default
+    for PartitionedBoundedAllocator<
+        SC_BLOCKS,
+        QM_BLOCKS,
+        BLOCK_SIZE,
+        SC_BITMAP_WORDS,
+        QM_BITMAP_WORDS,
+    >
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Thread-local integrity level context for GlobalAlloc routing when
+// the `std` feature is enabled.
+#[cfg(feature = "std")]
+std::thread_local! {
+    static CURRENT_INTEGRITY_LEVEL: core::cell::Cell<IntegrityLevel> =
+        const { core::cell::Cell::new(IntegrityLevel::QualityManaged) };
+}
+
+/// Set the current thread's integrity level for subsequent
+/// `GlobalAlloc::alloc` calls on a `PartitionedBoundedAllocator`
+/// when the `std` feature is enabled.
+///
+/// When `std` is off, this function does nothing and
+/// `GlobalAlloc::alloc` always routes to the quality-managed pool.
+#[cfg(feature = "std")]
+pub fn set_current_integrity_level(level: IntegrityLevel) {
+    CURRENT_INTEGRITY_LEVEL.with(|cell| cell.set(level));
+}
+
+/// Get the current thread's integrity level.
+///
+/// Only available when the `std` feature is enabled.
+#[cfg(feature = "std")]
+#[must_use]
+pub fn current_integrity_level() -> IntegrityLevel {
+    CURRENT_INTEGRITY_LEVEL.with(core::cell::Cell::get)
+}
+
+// SAFETY: `unsafe impl GlobalAlloc` is the trait's requirement; the
+// implementation upholds the trait contract by delegating to the
+// appropriate sub-pool's `GlobalAlloc` impl, which already upholds
+// the contract. Aliasing is prevented by each sub-pool's independent
+// bitmap CAS protocol.
+#[allow(unsafe_code)]
+unsafe impl<
+    const SC_BLOCKS: usize,
+    const QM_BLOCKS: usize,
+    const BLOCK_SIZE: usize,
+    const SC_BITMAP_WORDS: usize,
+    const QM_BITMAP_WORDS: usize,
+> GlobalAlloc
+    for PartitionedBoundedAllocator<
+        SC_BLOCKS,
+        QM_BLOCKS,
+        BLOCK_SIZE,
+        SC_BITMAP_WORDS,
+        QM_BITMAP_WORDS,
+    >
+{
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // When std is enabled, route via thread-local context.
+        // Otherwise, default to QualityManaged.
+        #[cfg(feature = "std")]
+        let level = current_integrity_level();
+        #[cfg(not(feature = "std"))]
+        let level = IntegrityLevel::QualityManaged;
+
+        // SAFETY: Our alloc_in upholds the GlobalAlloc contract.
+        unsafe { self.alloc_in(level, layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // Use pointer-range-based detection to free from the correct pool.
+        // SAFETY: Our dealloc method upholds the GlobalAlloc contract.
+        unsafe { self.dealloc(ptr, layout) }
+    }
+}
+
+/// Construct a const-evaluable `PartitionedBoundedAllocator`
+/// expression with bitmap word counts computed automatically. Useful
+/// in regular (non-global-allocator) `static` declarations and tests.
+///
+/// # Example
+///
+/// ```ignore
+/// use taktora_bounded_alloc::partitioned_bounded_allocator;
+///
+/// static TEST_ALLOC: PartitionedBoundedAllocator<16, 32, 64, 1, 1> =
+///     partitioned_bounded_allocator!(16, 32, 64);
+/// ```
+#[macro_export]
+macro_rules! partitioned_bounded_allocator {
+    ($sc_blocks:expr, $qm_blocks:expr, $block_size:expr $(,)?) => {
+        $crate::PartitionedBoundedAllocator::<
+            { $sc_blocks },
+            { $qm_blocks },
+            { $block_size },
+            { ($sc_blocks as usize).div_ceil(64) },
+            { ($qm_blocks as usize).div_ceil(64) },
+        >::new()
+    };
+}
+
+/// Declare a `static PartitionedBoundedAllocator` registered as
+/// `#[global_allocator]`, computing bitmap word counts from block
+/// counts automatically.
+///
+/// # Example
+///
+/// ```ignore
+/// taktora_bounded_alloc::declare_partitioned_global_allocator!(ALLOC, 256, 256, 1024);
+/// ```
+///
+/// Expands to roughly:
+///
+/// ```ignore
+/// #[global_allocator]
+/// static ALLOC: taktora_bounded_alloc::PartitionedBoundedAllocator<256, 256, 1024, 4, 4> =
+///     taktora_bounded_alloc::PartitionedBoundedAllocator::new();
+/// ```
+#[macro_export]
+macro_rules! declare_partitioned_global_allocator {
+    ($name:ident, $sc_blocks:expr, $qm_blocks:expr, $block_size:expr $(,)?) => {
+        #[global_allocator]
+        static $name: $crate::PartitionedBoundedAllocator<
+            { $sc_blocks },
+            { $qm_blocks },
+            { $block_size },
+            { ($sc_blocks as usize).div_ceil(64) },
+            { ($qm_blocks as usize).div_ceil(64) },
+        > = $crate::PartitionedBoundedAllocator::new();
     };
 }
 
