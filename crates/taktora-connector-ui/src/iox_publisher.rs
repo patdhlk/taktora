@@ -95,8 +95,13 @@ impl<const N: usize> IoxVmPublisher<N> {
         let service = node
             .service_builder(&service_name)
             .publish_subscribe::<ConnectorEnvelope<N>>()
+            // QoS must match `ServiceFactory::open_pubsub` (single-publisher +
+            // lossy overflow, `TSR_0007`) so a framework reader can open the
+            // same service without an incompatible-QoS error.
+            .max_publishers(1)
             .history_size(1)
             .subscriber_max_buffer_size(SUBSCRIBER_MAX_BUFFER_SIZE)
+            .enable_safe_overflow(false)
             .open_or_create()
             .map_err(|e| ConnectorError::stack(IoxError(format!("open_or_create: {e:?}"))))?;
         let publisher = service
@@ -134,6 +139,9 @@ impl<const N: usize> VmPublisher for IoxVmPublisher<N> {
             ..Default::default()
         };
         envelope.payload[..bytes.len()].copy_from_slice(bytes);
+        // Stamp the integrity CRC over the finalised header + payload so the
+        // framework's CRC-verifying readers accept the frame (`TSR_0008`).
+        envelope.crc32 = envelope.compute_crc();
 
         self.publisher
             .send_copy(envelope)
