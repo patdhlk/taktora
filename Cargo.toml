@@ -146,6 +146,7 @@ bitflags          = "2"
 bitvec            = "1"
 crossbeam-channel = "0.5"
 crossbeam-utils   = "0.8"
+parking_lot       = "0.12"
 num_cpus          = "1"
 log               = { version = "0.4.21", features = ["kv", "std"] }
 tracing           = "0.1"
@@ -157,6 +158,7 @@ rmp-serde         = { version = "1" }
 bincode           = { version = "2", default-features = false, features = ["std", "serde"] }
 rand              = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
 sha2              = "0.10"
+crc32fast        = "1"
 tokio             = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 tokio-stream      = { version = "0.1", default-features = false, features = ["sync"] }
 ethercrab         = { version = "0.7", default-features = false, features = ["std"] }

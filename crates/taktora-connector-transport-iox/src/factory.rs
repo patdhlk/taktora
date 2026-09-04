@@ -30,24 +30,154 @@ use crate::slice::{SliceChannelReader, SliceChannelWriter, SliceUserHeader};
 /// large enough to span many dispatcher ticks.
 const SUBSCRIBER_MAX_BUFFER_SIZE: usize = 64;
 
+/// History size explicitly configured for every pub/sub service. iceoryx2's
+/// default is 0 (no history). Setting a non-zero history allows
+/// late-joining subscribers to receive the last N published samples
+/// immediately on connection, which mirrors the `EtherCAT` PDI "current value"
+/// semantics. 1 is intentionally minimal — enough for the late-join case
+/// but small enough to avoid memory pressure.
+const HISTORY_SIZE: usize = 1;
+
+/// Static channel specification for pre-declared topology. `TSR_0007`.
+///
+/// A topology is declared as a static table:
+///
+/// ```no_run
+/// use taktora_connector_transport_iox::ChannelSpec;
+/// static TOPOLOGY: &[ChannelSpec] = &[
+///     ChannelSpec {
+///         name: "app.pdo_out",
+///         max_publishers: 1,
+///         max_subscribers: 2,
+///         subscriber_max_buffer_size: 64,
+///         history_size: 1,
+///     },
+///     ChannelSpec {
+///         name: "app.pdo_in",
+///         max_publishers: 1,
+///         max_subscribers: 1,
+///         subscriber_max_buffer_size: 32,
+///         history_size: 1,
+///     },
+/// ];
+/// ```
+///
+/// Pass the table to [`ServiceFactory::create_all`] during init to
+/// pre-create every declared service with its configured `QoS`. After
+/// `create_all`, opening or creating an undeclared service via
+/// [`ServiceFactory::create_writer`] / [`ServiceFactory::create_reader`]
+/// returns [`ConnectorError::Configuration`].
+#[derive(Clone, Copy, Debug)]
+pub struct ChannelSpec {
+    /// Service name (must be a valid iceoryx2 service name).
+    pub name: &'static str,
+    /// Maximum number of publishers allowed on this service.
+    pub max_publishers: usize,
+    /// Maximum number of subscribers allowed on this service.
+    pub max_subscribers: usize,
+    /// Per-subscriber queue depth.
+    pub subscriber_max_buffer_size: usize,
+    /// History size — late-joining subscribers receive the last N samples.
+    pub history_size: usize,
+}
+
 /// Wraps an iceoryx2 [`Node`] and opens pub/sub services on demand.
 ///
 /// `ServiceFactory` borrows the node — the caller owns the node and is
 /// responsible for keeping it alive for the lifetime of every writer /
 /// reader the factory hands out.
+///
+/// # Static topology mode
+///
+/// Call [`ServiceFactory::create_all`] with a static [`ChannelSpec`] table
+/// to pre-create every declared service and switch to open-only mode.
+/// After `create_all`, creating or opening an undeclared service returns
+/// [`ConnectorError::Configuration`]. `TSR_0007` / `AFSR_0002`.
 pub struct ServiceFactory<'n> {
     node: &'n Node<ipc::Service>,
+    /// Declared service names (set by `create_all`). When `Some`, the
+    /// factory is in static topology mode and rejects undeclared services.
+    declared_services: Option<std::collections::HashSet<String>>,
 }
 
 impl<'n> ServiceFactory<'n> {
     /// Construct a factory bound to `node`.
     #[must_use]
     pub const fn new(node: &'n Node<ipc::Service>) -> Self {
-        Self { node }
+        Self {
+            node,
+            declared_services: None,
+        }
+    }
+
+    /// Pre-create every service declared in `specs` with its configured `QoS`
+    /// and switch to static topology mode. After this call, opening or
+    /// creating an undeclared service via [`ServiceFactory::create_writer`]
+    /// or [`ServiceFactory::create_reader`] returns
+    /// [`ConnectorError::Configuration`].
+    ///
+    /// Each spec's `max_publishers`, `max_subscribers`,
+    /// `subscriber_max_buffer_size`, and `history_size` are applied
+    /// explicitly to the service builder. Services are created with the
+    /// **create** path (not `open_or_create`) so pre-existing services with
+    /// incompatible `QoS` cause an error.
+    ///
+    /// `TSR_0007` / `AFSR_0002`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConnectorError::Configuration`] when a service name is
+    /// invalid, or [`ConnectorError::Stack`] wrapping any iceoryx2 service
+    /// creation error (e.g., service already exists with incompatible `QoS`).
+    pub fn create_all<const N: usize>(
+        &mut self,
+        specs: &[ChannelSpec],
+    ) -> Result<(), ConnectorError> {
+        let mut declared = std::collections::HashSet::new();
+        for spec in specs {
+            let service_name: iceoryx2::service::service_name::ServiceName =
+                spec.name
+                    .try_into()
+                    .map_err(|e| ConnectorError::Configuration(format!("iceoryx2 name: {e:?}")))?;
+            self.node
+                .service_builder(&service_name)
+                .publish_subscribe::<ConnectorEnvelope<N>>()
+                .max_publishers(spec.max_publishers)
+                .max_subscribers(spec.max_subscribers)
+                .subscriber_max_buffer_size(spec.subscriber_max_buffer_size)
+                .history_size(spec.history_size)
+                .enable_safe_overflow(false)
+                .create()
+                .map_err(|e| {
+                    ConnectorError::stack(svc_error(format!("create {}: {e:?}", spec.name)))
+                })?;
+            declared.insert(spec.name.to_owned());
+        }
+        self.declared_services = Some(declared);
+        Ok(())
+    }
+
+    /// Check if `name` is declared in static topology mode. Returns `Ok(())`
+    /// if the factory is in dynamic mode or if the name is declared.
+    fn check_declared(&self, name: &str) -> Result<(), ConnectorError> {
+        if let Some(ref declared) = self.declared_services {
+            if !declared.contains(name) {
+                return Err(ConnectorError::Configuration(format!(
+                    "service '{name}' not in declared topology (static mode active)"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Open or create the pub/sub service named after `descriptor` and
     /// return a [`ChannelWriter`] (the publisher side).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConnectorError::Configuration`] when the descriptor name
+    /// is invalid or when the factory is in static topology mode and the
+    /// service name was not declared via [`ServiceFactory::create_all`].
     pub fn create_writer<T, R, C, const N: usize>(
         &self,
         descriptor: &ChannelDescriptor<R, N>,
@@ -58,6 +188,7 @@ impl<'n> ServiceFactory<'n> {
         R: Routing,
         C: PayloadCodec,
     {
+        self.check_declared(descriptor.name())?;
         let service = self.open_pubsub::<N>(descriptor.name())?;
         let publisher = service
             .publisher_builder()
@@ -68,6 +199,12 @@ impl<'n> ServiceFactory<'n> {
 
     /// Open or create the pub/sub service named after `descriptor` and
     /// return a [`ChannelReader`] (the subscriber side).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConnectorError::Configuration`] when the descriptor name
+    /// is invalid or when the factory is in static topology mode and the
+    /// service name was not declared via [`ServiceFactory::create_all`].
     pub fn create_reader<T, R, C, const N: usize>(
         &self,
         descriptor: &ChannelDescriptor<R, N>,
@@ -78,6 +215,7 @@ impl<'n> ServiceFactory<'n> {
         R: Routing,
         C: PayloadCodec,
     {
+        self.check_declared(descriptor.name())?;
         let service = self.open_pubsub::<N>(descriptor.name())?;
         let subscriber = service
             .subscriber_builder()
@@ -90,10 +228,17 @@ impl<'n> ServiceFactory<'n> {
     /// [`RawChannelWriter`]. Used by the gateway dispatcher
     /// (`REQ_0327`) to publish PDI bit-slice bytes back to the plugin
     /// without invoking the channel's codec.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConnectorError::Configuration`] when the name is invalid
+    /// or when the factory is in static topology mode and the service name
+    /// was not declared via [`ServiceFactory::create_all`].
     pub fn create_raw_writer_named<const N: usize>(
         &self,
         name: &str,
     ) -> Result<RawChannelWriter<N>, ConnectorError> {
+        self.check_declared(name)?;
         let service = self.open_pubsub::<N>(name)?;
         let publisher = service
             .publisher_builder()
@@ -106,10 +251,17 @@ impl<'n> ServiceFactory<'n> {
     /// [`RawChannelReader`]. Used by the gateway dispatcher
     /// (`REQ_0326`) to drain plugin-side publisher envelopes into a
     /// caller-provided buffer without invoking the channel's codec.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConnectorError::Configuration`] when the name is invalid
+    /// or when the factory is in static topology mode and the service name
+    /// was not declared via [`ServiceFactory::create_all`].
     pub fn create_raw_reader_named<const N: usize>(
         &self,
         name: &str,
     ) -> Result<RawChannelReader<N>, ConnectorError> {
+        self.check_declared(name)?;
         let service = self.open_pubsub::<N>(name)?;
         let subscriber = service
             .subscriber_builder()
@@ -206,7 +358,10 @@ impl<'n> ServiceFactory<'n> {
         self.node
             .service_builder(&service_name)
             .publish_subscribe::<ConnectorEnvelope<N>>()
+            .max_publishers(1)
             .subscriber_max_buffer_size(SUBSCRIBER_MAX_BUFFER_SIZE)
+            .history_size(HISTORY_SIZE)
+            .enable_safe_overflow(false)
             .open_or_create()
             .map_err(|e| ConnectorError::stack(svc_error(format!("open_or_create: {e:?}"))))
     }

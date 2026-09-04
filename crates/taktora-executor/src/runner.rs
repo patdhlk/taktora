@@ -139,6 +139,13 @@ fn clone_executor_error(e: &ExecutorError) -> ExecutorError {
         ExecutorError::TaskNotFound(id) => ExecutorError::TaskNotFound(id.clone()),
         ExecutorError::TaskNotFaulted(id) => ExecutorError::TaskNotFaulted(id.clone()),
         ExecutorError::ExecutorNotFaulted => ExecutorError::ExecutorNotFaulted,
+        ExecutorError::MixedIntegrity { expected, found } => ExecutorError::MixedIntegrity {
+            expected: *expected,
+            found: *found,
+        },
+        ExecutorError::AdmissionRejected { reason } => ExecutorError::AdmissionRejected {
+            reason: reason.clone(),
+        },
     }
 }
 

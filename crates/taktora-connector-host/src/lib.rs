@@ -28,9 +28,11 @@
 pub mod connector;
 pub mod gateway;
 pub mod health_sub;
+pub mod heartbeat_bridge;
 pub mod host;
 
 pub use connector::Connector;
 pub use gateway::{ConnectorGateway, ConnectorGatewayBuilder};
 pub use health_sub::HealthSubscription;
+pub use heartbeat_bridge::HeartbeatHealthBridge;
 pub use host::{ConnectorHost, ConnectorHostBuilder};

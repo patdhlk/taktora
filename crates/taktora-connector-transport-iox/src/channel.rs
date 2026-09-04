@@ -7,10 +7,11 @@
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use crossbeam_channel::Sender;
 use iceoryx2::port::publisher::Publisher;
 use iceoryx2::port::subscriber::Subscriber;
 use iceoryx2::prelude::ipc;
-use taktora_connector_core::{ConnectorError, PayloadCodec};
+use taktora_connector_core::{ConnectorError, ConnectorHealth, HealthEvent, PayloadCodec};
 
 use crate::envelope::{ConnectorEnvelope, CorrelationId};
 use crate::now::now_unix_ns;
@@ -116,6 +117,20 @@ where
             core::ptr::addr_of_mut!((*env_ptr).correlation_id).write(correlation_id);
             core::ptr::addr_of_mut!((*env_ptr).payload_len).write(written_u32);
             core::ptr::addr_of_mut!((*env_ptr).reserved).write(0);
+            core::ptr::addr_of_mut!((*env_ptr).version).write(ConnectorEnvelope::<N>::WIRE_VERSION);
+            core::ptr::addr_of_mut!((*env_ptr).padding).write(0);
+        }
+
+        // SAFETY: every field except `crc32` is now initialised. We need
+        // to compute the CRC over the header + payload, then write it.
+        // `assume_init` is safe here because `u8` has no validity invariants
+        // and we're only reading the initialized fields for CRC computation.
+        let crc = unsafe {
+            let env_ref = &*env_ptr;
+            env_ref.compute_crc()
+        };
+        unsafe {
+            core::ptr::addr_of_mut!((*env_ptr).crc32).write(crc);
         }
 
         // SAFETY: every field of `ConnectorEnvelope` is now initialised
@@ -148,10 +163,15 @@ pub struct SendOutcome {
     pub bytes_written: usize,
 }
 
-/// Typed subscriber handle. Mirrors [`ChannelWriter`].
+/// Typed subscriber handle with CRC integrity checking and optional health
+/// event emission. Mirrors [`ChannelWriter`].
 pub struct ChannelReader<T, C, const N: usize> {
     inner: Subscriber<ipc::Service, ConnectorEnvelope<N>, ()>,
     codec: C,
+    health_sink: Option<Sender<HealthEvent>>,
+    expected_sequence: AtomicU64,
+    crc_errors: AtomicU64,
+    sequence_gaps: AtomicU64,
     _phantom: PhantomData<fn() -> T>,
 }
 
@@ -170,11 +190,78 @@ where
         Self {
             inner,
             codec,
+            health_sink: None,
+            expected_sequence: AtomicU64::new(0),
+            crc_errors: AtomicU64::new(0),
+            sequence_gaps: AtomicU64::new(0),
             _phantom: PhantomData,
         }
     }
 
+    /// Attach a health event sink. When set, CRC mismatches and sequence
+    /// gaps raise [`HealthEvent`]s to the provided channel. Corrupt frames
+    /// are dropped regardless of whether a sink is attached; the sink only
+    /// controls notification.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use crossbeam_channel::unbounded;
+    /// use taktora_connector_transport_iox::ServiceFactory;
+    /// # use taktora_connector_core::{ChannelDescriptor, Routing};
+    /// # use iceoryx2::prelude::*;
+    /// # let node = NodeBuilder::new().create::<ipc::Service>().unwrap();
+    /// # #[derive(Clone, Debug)]
+    /// # struct TestRouting;
+    /// # impl Routing for TestRouting {}
+    /// # let desc: ChannelDescriptor<TestRouting, 1024> =
+    /// #     ChannelDescriptor::new("test".to_string(), TestRouting).unwrap();
+    /// # struct TestCodec;
+    /// # impl taktora_connector_core::PayloadCodec for TestCodec {
+    /// #     fn format_name(&self) -> &'static str { "test" }
+    /// #     fn encode<T: serde::Serialize>(&self, _: &T, _: &mut [u8]) -> Result<usize, taktora_connector_core::ConnectorError> { Ok(0) }
+    /// #     fn decode<T: serde::de::DeserializeOwned>(&self, _: &[u8]) -> Result<T, taktora_connector_core::ConnectorError> { unimplemented!() }
+    /// # }
+    ///
+    /// let factory = ServiceFactory::new(&node);
+    /// let (health_tx, health_rx) = unbounded();
+    /// let mut reader = factory
+    ///     .create_reader::<String, _, _, 1024>(&desc, TestCodec)
+    ///     .unwrap()
+    ///     .with_health_sink(health_tx);
+    ///
+    /// // CRC errors and sequence gaps now emit HealthEvent to health_rx
+    /// ```
+    #[must_use]
+    pub fn with_health_sink(mut self, tx: Sender<HealthEvent>) -> Self {
+        self.health_sink = Some(tx);
+        self
+    }
+
+    /// Number of envelopes dropped due to CRC mismatch since this reader
+    /// was created.
+    #[must_use]
+    pub fn crc_errors(&self) -> u64 {
+        self.crc_errors.load(Ordering::Relaxed)
+    }
+
+    /// Number of sequence gaps (missed or out-of-order envelopes) detected
+    /// since this reader was created.
+    #[must_use]
+    pub fn sequence_gaps(&self) -> u64 {
+        self.sequence_gaps.load(Ordering::Relaxed)
+    }
+
     /// Take the next envelope, if any, and decode its payload into `T`.
+    ///
+    /// Verifies the envelope's CRC-32 checksum before decoding. Corrupt
+    /// envelopes (CRC mismatch) are dropped and return `Ok(None)` rather
+    /// than surfacing bad data; a [`HealthEvent`] is emitted to the health
+    /// sink (if attached) and the `crc_errors()` counter is incremented
+    /// (`TSR_0008`).
+    ///
+    /// Sequence gaps (missed or out-of-order envelopes) also raise a
+    /// [`HealthEvent`] and increment `sequence_gaps()`.
     ///
     /// Returns `Ok(None)` when no envelope is available. Decode errors
     /// surface as [`ConnectorError::Codec`] rather than silently
@@ -188,6 +275,43 @@ where
             return Ok(None);
         };
         let env: &ConnectorEnvelope<N> = sample.payload();
+
+        // Verify CRC before trusting any envelope data
+        if !env.verify_crc() {
+            if let Some(tx) = &self.health_sink {
+                let _ = tx.send(HealthEvent {
+                    from: ConnectorHealth::Up,
+                    to: ConnectorHealth::Degraded {
+                        reason: "envelope crc mismatch".to_string(),
+                    },
+                    at: std::time::Instant::now(),
+                });
+            }
+            // Drop corrupt frame; do not surface to caller
+            return Ok(None);
+        }
+
+        // Check sequence monotonicity
+        let expected = self.expected_sequence.load(Ordering::Relaxed);
+        if env.sequence_number != expected {
+            self.sequence_gaps.fetch_add(1, Ordering::Relaxed);
+            if let Some(tx) = &self.health_sink {
+                let _ = tx.send(HealthEvent {
+                    from: ConnectorHealth::Up,
+                    to: ConnectorHealth::Degraded {
+                        reason: format!(
+                            "envelope sequence gap (expected {expected}, got {})",
+                            env.sequence_number
+                        ),
+                    },
+                    at: std::time::Instant::now(),
+                });
+            }
+        }
+        // Update expected to the next sequence after this one
+        self.expected_sequence
+            .store(env.sequence_number.wrapping_add(1), Ordering::Relaxed);
+
         let value = self.codec.decode(env.payload_bytes())?;
         Ok(Some(RecvEnvelope {
             sequence_number: env.sequence_number,

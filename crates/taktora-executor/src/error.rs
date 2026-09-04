@@ -60,6 +60,26 @@ pub enum ExecutorError {
     /// Running. `REQ_0071`.
     #[error("executor is not in fault state")]
     ExecutorNotFaulted,
+
+    /// Integrity-level mismatch rejected: the executor is pinned to
+    /// `expected` but the item declares `found`. `TSR_0003`.
+    #[error(
+        "mixed integrity rejected: executor pinned to {expected:?} but item declares {found:?}"
+    )]
+    MixedIntegrity {
+        /// The level the executor is pinned to.
+        expected: crate::IntegrityLevel,
+        /// The level the rejected item declared.
+        found: crate::IntegrityLevel,
+    },
+
+    /// Cold-start admission check refused to admit the executor (`AFSR_0005`).
+    /// The executor did NOT enter `RUNNING` — no tasks were dispatched.
+    #[error("admission rejected: {reason}")]
+    AdmissionRejected {
+        /// The reason for rejection, provided by the admission check.
+        reason: String,
+    },
 }
 
 impl ExecutorError {

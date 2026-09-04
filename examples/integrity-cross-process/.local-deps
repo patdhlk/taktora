@@ -1,0 +1,10 @@
+# Presence of this marker tells scripts/check-examples.sh to build this example
+# against the in-tree crates/ (with the [patch.crates-io] block toggled on),
+# instead of the published crates.io versions the other examples build against.
+#
+# This example demonstrates unreleased executor API (IntegrityLevel /
+# ExecutorBuilder::integrity_level, TSR_0009); those symbols do not exist in any
+# published taktora-executor, so a patch-off build against crates.io cannot
+# compile. It is built local-only until the API lands in a published release,
+# at which point this marker is removed and the version pins track the new major
+# like every other example.

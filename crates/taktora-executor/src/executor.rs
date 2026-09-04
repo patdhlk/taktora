@@ -234,6 +234,32 @@ pub struct Executor {
     /// dispatch timing. Defaults to
     /// [`MonotonicCyclicClock`](crate::MonotonicCyclicClock).
     pub(crate) cyclic_clock: std::sync::Arc<dyn crate::CyclicClock>,
+
+    /// Pinned integrity level (`TSR_0003`). Propagated from
+    /// [`ExecutorBuilder::integrity_level`]; `None` means no enforcement
+    /// (mixed levels allowed).
+    pub(crate) integrity_level: Option<crate::IntegrityLevel>,
+
+    /// Heartbeat configuration and state (`TSR_0010` / `AOU_0003`). `None`
+    /// means no heartbeat; `Some` holds the period, the next due timestamp
+    /// (in cyclic-clock nanos), and the running sequence counter. Updated
+    /// every tick on the `WaitSet` thread; never accessed from workers.
+    heartbeat_state: Option<HeartbeatState>,
+
+    /// Cold-start admission check (`AFSR_0005`). `None` → no check; `Some(f)` →
+    /// invoke `f` once at cold-start to verify spatial isolation before entering
+    /// `RUNNING`. Propagated from [`ExecutorBuilder::admission_check`].
+    admission_check: Option<crate::admission::AdmissionCheckFn>,
+}
+
+/// Heartbeat state bundled into one optional field on [`Executor`].
+struct HeartbeatState {
+    /// Period between heartbeat ticks.
+    period_nanos: u64,
+    /// Next tick deadline, in `cyclic_clock.now_nanos()` units.
+    next_due_nanos: u64,
+    /// Running sequence counter. Starts at 0, incremented before each tick.
+    seq: u64,
 }
 
 // SAFETY: `IxListener<ipc::Service>` is `!Send` for the same Rc-based
@@ -325,6 +351,14 @@ impl Executor {
         // period) before the task joins the table — the natural validation
         // point, where the decls are first available, for every DispatchMode.
         validate_decls(&id, &decls)?;
+
+        // TSR_0003: reject integrity mismatch when the executor is pinned.
+        if let Some(expected) = self.integrity_level {
+            let found = item.integrity_level();
+            if found != expected {
+                return Err(ExecutorError::MixedIntegrity { expected, found });
+            }
+        }
 
         let mut item_box: Box<dyn ExecutableItem> = Box::new(item);
         let app_id = item_box.app_id();
@@ -648,6 +682,17 @@ impl Executor {
         // applied to the head item's decls (which gate the whole chain).
         validate_decls(&id, &decls)?;
 
+        // TSR_0003: reject any item in the chain whose integrity differs from
+        // the executor pin.
+        if let Some(expected) = self.integrity_level {
+            for item in &items {
+                let found = item.integrity_level();
+                if found != expected {
+                    return Err(ExecutorError::MixedIntegrity { expected, found });
+                }
+            }
+        }
+
         // Warn if non-head items declared triggers (those will be ignored).
         for (i, body) in items.iter_mut().enumerate().skip(1) {
             let mut spurious = TriggerDeclarer::new_internal();
@@ -812,6 +857,18 @@ pub struct ExecutorBuilder {
     /// Scheduling clock for the absolute grid. `None` → resolved to
     /// [`MonotonicCyclicClock`](crate::MonotonicCyclicClock) in `build()`.
     cyclic_clock: Option<std::sync::Arc<dyn crate::CyclicClock>>,
+    /// Pinned integrity level (`TSR_0003`). `None` → no enforcement (mixed
+    /// levels allowed); `Some(level)` → every added item must match `level`.
+    integrity_level: Option<crate::IntegrityLevel>,
+    /// Heartbeat period (`TSR_0010` / `AOU_0003`). `None` → no heartbeat;
+    /// `Some(period)` → emit a liveness tick via [`Observer::on_heartbeat`]
+    /// at least every `period`. Typical automotive safety use: `≤ FTTI/2`
+    /// (`≤ 50 ms`).
+    heartbeat_period: Option<Duration>,
+    /// Cold-start admission check (`AFSR_0005`). `None` → no check (default,
+    /// backward-compatible); `Some(f)` → invoke `f` once at cold-start to verify
+    /// spatial isolation before entering `RUNNING`.
+    admission_check: Option<crate::admission::AdmissionCheckFn>,
 }
 
 impl Default for ExecutorBuilder {
@@ -824,9 +881,12 @@ impl Default for ExecutorBuilder {
             iteration_budget: None,
             fatal_handler: None,
             stats_window: None,
+            integrity_level: None,
+            heartbeat_period: None,
             clock: None,
             dispatch_mode: crate::DispatchMode::default(),
             cyclic_clock: None,
+            admission_check: None,
         }
     }
 }
@@ -897,6 +957,86 @@ impl ExecutorBuilder {
     #[must_use]
     pub fn cyclic_clock(mut self, clock: std::sync::Arc<dyn crate::CyclicClock>) -> Self {
         self.cyclic_clock = Some(clock);
+        self
+    }
+
+    /// Pin the executor to a specific integrity level. Any item whose
+    /// [`crate::ExecutableItem::integrity_level`] differs from `level` will
+    /// be rejected at `add` time with
+    /// [`crate::ExecutorError::MixedIntegrity`]. Default: `None` (no
+    /// enforcement, mixed levels allowed).
+    #[must_use]
+    pub const fn integrity_level(mut self, level: crate::IntegrityLevel) -> Self {
+        self.integrity_level = Some(level);
+        self
+    }
+
+    /// Configure a liveness heartbeat emitted via
+    /// [`Observer::on_heartbeat`] at least every `period`.
+    ///
+    /// The executor bounds its `WaitSet` wait by the heartbeat deadline,
+    /// ensuring a tick fires even when no other triggers are active.
+    /// Alloc-free on the hot path. Default: no heartbeat.
+    ///
+    /// # Timing contract
+    ///
+    /// A tick is emitted at least once per `period` (subject to OS scheduler
+    /// latency). The inter-tick gap is bounded by approximately
+    /// `period * 2` under typical load.
+    ///
+    /// # Safety use case
+    ///
+    /// Automotive functional safety: set `period` to `FTTI/2` or smaller
+    /// (typically ≤ 50 ms) so an external watchdog can force a safe state
+    /// if no tick arrives within its configured timeout.
+    ///
+    /// # TSR coverage
+    ///
+    /// Supports `TSR_0010` / `AOU_0003`: bounded-period liveness signal
+    /// for external monitoring.
+    #[must_use]
+    pub const fn heartbeat(mut self, period: Duration) -> Self {
+        self.heartbeat_period = Some(period);
+        self
+    }
+
+    /// Configure a cold-start admission check that verifies spatial isolation
+    /// before the executor enters `RUNNING` (`AFSR_0005`).
+    ///
+    /// The check is invoked exactly once per `run` / `run_for` / `run_n` /
+    /// `run_until` call, before [`Observer::on_executor_up`] and before any
+    /// task dispatches. If the check returns
+    /// [`crate::admission::AdmissionOutcome::Rejected`], no tasks are
+    /// dispatched, and the `run` call returns
+    /// [`crate::ExecutorError::AdmissionRejected`].
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use taktora_executor::{Executor, IntegrityLevel};
+    ///
+    /// let mut exec = Executor::builder()
+    ///     .integrity_level(IntegrityLevel::SafetyCritical)
+    ///     .admission_check(|ctx| {
+    ///         // Integrator-provided spatial-isolation check.
+    ///         // Real implementations would verify allocator lock,
+    ///         // channel topology, etc.
+    ///         ctx.verify_isolation()
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    ///
+    /// Default: `None` (no admission check).
+    #[must_use]
+    pub fn admission_check<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&crate::admission::AdmissionContext) -> crate::admission::AdmissionOutcome
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.admission_check = Some(Box::new(f));
         self
     }
 
@@ -1016,6 +1156,16 @@ impl ExecutorBuilder {
             .cyclic_clock
             .unwrap_or_else(|| std::sync::Arc::new(crate::MonotonicCyclicClock::new()));
 
+        let heartbeat_state = self.heartbeat_period.map(|period| {
+            let period_nanos = period.as_nanos().try_into().unwrap_or(u64::MAX);
+            let now = cyclic_clock.now_nanos();
+            HeartbeatState {
+                period_nanos,
+                next_due_nanos: now.saturating_add(period_nanos),
+                seq: 0,
+            }
+        });
+
         let exec = Executor {
             node,
             pool,
@@ -1038,6 +1188,9 @@ impl ExecutorBuilder {
             clock,
             dispatch_mode: self.dispatch_mode,
             cyclic_clock,
+            integrity_level: self.integrity_level,
+            heartbeat_state,
+            admission_check: self.admission_check,
         };
 
         Ok(exec)
@@ -1130,6 +1283,46 @@ enum RunMode<'a> {
 }
 
 impl Executor {
+    /// Bound `timeout` by the heartbeat deadline so the `WaitSet` wakes in
+    /// time to emit the next tick (`TSR_0010`). Returns `timeout` unchanged
+    /// when no heartbeat is configured. Alloc-free.
+    #[inline]
+    fn heartbeat_bounded_timeout(&self, timeout: Duration) -> Duration {
+        let Some(hb_state) = self.heartbeat_state.as_ref() else {
+            return timeout;
+        };
+        let now_nanos = self.cyclic_clock.now_nanos();
+        let heartbeat_timeout = if now_nanos >= hb_state.next_due_nanos {
+            Duration::ZERO
+        } else {
+            Duration::from_nanos(hb_state.next_due_nanos - now_nanos)
+        };
+        timeout.min(heartbeat_timeout)
+    }
+
+    /// Emit a heartbeat tick via [`Observer::on_heartbeat`] when
+    /// `now_nanos` has reached the next deadline, then advance the deadline
+    /// by one period (catching up without an unbounded burst). Alloc-free:
+    /// [`crate::heartbeat::HeartbeatTick`] is `Copy` on the stack.
+    #[inline]
+    fn emit_heartbeat_if_due(&mut self, now_nanos: u64) {
+        let Some(hb_state) = self.heartbeat_state.as_mut() else {
+            return;
+        };
+        if now_nanos < hb_state.next_due_nanos {
+            return;
+        }
+        hb_state.seq = hb_state.seq.wrapping_add(1);
+        let tick = crate::heartbeat::HeartbeatTick {
+            seq: hb_state.seq,
+            at_nanos: now_nanos,
+        };
+        self.observer.on_heartbeat(&tick);
+        hb_state.next_due_nanos = hb_state
+            .next_due_nanos
+            .saturating_add(hb_state.period_nanos);
+    }
+
     fn run_inner(&mut self, mut mode: RunMode<'_>) -> Result<(), ExecutorError> {
         // NOTE: Once `Stoppable::stop()` has been called, `self.stoppable.is_stopped()`
         // remains true permanently. Calling `run()` again after a stop will return
@@ -1139,6 +1332,26 @@ impl Executor {
         // Runner owns the Executor and consumes it.
         if self.running.swap(true, Ordering::SeqCst) {
             return Err(ExecutorError::AlreadyRunning);
+        }
+
+        // Cold-start admission check (`AFSR_0005`). Invoked once per `run`
+        // call, before `on_executor_up` and before any task dispatches. A
+        // rejected admission prevents entry to `RUNNING`.
+        if let Some(ref check) = self.admission_check {
+            let ctx =
+                crate::admission::AdmissionContext::new(self.integrity_level, self.tasks.len());
+            match check(&ctx) {
+                crate::admission::AdmissionOutcome::Admitted => {
+                    self.observer.on_admission_admitted();
+                }
+                crate::admission::AdmissionOutcome::Rejected(fault) => {
+                    self.observer.on_admission_rejected(&fault);
+                    self.running.store(false, Ordering::SeqCst);
+                    return Err(ExecutorError::AdmissionRejected {
+                        reason: fault.reason,
+                    });
+                }
+            }
         }
 
         self.observer.on_executor_up();
@@ -1411,15 +1624,23 @@ impl Executor {
                     // Linux: block on fds — the master timerfd wakes us on the
                     // absolute grid. Non-Linux dev: bound the wait by the earliest
                     // pending grid target so the post-wait pass can dispatch.
+                    // Bound the wait by the earliest pending grid target AND the
+                    // heartbeat deadline (if configured). The heartbeat MUST fire
+                    // at least every period regardless of other trigger activity.
                     #[cfg(target_os = "linux")]
-                    let timeout = std::time::Duration::MAX;
+                    let mut timeout = std::time::Duration::MAX;
                     #[cfg(not(target_os = "linux"))]
-                    let timeout = match dispatch_mode {
+                    let mut timeout = match dispatch_mode {
                         crate::DispatchMode::Grid => {
                             grid.next_timeout(self.cyclic_clock.now_nanos())
                         }
                         crate::DispatchMode::Legacy => std::time::Duration::MAX,
                     };
+
+                    // Heartbeat deadline: fold into timeout so the WaitSet wakes
+                    // in time to emit the tick. Works on both Linux (timerfd path)
+                    // and macOS (self-computed-timeout fallback).
+                    timeout = self.heartbeat_bounded_timeout(timeout);
                     waitset.wait_and_process_once_with_timeout(
                         |attachment_id: WaitSetAttachmentId<ipc::Service>| {
                             // `attachment_map` is a standalone local re-borrowed
@@ -1509,6 +1730,11 @@ impl Executor {
                 pool.barrier();
                 break Ok(());
             };
+
+            // Heartbeat tick: emit if now >= next_due, then advance next_due by
+            // period (catching up without unbounded burst). Alloc-free: HeartbeatTick
+            // is Copy on the stack.
+            self.emit_heartbeat_if_due(now_nanos);
 
             // Funnel the post-callback decision (interrupt / item error /
             // stop request / run-mode termination) through one helper that
@@ -2842,6 +3068,17 @@ impl ExecutorGraphBuilder<'_> {
         // discarded in `GraphBuilder::collect_root_decls` — so validating the root
         // decls is sufficient.
         validate_decls(&id, &decls)?;
+
+        // TSR_0003: reject any vertex whose integrity differs from the
+        // executor pin.
+        if let Some(expected) = self.executor.integrity_level {
+            for item in &g.items {
+                let found = item.integrity_level();
+                if found != expected {
+                    return Err(ExecutorError::MixedIntegrity { expected, found });
+                }
+            }
+        }
         let scan_period = scan_period_from_decls(&decls);
 
         // Box the graph for address stability — per-vertex dispatch

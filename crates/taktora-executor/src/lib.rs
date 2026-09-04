@@ -16,6 +16,7 @@
 //! See the workspace `README.md` for a quick-start.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod admission;
 mod attachment_map;
 mod chain;
 mod channel;
@@ -29,6 +30,8 @@ mod fatal;
 mod fault;
 mod graph;
 mod grid;
+mod heartbeat;
+mod integrity;
 mod item;
 mod monitor;
 mod observer;
@@ -47,6 +50,7 @@ mod thread_attrs;
 mod timerfd;
 mod trigger;
 
+pub use admission::{AdmissionContext, AdmissionFault, AdmissionOutcome};
 pub use channel::{Channel, EVENT_SUFFIX, NotifyOutcome, Publisher, Subscriber};
 pub use clock::{MockClock, MonotonicClock, SystemClock};
 pub use condition::{Conditional, wrap_with_condition};
@@ -58,6 +62,8 @@ pub use fatal::{FatalContext, FatalHandler, FatalSite};
 pub use fault::{ExecutorFaultReason, ExecutorFaultState, FaultReason, FaultState};
 pub use graph::{GraphBuilder, Vertex};
 pub use grid::{CyclicClock, DispatchMode, MonotonicCyclicClock};
+pub use heartbeat::HeartbeatTick;
+pub use integrity::IntegrityLevel;
 pub use item::{ExecutableItem, FnItem, FnItemWithTriggers, item, item_with_triggers};
 pub use monitor::ExecutionMonitor;
 pub use observer::{Observer, UserEvent};
