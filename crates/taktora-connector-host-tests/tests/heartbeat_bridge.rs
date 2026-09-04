@@ -5,7 +5,7 @@
 #![allow(clippy::doc_markdown)]
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::unbounded;
 use taktora_connector_core::{ConnectorHealth, HealthEvent};
@@ -20,7 +20,15 @@ fn bridge_forwards_ticks_to_health_channel() {
     let bridge = Arc::new(HeartbeatHealthBridge::new(health_tx));
 
     let period = Duration::from_millis(20);
-    let run_duration = Duration::from_millis(150);
+    // Drive to a fixed number of forwarded ticks rather than asserting a rate
+    // over a fixed wall-clock window. A transient CI scheduler stall can
+    // swallow most of a short window (observed: 1 tick in 150 ms on a loaded
+    // macOS runner), so a rate assertion is inherently flaky. The dispatch loop
+    // keeps iterating across a stall — the stall only lengthens one wait — so a
+    // count-driven run is deterministic. The wall-clock safety cap turns a
+    // genuinely dead heartbeat into a clean assertion failure, not a hang.
+    let target_events: usize = 5;
+    let safety_cap = Duration::from_secs(10);
 
     let mut exec = Executor::builder()
         .worker_threads(0)
@@ -29,16 +37,16 @@ fn bridge_forwards_ticks_to_health_channel() {
         .build()
         .unwrap();
 
-    exec.run_for(run_duration).unwrap();
+    let start = Instant::now();
+    exec.run_until(|| health_rx.len() >= target_events || start.elapsed() > safety_cap)
+        .unwrap();
 
     // Collect the health events.
     let events: Vec<HealthEvent> = health_rx.try_iter().collect();
 
-    // We should have received at least (run_duration / period) - 1 events.
-    let expected_min = (run_duration.as_millis() / period.as_millis()) - 1;
     assert!(
-        events.len() as u128 >= expected_min,
-        "expected at least {expected_min} health events, got {}",
+        events.len() >= target_events,
+        "expected at least {target_events} health events, got {} (heartbeat not firing?)",
         events.len()
     );
 
@@ -80,7 +88,11 @@ fn bridge_emits_events_with_no_tasks() {
     let bridge = Arc::new(HeartbeatHealthBridge::new(health_tx));
 
     let period = Duration::from_millis(25);
-    let run_duration = Duration::from_millis(125);
+    // Count-driven with a safety cap, for the same CI-stall reason documented on
+    // bridge_forwards_ticks_to_health_channel. Verifies the WaitSet wait is
+    // bounded by the heartbeat deadline even with no tasks: ticks keep arriving.
+    let target_events: usize = 3;
+    let safety_cap = Duration::from_secs(10);
 
     // No tasks registered.
     let mut exec = Executor::builder()
@@ -90,14 +102,15 @@ fn bridge_emits_events_with_no_tasks() {
         .build()
         .unwrap();
 
-    exec.run_for(run_duration).unwrap();
+    let start = Instant::now();
+    exec.run_until(|| health_rx.len() >= target_events || start.elapsed() > safety_cap)
+        .unwrap();
 
     let events: Vec<HealthEvent> = health_rx.try_iter().collect();
 
-    let expected_min = (run_duration.as_millis() / period.as_millis()) - 1;
     assert!(
-        events.len() as u128 >= expected_min,
-        "expected at least {expected_min} events with no tasks, got {}",
+        events.len() >= target_events,
+        "expected at least {target_events} events with no tasks, got {} (heartbeat not firing?)",
         events.len()
     );
 }
