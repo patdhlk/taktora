@@ -2,6 +2,7 @@
 
 use crate::error::ExecutorError;
 use crate::fault::{ExecutorFaultReason, FaultReason};
+use crate::heartbeat::HeartbeatTick;
 use crate::stats::CycleObservation;
 use crate::task_id::TaskId;
 
@@ -95,6 +96,31 @@ pub trait Observer: Send + Sync {
     /// per-item panic catch — a panic here routes to the fail-fast boundary
     /// (`REQ_0123`). Implementations must not panic.
     fn on_cycle_stats(&self, _obs: &CycleObservation) {}
+
+    /// Called on every heartbeat tick when the executor is configured with
+    /// [`crate::ExecutorBuilder::heartbeat`].
+    ///
+    /// Emitted at a bounded period (≤ configured `period` under typical load)
+    /// to signal executor liveness. Default no-op for backward compatibility.
+    ///
+    /// # Timing
+    ///
+    /// The executor guarantees at least one tick per configured period,
+    /// regardless of other dispatch activity. The `WaitSet` wait is bounded by
+    /// the heartbeat deadline. Alloc-free on the hot path (tick is `Copy`,
+    /// passed by reference).
+    ///
+    /// # Containment
+    ///
+    /// Runs on the executor's `WaitSet` thread outside the per-item panic
+    /// catch — a panic here routes to the fail-fast boundary (`REQ_0123`).
+    /// Implementations must not panic.
+    ///
+    /// # TSR coverage
+    ///
+    /// Supports `TSR_0010` / `AOU_0003`: liveness heartbeat for external
+    /// watchdog integration.
+    fn on_heartbeat(&self, _tick: &HeartbeatTick) {}
 }
 
 /// No-op observer used when the user does not configure one.
