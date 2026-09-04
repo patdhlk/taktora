@@ -20,14 +20,14 @@
 //! [`PayloadCodec`]: taktora_connector_core::PayloadCodec
 
 use core::sync::atomic::{AtomicU64, Ordering};
-
-use iceoryx2::port::publisher::Publisher;
-use iceoryx2::port::subscriber::Subscriber;
-use iceoryx2::prelude::ipc;
-use taktora_connector_core::ConnectorError;
+use crossbeam_channel::Sender;
 
 use crate::envelope::{ConnectorEnvelope, CorrelationId};
 use crate::now::now_unix_ns;
+use iceoryx2::port::publisher::Publisher;
+use iceoryx2::port::subscriber::Subscriber;
+use iceoryx2::prelude::ipc;
+use taktora_connector_core::{ConnectorError, ConnectorHealth, HealthEvent};
 
 /// Outcome of a successful [`RawChannelWriter::send_raw_bytes`] call.
 ///
@@ -173,6 +173,18 @@ impl<const N: usize> RawChannelWriter<N> {
             core::ptr::addr_of_mut!((*env_ptr).correlation_id).write(correlation_id);
             core::ptr::addr_of_mut!((*env_ptr).payload_len).write(written_u32);
             core::ptr::addr_of_mut!((*env_ptr).reserved).write(reserved);
+            core::ptr::addr_of_mut!((*env_ptr).version).write(ConnectorEnvelope::<N>::WIRE_VERSION);
+            core::ptr::addr_of_mut!((*env_ptr).padding).write(0);
+        }
+
+        // SAFETY: every field except `crc32` is now initialised. Compute
+        // the CRC over the header + payload, then write it.
+        let crc = unsafe {
+            let env_ref = &*env_ptr;
+            env_ref.compute_crc()
+        };
+        unsafe {
+            core::ptr::addr_of_mut!((*env_ptr).crc32).write(crc);
         }
         // SAFETY: every field initialised per the comment above.
         let sample = unsafe { sample.assume_init() };
@@ -188,10 +200,14 @@ impl<const N: usize> RawChannelWriter<N> {
     }
 }
 
-/// Byte-only iceoryx2 subscriber. Drains envelopes into a
-/// caller-provided destination buffer; never allocates.
+/// Byte-only iceoryx2 subscriber with CRC integrity checking. Drains
+/// envelopes into a caller-provided destination buffer; never allocates.
 pub struct RawChannelReader<const N: usize> {
     inner: Subscriber<ipc::Service, ConnectorEnvelope<N>, ()>,
+    health_sink: Option<Sender<HealthEvent>>,
+    expected_sequence: AtomicU64,
+    crc_errors: AtomicU64,
+    sequence_gaps: AtomicU64,
 }
 
 #[allow(clippy::non_send_fields_in_send_ty)]
@@ -199,13 +215,52 @@ unsafe impl<const N: usize> Send for RawChannelReader<N> {}
 
 impl<const N: usize> RawChannelReader<N> {
     pub(crate) const fn new(inner: Subscriber<ipc::Service, ConnectorEnvelope<N>, ()>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            health_sink: None,
+            expected_sequence: AtomicU64::new(0),
+            crc_errors: AtomicU64::new(0),
+            sequence_gaps: AtomicU64::new(0),
+        }
+    }
+
+    /// Attach a health event sink. When set, CRC mismatches and sequence
+    /// gaps raise [`HealthEvent`]s to the provided channel. Corrupt frames
+    /// are dropped regardless of whether a sink is attached; the sink only
+    /// controls notification.
+    #[must_use]
+    pub fn with_health_sink(mut self, tx: Sender<HealthEvent>) -> Self {
+        self.health_sink = Some(tx);
+        self
+    }
+
+    /// Number of envelopes dropped due to CRC mismatch since this reader
+    /// was created.
+    #[must_use]
+    pub fn crc_errors(&self) -> u64 {
+        self.crc_errors.load(Ordering::Relaxed)
+    }
+
+    /// Number of sequence gaps (missed or out-of-order envelopes) detected
+    /// since this reader was created.
+    #[must_use]
+    pub fn sequence_gaps(&self) -> u64 {
+        self.sequence_gaps.load(Ordering::Relaxed)
     }
 
     /// Drain one envelope into `dest`. Returns `Ok(Some(sample))`
     /// when an envelope was consumed and its payload copied into
     /// `dest[..sample.payload_len]`; returns `Ok(None)` when the
     /// subscriber's queue was empty.
+    ///
+    /// Verifies the envelope's CRC-32 checksum before copying. Corrupt
+    /// envelopes (CRC mismatch) are dropped and return `Ok(None)` rather
+    /// than surfacing bad data; a [`HealthEvent`] is emitted to the health
+    /// sink (if attached) and the `crc_errors()` counter is incremented
+    /// (`TSR_0008`).
+    ///
+    /// Sequence gaps (missed or out-of-order envelopes) also raise a
+    /// [`HealthEvent`] and increment `sequence_gaps()`.
     ///
     /// # Errors
     ///
@@ -221,6 +276,44 @@ impl<const N: usize> RawChannelReader<N> {
             return Ok(None);
         };
         let env: &ConnectorEnvelope<N> = sample.payload();
+
+        // Verify CRC before trusting any envelope data
+        if !env.verify_crc() {
+            self.crc_errors.fetch_add(1, Ordering::Relaxed);
+            if let Some(tx) = &self.health_sink {
+                let _ = tx.send(HealthEvent {
+                    from: ConnectorHealth::Up,
+                    to: ConnectorHealth::Degraded {
+                        reason: "envelope crc mismatch".to_string(),
+                    },
+                    at: std::time::Instant::now(),
+                });
+            }
+            // Drop corrupt frame; do not surface to caller
+            return Ok(None);
+        }
+
+        // Check sequence monotonicity
+        let expected = self.expected_sequence.load(Ordering::Relaxed);
+        if env.sequence_number != expected {
+            self.sequence_gaps.fetch_add(1, Ordering::Relaxed);
+            if let Some(tx) = &self.health_sink {
+                let _ = tx.send(HealthEvent {
+                    from: ConnectorHealth::Up,
+                    to: ConnectorHealth::Degraded {
+                        reason: format!(
+                            "envelope sequence gap (expected {expected}, got {})",
+                            env.sequence_number
+                        ),
+                    },
+                    at: std::time::Instant::now(),
+                });
+            }
+        }
+        // Update expected to the next sequence after this one
+        self.expected_sequence
+            .store(env.sequence_number.wrapping_add(1), Ordering::Relaxed);
+
         let bytes = env.payload_bytes();
         if bytes.len() > dest.len() {
             return Err(ConnectorError::PayloadOverflow {
