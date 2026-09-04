@@ -62,6 +62,7 @@ async fn serve(provider: MockProvider) -> SocketAddr {
 
 /// `TEST_0953` — a server over a provider carrying telemetry surfaces the exact
 /// override values, while the live entity-cache `apps` count stays authoritative.
+// @need-ids: TEST_0953
 #[tokio::test]
 async fn health_surfaces_provider_telemetry() {
     let telemetry = Telemetry {
@@ -87,6 +88,7 @@ async fn health_surfaces_provider_telemetry() {
 
 /// `TEST_0953` (back-compat) — a server over a plain provider with no telemetry
 /// keeps the zero-filled blocks alongside the real counts.
+// @need-ids: TEST_0953
 #[tokio::test]
 async fn health_without_telemetry_keeps_zero_defaults() {
     let addr = serve(MockProvider::new().with_entity(app("gw"))).await;

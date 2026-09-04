@@ -10,8 +10,8 @@ land.
 
 .. test:: ZenohRouting field validation
    :id: TEST_0300
-   :status: open
-   :verifies: REQ_0401
+   :status: implemented
+   :verifies: REQ_0224, REQ_0401
 
    Unit test asserting that constructing a ``ZenohRouting`` with
    an invalid ``key_expr`` (empty, leading slash, illegal wildcard
@@ -23,8 +23,8 @@ land.
 
 .. test:: ZenohConnector implements Connector with ZenohRouting
    :id: TEST_0301
-   :status: open
-   :verifies: REQ_0400
+   :status: implemented
+   :verifies: REQ_0211, REQ_0220, REQ_0400
 
    Compile-fail test ensuring ``ZenohConnector<JsonCodec>`` is
    accepted in any position requiring ``Connector<Routing =
@@ -34,7 +34,7 @@ land.
 
 .. test:: Pub/sub end-to-end against MockZenohSession
    :id: TEST_0302
-   :status: open
+   :status: implemented
    :verifies: REQ_0402, REQ_0407, REQ_0408, REQ_0445
 
    Drive a ``ChannelWriter::send(value)`` through
@@ -46,7 +46,7 @@ land.
 
 .. test:: Query round-trip against MockZenohSession
    :id: TEST_0303
-   :status: open
+   :status: implemented
    :verifies: REQ_0420, REQ_0421, REQ_0422, REQ_0423, REQ_0424, REQ_0426, REQ_0427
 
    End-to-end query test: plugin A calls
@@ -83,7 +83,7 @@ land.
 
 .. test:: Inbound bridge saturation surfaces as DroppedInbound
    :id: TEST_0306
-   :status: open
+   :status: implemented
    :verifies: REQ_0406, REQ_0428
 
    With ``inbound_bridge_capacity = 1`` and a deliberately stalled
@@ -95,7 +95,7 @@ land.
 
 .. test:: Query timeout emits 0x03 terminator
    :id: TEST_0307
-   :status: open
+   :status: implemented
    :verifies: REQ_0425
 
    With ``query_timeout = 50 ms`` and a queryable that never
@@ -107,7 +107,7 @@ land.
 .. test:: Health state machine on MockZenohSession lifecycle
    :id: TEST_0308
    :status: implemented
-   :verifies: REQ_0440, REQ_0442
+   :verifies: REQ_0231, REQ_0235, REQ_0440, REQ_0442
 
    Walk the mock session through ``Connecting → Up → Degraded →
    Up → Down`` and assert one ``HealthEvent`` per transition on
@@ -123,7 +123,7 @@ land.
 .. test:: REQ_0441 anti-req — no ReconnectPolicy on session loss
    :id: TEST_0309
    :status: implemented
-   :verifies: REQ_0441
+   :verifies: REQ_0235, REQ_0441
 
    Regression-guard for the explicit anti-requirement
    :need:`REQ_0441` (which is status:rejected because the project

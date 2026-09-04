@@ -8,7 +8,7 @@ they verify to ``implemented`` and link these tests.
 
 .. test:: Model wire shapes round-trip
    :id: TEST_0900
-   :status: open
+   :status: implemented
    :verifies: REQ_0914, REQ_0915
 
    Each model DTO (entity, DTC/fault with status sub-object and freeze-frame,
@@ -27,7 +27,7 @@ they verify to ``implemented`` and link these tests.
 
 .. test:: Gateway read core over the mock provider
    :id: TEST_0902
-   :status: open
+   :status: implemented
    :verifies: REQ_0912
 
    The transport-neutral gateway resolves the entity tree, fault lists, and the
@@ -35,7 +35,7 @@ they verify to ``implemented`` and link these tests.
 
 .. test:: Worst-wins health rollup
    :id: TEST_0903
-   :status: open
+   :status: implemented
    :verifies: REQ_0912
 
    An entity's aggregated health equals the worst health of itself and its
@@ -54,7 +54,7 @@ they verify to ``implemented`` and link these tests.
 
 .. test:: Drop-in contract snapshot
    :id: TEST_0905
-   :status: open
+   :status: implemented
    :verifies: REQ_0911
 
    Serialising each served shape produces JSON whose keys and casing match the
@@ -545,3 +545,17 @@ they verify to ``implemented`` and link these tests.
    ``BuildInfo`` captured with git metadata absent yields ``"unknown"`` for every
    git-derived field and ``false`` for ``git_dirty`` without panicking, holding
    the no-``.git`` fallback of :need:`REQ_0990`.
+
+Execution results
+-----------------
+
+Which of the cases above actually ran, and passed, against a given commit
+is recorded by the test-execution records tooling (:need:`FEAT_0122`): the
+medkit tests carry ``@need-ids:`` markers naming the case they exercise,
+and the CI build ingests their ``cargo-nextest`` results as ``test-case``
+needs on the page below, emitting ``test-execution-record.json`` alongside.
+
+.. toctree::
+   :maxdepth: 1
+
+   test-results

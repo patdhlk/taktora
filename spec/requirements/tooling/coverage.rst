@@ -6,7 +6,7 @@ coverage is a repeatable verification artifact rather than a one-off number.
 
 .. feat:: Workspace test-coverage measurement
    :id: FEAT_0120
-   :status: open
+   :status: implemented
 
    **Motivation.** No coverage measurement exists in the repository today —
    no tool, no script, no CI job. For a project building a safety argument,

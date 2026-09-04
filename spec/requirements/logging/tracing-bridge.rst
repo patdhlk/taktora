@@ -8,7 +8,7 @@ their events as ``log::Record`` through the same active backend
 
 .. feat:: tracing-log bridge for existing tracing emitters
    :id: FEAT_0078
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0071
 
    Existing ``tracing::*`` emitters (notably

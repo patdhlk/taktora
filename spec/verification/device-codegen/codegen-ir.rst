@@ -6,7 +6,7 @@ Per-crate, snapshot-based. Live under
 
 .. test:: Name sanitisation handles ESI naming edge cases
    :id: TEST_0410
-   :status: open
+   :status: implemented
    :verifies: REQ_0511
 
    Parameterised test asserting the sanitisation map for a fixed
@@ -17,7 +17,7 @@ Per-crate, snapshot-based. Live under
 
 .. test:: Revision collision produces distinct idents
    :id: TEST_0411
-   :status: open
+   :status: implemented
    :verifies: REQ_0512
 
    Synthetic input set containing two devices with identical

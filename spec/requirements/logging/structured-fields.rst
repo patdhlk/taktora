@@ -8,7 +8,7 @@ into the formatted message (a refinement of the DLT backend,
 
 .. feat:: Structured key-value fields mapped to DLT verbose args
    :id: FEAT_0074
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0072
 
    The ``log`` crate (v0.4.21+) supports structured key-value pairs

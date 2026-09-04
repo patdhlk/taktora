@@ -6,7 +6,7 @@ cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. feat:: CAN frame transport (classical + FD)
    :id: FEAT_0047
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0046
 
    The on-wire form of CAN traffic crossing the plugin↔gateway
@@ -18,8 +18,9 @@ cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: Classical CAN frames supported
    :id: REQ_0610
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0047
+   :links: IMPL_0080, TEST_0502
 
    For channels declared with ``CanFrameKind::Classical``, the
    connector shall transport up to 8 bytes of payload per frame,
@@ -30,8 +31,9 @@ cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: CAN-FD frames supported
    :id: REQ_0611
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0047
+   :links: IMPL_0080, TEST_0503
 
    For channels declared with ``CanFrameKind::Fd``, the connector
    shall transport up to 64 bytes of payload per frame with the
@@ -42,8 +44,9 @@ cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: Channel payload sizing keyed on frame kind
    :id: REQ_0612
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0047
+   :links: BB_0071, IMPL_0080, TEST_0502
 
    ``ChannelDescriptor<CanRouting>::max_payload_size`` shall be
    derived deterministically from ``CanRouting::kind``: 8 bytes
@@ -53,8 +56,9 @@ cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: Outbound payload serialised to socketcan frame
    :id: REQ_0613
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0047
+   :links: BB_0072, IMPL_0080, TEST_0502, TEST_0503, TEST_0512
 
    When a plugin publishes a value through ``ChannelWriter::send``,
    the gateway shall, before the next RX/TX iteration on the
@@ -69,8 +73,9 @@ cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: Inbound gateway is byte-only on the publish path
    :id: REQ_0614
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0047
+   :links: BB_0072, IMPL_0080, TEST_0502, TEST_0512
 
    On the inbound leg (CAN bus → plugin), the gateway shall
    publish the raw frame data bytes received from the SocketCAN
@@ -82,8 +87,9 @@ cluster ``:satisfies:`` :need:`FEAT_0046`.
 
 .. req:: CAN ID extended flag preserved end-to-end
    :id: REQ_0615
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0047
+   :links: BB_0071, IMPL_0080, TEST_0501, TEST_0512
 
    The ``CanRouting::can_id.extended`` boolean shall be preserved
    end-to-end between plugin and gateway: outbound, the gateway

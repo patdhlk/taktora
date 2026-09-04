@@ -8,7 +8,7 @@ Test cases verifying :need:`FEAT_0040`. Each ``test`` directive
 
 .. test:: Cap exhaustion and oversize alloc both fail-closed
    :id: TEST_0180
-   :status: open
+   :status: implemented
    :verifies: REQ_0300, REQ_0301
 
    **Goal.** Confirm that the allocator (a) returns a non-null
@@ -40,7 +40,7 @@ Test cases verifying :need:`FEAT_0040`. Each ``test`` directive
 
 .. test:: Steady-state cap behaviour under burst
    :id: TEST_0181
-   :status: open
+   :status: implemented
    :verifies: REQ_0300
 
    **Goal.** Confirm that repeated allocate-then-free cycles never
@@ -61,7 +61,7 @@ Test cases verifying :need:`FEAT_0040`. Each ``test`` directive
 
 .. test:: lock() then alloc panics
    :id: TEST_0182
-   :status: open
+   :status: implemented
    :verifies: REQ_0302
 
    **Goal.** Confirm ``lock()`` causes a subsequent ``alloc`` call
@@ -87,7 +87,7 @@ Test cases verifying :need:`FEAT_0040`. Each ``test`` directive
 
 .. test:: Counter accuracy
    :id: TEST_0183
-   :status: open
+   :status: implemented
    :verifies: REQ_0303
 
    **Goal.** Confirm ``alloc_count``, ``dealloc_count``, and
@@ -111,7 +111,7 @@ Test cases verifying :need:`FEAT_0040`. Each ``test`` directive
 
 .. test:: Concurrent alloc/dealloc safety smoke
    :id: TEST_0184
-   :status: open
+   :status: implemented
    :verifies: REQ_0304
 
    **Goal.** Confirm concurrent ``alloc``/``dealloc`` from multiple

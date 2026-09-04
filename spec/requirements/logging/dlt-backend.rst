@@ -7,7 +7,7 @@ or standalone as a ``log::Log``.
 
 .. feat:: taktora-log-dlt DLT-protocol backend
    :id: FEAT_0072
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0070
 
    A pure-Rust DLT backend (``taktora-log-dlt``) that implements both

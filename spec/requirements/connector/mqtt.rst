@@ -6,7 +6,7 @@ cluster ``:satisfies:`` :need:`FEAT_0030`.
 
 .. feat:: MQTT reference connector
    :id: FEAT_0036
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0030
 
    **Motivation.** The first concrete connector instantiating the

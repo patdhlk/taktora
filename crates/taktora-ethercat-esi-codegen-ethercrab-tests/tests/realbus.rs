@@ -177,6 +177,7 @@ fn el3602_decode_buffer_too_short() {
 // Registry dispatch over all four generated devices.
 // ---------------------------------------------------------------------------
 
+/// `TEST_0421` — the generated `REGISTRY` holds exactly one entry per `esi/*.xml` device.
 #[test]
 fn registry_has_all_devices() {
     // Four demo devices (EL1008/EL2004/EL3602/EL3001_like), the synthetic ALT

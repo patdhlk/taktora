@@ -106,21 +106,21 @@ taktora-ethercat-netcfg-build            = { path = "crates/taktora-ethercat-net
 taktora-ethercat-netcfg-cli              = { path = "crates/taktora-ethercat-netcfg-cli", version = "0.1.10" }
 taktora-ethercat-netcfg-codegen          = { path = "crates/taktora-ethercat-netcfg-codegen", version = "0.1.10" }
 taktora-bounded-alloc            = { path = "crates/taktora-bounded-alloc", version = "0.1.9" }
-taktora-connector-can            = { path = "crates/taktora-connector-can", version = "0.1.18" }
+taktora-connector-can            = { path = "crates/taktora-connector-can", version = "0.1.19" }
 taktora-connector-codec          = { path = "crates/taktora-connector-codec", version = "0.1.13" }
 taktora-connector-core           = { path = "crates/taktora-connector-core", version = "0.2.10" }
-taktora-connector-ethercat       = { path = "crates/taktora-connector-ethercat", version = "0.4.7" }
-taktora-connector-host           = { path = "crates/taktora-connector-host", version = "0.1.18" }
-taktora-connector-j1939          = { path = "crates/taktora-connector-j1939", version = "0.1.4" }
-taktora-connector-mqtt           = { path = "crates/taktora-connector-mqtt", version = "0.2.1" }
-taktora-connector-transport-iox  = { path = "crates/taktora-connector-transport-iox", version = "0.1.11" }
+taktora-connector-ethercat       = { path = "crates/taktora-connector-ethercat", version = "0.4.8" }
+taktora-connector-host           = { path = "crates/taktora-connector-host", version = "0.1.19" }
+taktora-connector-j1939          = { path = "crates/taktora-connector-j1939", version = "0.1.5" }
+taktora-connector-mqtt           = { path = "crates/taktora-connector-mqtt", version = "0.2.2" }
+taktora-connector-transport-iox  = { path = "crates/taktora-connector-transport-iox", version = "0.1.12" }
 taktora-connector-ui-contract    = { path = "crates/taktora-connector-ui-contract", version = "0.1.2" }
 taktora-connector-ui-derive      = { path = "crates/taktora-connector-ui-derive", version = "0.1.2" }
-taktora-connector-ui             = { path = "crates/taktora-connector-ui", version = "0.1.5" }
-taktora-connector-ui-client      = { path = "crates/taktora-connector-ui-client", version = "0.1.2" }
-taktora-connector-zenoh          = { path = "crates/taktora-connector-zenoh", version = "0.2.17" }
-taktora-executor                 = { path = "crates/taktora-executor", version = "0.5.0" }
-taktora-executor-tracing         = { path = "crates/taktora-executor-tracing", version = "0.1.17" }
+taktora-connector-ui             = { path = "crates/taktora-connector-ui", version = "0.1.6" }
+taktora-connector-ui-client      = { path = "crates/taktora-connector-ui-client", version = "0.1.3" }
+taktora-connector-zenoh          = { path = "crates/taktora-connector-zenoh", version = "0.2.18" }
+taktora-executor                 = { path = "crates/taktora-executor", version = "0.6.0" }
+taktora-executor-tracing         = { path = "crates/taktora-executor-tracing", version = "0.1.18" }
 taktora-log                      = { path = "crates/taktora-log", version = "0.1.3" }
 taktora-log-dlt                  = { path = "crates/taktora-log-dlt", version = "0.1.6" }
 taktora-motion-core              = { path = "crates/taktora-motion-core", version = "0.1.5" }
@@ -136,7 +136,7 @@ taktora-medkit-manifest          = { path = "crates/taktora-medkit-manifest", ve
 taktora-medkit-provider          = { path = "crates/taktora-medkit-provider", version = "0.2.2" }
 taktora-medkit-gateway           = { path = "crates/taktora-medkit-gateway", version = "0.2.1" }
 taktora-medkit-gateway-axum      = { path = "crates/taktora-medkit-gateway-axum", version = "0.4.1" }
-taktora-medkit-binding-executor  = { path = "crates/taktora-medkit-binding-executor", version = "0.2.3" }
+taktora-medkit-binding-executor  = { path = "crates/taktora-medkit-binding-executor", version = "0.2.4" }
 taktora-medkit-binding-connector = { path = "crates/taktora-medkit-binding-connector", version = "0.2.3" }
 
 # External crates
@@ -172,7 +172,7 @@ prettyplease      = "0.2"
 encoding_rs       = "0.8"
 humantime         = "2"
 clap              = { version = "4", features = ["derive"] }
-glob              = "0.3"
+glob              = "0.3.4" # From<GlobError> for io::Error (esi-build); into_error() deprecated
 libm              = "0.2"
 axum              = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tower-http        = { version = "0.6", default-features = false }

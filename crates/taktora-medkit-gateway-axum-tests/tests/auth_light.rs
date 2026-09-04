@@ -102,6 +102,7 @@ const CLIENT_CREDENTIALS: &str =
     r#"{"grant_type":"client_credentials","client_id":"diag","client_secret":"s3cret"}"#;
 
 /// `TEST_0922` — the token endpoint issues a contract-shaped, JWT-shaped token.
+// @need-ids: TEST_0922
 #[tokio::test]
 async fn token_endpoint_issues_contract_shaped_jwt() {
     let addr = spawn().await;
@@ -140,6 +141,7 @@ async fn token_endpoint_issues_contract_shaped_jwt() {
 }
 
 /// `TEST_0922` — `/auth/authorize` and `/auth/revoke` exist and are POST-only.
+// @need-ids: TEST_0922
 #[tokio::test]
 async fn authorize_and_revoke_endpoints_exist() {
     let addr = spawn().await;
@@ -176,6 +178,7 @@ async fn authorize_and_revoke_endpoints_exist() {
 
 /// `TEST_0923` — resource endpoints pass with or without a Bearer token
 /// (enforcement none); auth never rejects a read in v1.
+// @need-ids: TEST_0923
 #[tokio::test]
 async fn resource_endpoints_pass_with_and_without_bearer() {
     let addr = spawn().await;
@@ -192,6 +195,7 @@ async fn resource_endpoints_pass_with_and_without_bearer() {
 
 /// `TEST_0924` — the full client shape: login → obtain token → call a read-core
 /// endpoint with the token → 200.
+// @need-ids: TEST_0924
 #[tokio::test]
 async fn full_client_login_then_read_with_token() {
     let addr = spawn().await;
@@ -242,6 +246,7 @@ impl Authenticator for RejectingAuthenticator {
 
 /// `TEST_0924` — substituting a strict `Authenticator` changes token issuance
 /// without touching handlers, and enforcement=none read-core is unaffected.
+// @need-ids: TEST_0924
 #[tokio::test]
 async fn strict_authenticator_is_substitutable() {
     let addr = spawn_with(Arc::new(RejectingAuthenticator)).await;

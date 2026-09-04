@@ -1,3 +1,6 @@
+//! `TEST_0214` — inbound bridge saturation surfaces as a single `Degraded`
+//! health transition carrying the running drop count (`REQ_0324`).
+//!
 //! Inbound-saturation coverage for the `EtherCAT` connector (`REQ_0324`).
 //!
 //! The bridge-unit contract lives next to the type (see

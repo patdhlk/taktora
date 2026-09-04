@@ -105,6 +105,8 @@ mod tests {
         }
     }
 
+    /// `TEST_0430` — hand-written `EsiDevice` impl: identity, byte lengths and a
+    /// `BitSlice<u8, Lsb0>` decode round-trip (`REQ_0530`, `REQ_0534`).
     #[test]
     fn decodes_known_process_image() {
         // bit 0 = flag (1), bits 1..17 = i16.

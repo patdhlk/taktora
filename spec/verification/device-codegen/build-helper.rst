@@ -5,7 +5,7 @@ Live under ``crates/ethercat-esi-build/tests/``.
 
 .. test:: Builder writes a parseable Rust file to OUT_DIR
    :id: TEST_0440
-   :status: open
+   :status: implemented
    :verifies: REQ_0540, REQ_0541
 
    Test crate driven by a fixture ESI set runs

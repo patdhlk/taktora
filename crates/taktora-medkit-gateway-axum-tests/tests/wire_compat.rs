@@ -104,6 +104,7 @@ async fn spawn_static(config: GatewayConfig) -> SocketAddr {
 }
 
 /// `TEST_0936` (`REQ_0965`) — the root advertises the served extensions honestly.
+// @need-ids: TEST_0936
 #[tokio::test]
 async fn root_capabilities_are_honest() {
     let addr = spawn_static(GatewayConfig::default()).await;
@@ -141,6 +142,7 @@ async fn root_capabilities_are_honest() {
 }
 
 /// `TEST_0937` (`REQ_0967`) — `/health` carries the golden telemetry blocks.
+// @need-ids: TEST_0937
 #[tokio::test]
 async fn health_carries_telemetry_blocks() {
     let addr = spawn_static(GatewayConfig::default()).await;
@@ -161,6 +163,7 @@ async fn health_carries_telemetry_blocks() {
 }
 
 /// `TEST_0938` (`REQ_0964`) — global `DELETE /faults` answers `204`.
+// @need-ids: TEST_0938
 #[tokio::test]
 async fn global_delete_faults_acknowledges() {
     let addr = spawn_static(GatewayConfig::default()).await;
@@ -173,6 +176,7 @@ async fn global_delete_faults_acknowledges() {
 }
 
 /// `TEST_0939` (`REQ_0968`) — auth on issues a token; auth off answers `404`.
+// @need-ids: TEST_0939
 #[tokio::test]
 async fn auth_disabled_is_404_not_501() {
     let creds = r#"{"grant_type":"client_credentials"}"#;
@@ -198,6 +202,7 @@ async fn auth_disabled_is_404_not_501() {
 }
 
 /// `TEST_0940` (`REQ_0963`) — locks expose `GET` list + detail with `owned`.
+// @need-ids: TEST_0940
 #[tokio::test]
 async fn lock_reads_expose_owner_view() {
     let addr = spawn_static(GatewayConfig::default()).await;
@@ -234,6 +239,7 @@ async fn lock_reads_expose_owner_view() {
 }
 
 /// `TEST_0941` (`REQ_0962`) — triggers are reachable per entity and entity-scoped.
+// @need-ids: TEST_0941
 #[tokio::test]
 async fn entity_scoped_triggers_are_pinned() {
     let addr = spawn_static(GatewayConfig::default()).await;
@@ -369,6 +375,7 @@ async fn read_sse(mut stream: TcpStream, deadline: Duration) -> String {
 /// `TEST_0942` (`REQ_0961`, `REQ_0966`) — the global `/faults/stream` is
 /// unfiltered (no trigger needed), replays the retained ring on a fresh connect,
 /// and honours `Last-Event-ID`.
+// @need-ids: TEST_0942
 #[tokio::test]
 async fn global_stream_replays_ring_and_honours_last_event_id() {
     let phase = Arc::new(AtomicUsize::new(0));

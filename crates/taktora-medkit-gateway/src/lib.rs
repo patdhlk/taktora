@@ -162,6 +162,7 @@ mod tests {
 
     /// `TEST_0902` — the gateway resolves the entity tree and fault lists over the
     /// mock provider with no HTTP layer.
+    // @need-ids: TEST_0902
     #[test]
     fn resolves_entities_and_faults_over_mock() {
         let provider = tree().with_fault("app:planner", fault("STUCK", Severity::Error));
@@ -173,6 +174,7 @@ mod tests {
     }
 
     /// `TEST_0903` — worst-wins health rolls a faulting leaf up to its ancestors.
+    // @need-ids: TEST_0903
     #[test]
     fn health_rolls_up_worst_wins() {
         let provider = tree()
@@ -189,6 +191,7 @@ mod tests {
     }
 
     /// `TEST_0903` — a healthy subtree rolls up to `Ok`; an unknown id is `Ok`.
+    // @need-ids: TEST_0903
     #[test]
     fn healthy_tree_and_unknown_roll_up_ok() {
         let gateway = Gateway::new(tree());

@@ -29,8 +29,9 @@ that lets multiple emitters share it — XML-free, ethercrab-free.
 
 .. req:: Naming policy is owned by codegen, not the backend
    :id: REQ_0511
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0052
+   :links: BB_0061, TEST_0410
 
    The ``ethercat-esi-codegen`` crate shall sanitise ESI product
    names into valid Rust identifiers (e.g. ``EL3001-0000`` →
@@ -40,8 +41,9 @@ that lets multiple emitters share it — XML-free, ethercrab-free.
 
 .. req:: Revision collision handled deterministically
    :id: REQ_0512
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0052
+   :links: BB_0061, TEST_0411
 
    When two devices in the input set share a product name but differ
    in revision (e.g. ``EL3204`` rev ``0x00100000`` vs rev

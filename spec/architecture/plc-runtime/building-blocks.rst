@@ -8,7 +8,7 @@ already-shipped foundation requirements refer to.
 
 .. building-block:: Dispatch scratch (pre-allocated)
    :id: BB_0023
-   :status: open
+   :status: implemented
    :implements: REQ_0060
    :refines: ADR_0011
 

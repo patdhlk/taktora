@@ -279,58 +279,69 @@ impl MqttSessionLike for MockMqttSession {
         self.reconnect_attempts.load(Ordering::Acquire)
     }
 
-    async fn publish(&self, routing: &MqttRouting, payload: &[u8]) -> Result<(), SessionError> {
-        if !matches!(self.state(), MqttConnectionState::Connected) {
-            return Err(SessionError::NotConnected {
-                reason: "mock session not connected".into(),
-            });
-        }
-        let topic = routing.topic().clone();
-        self.published
-            .lock()
-            .expect("mock published lock not poisoned")
-            .push(PublishRecord {
-                topic: topic.as_str().to_owned(),
-                payload: payload.to_vec(),
-                qos: routing.qos(),
-                retained: routing.retained(),
-            });
+    // The trait returns `impl Future` because the real session awaits the
+    // broker; the mock completes synchronously, so each method does its work
+    // eagerly and hands back an already-resolved future.
+    fn publish(
+        &self,
+        routing: &MqttRouting,
+        payload: &[u8],
+    ) -> impl std::future::Future<Output = Result<(), SessionError>> + Send {
+        std::future::ready((|| -> Result<(), SessionError> {
+            if !matches!(self.state(), MqttConnectionState::Connected) {
+                return Err(SessionError::NotConnected {
+                    reason: "mock session not connected".into(),
+                });
+            }
+            let topic = routing.topic().clone();
+            self.published
+                .lock()
+                .expect("mock published lock not poisoned")
+                .push(PublishRecord {
+                    topic: topic.as_str().to_owned(),
+                    payload: payload.to_vec(),
+                    qos: routing.qos(),
+                    retained: routing.retained(),
+                });
 
-        // Snapshot the matching sinks under the lock, then invoke them
-        // after releasing it (avoids holding the guard across callbacks).
-        let sinks = self.matching_sinks(&topic);
-        for sink in sinks {
-            sink(payload);
-        }
-        Ok(())
+            // Snapshot the matching sinks under the lock, then invoke them
+            // after releasing it (avoids holding the guard across callbacks).
+            let sinks = self.matching_sinks(&topic);
+            for sink in sinks {
+                sink(payload);
+            }
+            Ok(())
+        })())
     }
 
-    async fn subscribe(
+    fn subscribe(
         &self,
         filter: &MqttTopicFilter,
         sink: PayloadSink,
-    ) -> Result<SubscriptionHandle, SessionError> {
-        let id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
-        self.subscribe_log
-            .lock()
-            .expect("mock subscribe log lock not poisoned")
-            .push(filter.as_str().to_owned());
-        let entry = SubscriberEntry {
-            id,
-            filter: filter.clone(),
-            sink: Arc::from(sink),
-        };
-        self.subscribers
-            .lock()
-            .expect("mock subscribers lock not poisoned")
-            .push(entry);
-        let guard = SubscriptionGuard {
-            id,
-            filter: filter.as_str().to_owned(),
-            subscribers: Arc::clone(&self.subscribers),
-            unsubscribe_log: Arc::clone(&self.unsubscribe_log),
-        };
-        Ok(SubscriptionHandle(Box::new(guard)))
+    ) -> impl std::future::Future<Output = Result<SubscriptionHandle, SessionError>> + Send {
+        std::future::ready({
+            let id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
+            self.subscribe_log
+                .lock()
+                .expect("mock subscribe log lock not poisoned")
+                .push(filter.as_str().to_owned());
+            let entry = SubscriberEntry {
+                id,
+                filter: filter.clone(),
+                sink: Arc::from(sink),
+            };
+            self.subscribers
+                .lock()
+                .expect("mock subscribers lock not poisoned")
+                .push(entry);
+            let guard = SubscriptionGuard {
+                id,
+                filter: filter.as_str().to_owned(),
+                subscribers: Arc::clone(&self.subscribers),
+                unsubscribe_log: Arc::clone(&self.unsubscribe_log),
+            };
+            Ok(SubscriptionHandle(Box::new(guard)))
+        })
     }
 
     fn set_inbound_router(&self, router: InboundRouter) {

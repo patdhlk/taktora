@@ -14,8 +14,9 @@ surface for inspecting generated output and pinning remote ESI files.
 
 .. req:: Expand subcommand prints generated module
    :id: REQ_0832
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0084
+   :links: BB_0127, TEST_0841
 
    The CLI shall provide a ``netcfg expand`` subcommand that prints the
    generated module to stdout for inspection and diffing, mirroring the

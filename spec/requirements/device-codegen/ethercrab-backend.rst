@@ -27,8 +27,9 @@ implement the runtime traits of :doc:`runtime-trait`.
 
 .. req:: One device struct per ESI device entry
    :id: REQ_0521
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0053
+   :links: BB_0062, TEST_0420
 
    For each ``<Device>`` element parsed from the input ESI files,
    the backend shall emit exactly one Rust struct named per the
@@ -37,8 +38,9 @@ implement the runtime traits of :doc:`runtime-trait`.
 
 .. req:: Identity const emitted per device
    :id: REQ_0522
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0053
+   :links: BB_0062, TEST_0420
 
    For each generated device struct, the backend shall emit an
    accompanying ``pub const <IDENT>_REV<REV>: Identity =
@@ -91,8 +93,9 @@ implement the runtime traits of :doc:`runtime-trait`.
 
 .. req:: Generated module root exposes a registry
    :id: REQ_0525
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0053
+   :links: BB_0062, TEST_0421
 
    The module root emitted by ``emit_module_root`` shall expose a
    ``registry!()`` declarative macro (or equivalent generated

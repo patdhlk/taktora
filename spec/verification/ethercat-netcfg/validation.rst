@@ -6,7 +6,7 @@ Live under ``crates/ethercat-netcfg-codegen/tests/validation/``.
 
 .. test:: Overlapping slices are a build error unless allowed
    :id: TEST_0844
-   :status: open
+   :status: implemented
    :verifies: REQ_0836
 
    A fixture with two routings overlapping the same bit range in the same
@@ -17,7 +17,7 @@ Live under ``crates/ethercat-netcfg-codegen/tests/validation/``.
 
 .. test:: Out-of-image, zero-length, dangling, and collision faults fail the build
    :id: TEST_0845
-   :status: open
+   :status: implemented
    :verifies: REQ_0836, REQ_0835
 
    A table-driven test feeds one fixture per fault — a slice past the ESI
@@ -30,7 +30,7 @@ Live under ``crates/ethercat-netcfg-codegen/tests/validation/``.
 
 .. test:: Unmapped process-image gaps warn but do not fail
    :id: TEST_0846
-   :status: open
+   :status: implemented
    :verifies: REQ_0837
 
    A fixture leaving an unmapped bit range in a device's process image
@@ -49,7 +49,7 @@ Live under ``crates/ethercat-netcfg-codegen/tests/validation/``.
 
 .. test:: SM-watchdog registers resolve and are emitted for output devices
    :id: TEST_0860
-   :status: open
+   :status: implemented
    :verifies: REQ_0844
 
    Resolution + arithmetic + codegen. An rx-carrying device with no
@@ -67,7 +67,7 @@ Live under ``crates/ethercat-netcfg-codegen/tests/validation/``.
 
 .. test:: SM-watchdog bound and enable are validated at config time
    :id: TEST_0861
-   :status: open
+   :status: implemented
    :verifies: REQ_0845
 
    The :need:`REQ_0845` matrix. PASS: ESI output SM with the watchdog

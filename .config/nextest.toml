@@ -1,0 +1,7 @@
+# cargo-nextest configuration.
+#
+# The `ci` profile emits JUnit XML for the test-execution record (FEAT_0122,
+# REQ_1010): `.github/workflows/ci-test-records.yml` runs it over the medkit
+# crates only and feeds `target/nextest/ci/junit.xml` into the spec build.
+[profile.ci.junit]
+path = "junit.xml"

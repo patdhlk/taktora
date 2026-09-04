@@ -7,7 +7,7 @@ incompatible build. This cluster ``:satisfies:`` :need:`FEAT_0092`.
 
 .. feat:: Manifest, schema and discovery
    :id: FEAT_0095
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0092
 
    The application publishes a single self-describing manifest per instance

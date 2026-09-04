@@ -6,7 +6,7 @@ under ``crates/ethercat-netcfg-build/tests/``.
 
 .. test:: Build helper generates into OUT_DIR and the module compiles
    :id: TEST_0839
-   :status: open
+   :status: implemented
    :verifies: REQ_0830
 
    A throwaway consumer crate whose ``build.rs`` invokes the helper over

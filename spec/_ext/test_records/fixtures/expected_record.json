@@ -1,0 +1,55 @@
+{
+  "build": {
+    "build_timestamp": "2026-07-05T00:00:00Z",
+    "git_describe": "v0.1.0-1-gdeadbee",
+    "git_dirty": false,
+    "git_sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    "git_short": "deadbee"
+  },
+  "scope": "verification/medkit",
+  "summary": {
+    "cases_executed": 5,
+    "gaps": {"failed": 1, "unexecuted": 1, "unmarked": 1},
+    "tests_in_scope": 5,
+    "validated": 2
+  },
+  "validated": [
+    {
+      "test_id": "TEST_0900",
+      "verifies": ["REQ_0914", "REQ_0915"],
+      "cases": [
+        {"crate": "taktora-medkit-model", "case": "tests::round_trips", "result": "passed", "time": "0.004"}
+      ]
+    },
+    {
+      "test_id": "TEST_0936",
+      "verifies": ["REQ_0965"],
+      "cases": [
+        {"crate": "taktora-medkit-gateway-axum-tests", "case": "root_advertises_extensions", "result": "passed", "time": "0.120"}
+      ]
+    }
+  ],
+  "coverage_gaps": [
+    {
+      "test_id": "TEST_0903",
+      "verifies": ["REQ_0912"],
+      "reason": "failed",
+      "cases": [
+        {"crate": "taktora-medkit-gateway", "case": "tests::health_rolls_up_worst_wins", "result": "passed", "time": "0.001"},
+        {"crate": "taktora-medkit-gateway", "case": "tests::healthy_tree_and_unknown_roll_up_ok", "result": "failure", "time": "0.002"}
+      ]
+    },
+    {
+      "test_id": "TEST_0904",
+      "verifies": ["REQ_0910"],
+      "reason": "unmarked",
+      "cases": []
+    },
+    {
+      "test_id": "TEST_0909",
+      "verifies": ["REQ_0920"],
+      "reason": "unexecuted",
+      "cases": []
+    }
+  ]
+}

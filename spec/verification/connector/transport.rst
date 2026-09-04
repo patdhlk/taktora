@@ -6,8 +6,8 @@ test scopes its own ``Node`` name.
 
 .. test:: ChannelWriter → ChannelReader round-trip
    :id: TEST_0120
-   :status: open
-   :verifies: REQ_0205, REQ_0223
+   :status: implemented
+   :verifies: REQ_0200, REQ_0205, REQ_0223
 
    End-to-end zero-copy round-trip through a real iceoryx2 service:
    ``writer.send(&value)`` followed by ``reader.try_recv()`` yields
@@ -16,7 +16,7 @@ test scopes its own ``Node`` name.
 
 .. test:: Sequence-number monotonicity
    :id: TEST_0121
-   :status: open
+   :status: implemented
    :verifies: REQ_0202
 
    Sending N envelopes through a single ``ChannelWriter`` and reading
@@ -25,7 +25,7 @@ test scopes its own ``Node`` name.
 
 .. test:: Timestamp populated at send
    :id: TEST_0122
-   :status: open
+   :status: implemented
    :verifies: REQ_0203
 
    Captures wall-clock time before and after ``writer.send``; the
@@ -33,7 +33,7 @@ test scopes its own ``Node`` name.
 
 .. test:: Correlation ID round-trip
    :id: TEST_0123
-   :status: open
+   :status: implemented
    :verifies: REQ_0204
 
    ``writer.send_with_correlation(&value, id)`` followed by
@@ -52,7 +52,7 @@ test scopes its own ``Node`` name.
 
 .. test:: Payload-overflow rejection
    :id: TEST_0125
-   :status: open
+   :status: implemented
    :verifies: REQ_0201
 
    ``writer.send(&value)`` for a value whose encoded form exceeds
@@ -62,7 +62,7 @@ test scopes its own ``Node`` name.
 
 .. test:: Service naming derived from descriptor
    :id: TEST_0126
-   :status: open
+   :status: implemented
    :verifies: REQ_0206, BB_0011
 
    Two ``ChannelDescriptor`` values with identical ``name`` produce

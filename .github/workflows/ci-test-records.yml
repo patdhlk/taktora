@@ -1,0 +1,98 @@
+name: ci-test-records
+
+# Test-execution records (FEAT_0122, ADR_0138/ADR_0139): bind a build to the
+# medkit tests that validated it. Runs the medkit crates under cargo-nextest
+# (JUnit), then the strict spec build, which ingests the JUnit as test-case
+# needs, joins them to the TEST_ verification cases each test declares via
+# `// @need-ids:` markers, and emits test-execution-record.json stamped with
+# the build identity (REQ_1010–REQ_1016). The record is published as a
+# workflow artifact — reproducible from any commit, so it is never committed.
+# A marker naming a non-existent TEST_ id fails the -W build (REQ_1012).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 0. Classify the diff — README-only PRs skip; spec-only PRs still run,
+  #    because a spec change can add or retire the TEST_ needs the record
+  #    projects and the join must stay honest against them.
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      spec: ${{ steps.classify.outputs.spec }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: ./scripts/classify-changes.sh
+
+  test-record:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.spec == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The record carries `git describe`; tags need the full history.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - uses: astral-sh/setup-uv@v5
+      - name: Medkit tests under nextest (JUnit → target/nextest/ci/junit.xml)
+        run: |
+          cargo nextest run --profile ci \
+            -p taktora-medkit-model -p taktora-medkit-provider \
+            -p taktora-medkit-gateway -p taktora-medkit-gateway-axum \
+            -p taktora-medkit-manifest \
+            -p taktora-medkit-binding-connector-tests \
+            -p taktora-medkit-binding-executor-tests \
+            -p taktora-medkit-gateway-axum-tests
+          test -s target/nextest/ci/junit.xml
+      - name: Sync spec deps
+        working-directory: spec
+        run: uv sync --group dev
+      - name: Join-extension unit tests
+        working-directory: spec
+        run: uv run pytest -q _ext/test_records
+      - name: Spec build (warnings as errors) → test-execution-record.json
+        working-directory: spec
+        env:
+          TAKTORA_BUILD_TIMESTAMP: ${{ github.event.head_commit.timestamp || '' }}
+        run: |
+          uv run sphinx-build -W -b html . _build/html
+          test -s _build/html/test-execution-record.json
+          python3 -c 'import json,sys; r=json.load(open("_build/html/test-execution-record.json")); print(json.dumps(r["summary"], indent=1)); print("commit", r["build"]["git_short"])'
+      - name: Publish summary to job summary
+        if: ${{ !cancelled() }}
+        working-directory: spec
+        run: |
+          if [ -f _build/html/test-execution-record.json ]; then
+            {
+              echo '## Test-execution record (medkit)'
+              echo '```json'
+              python3 -c 'import json; r=json.load(open("_build/html/test-execution-record.json")); print(json.dumps({"build": r["build"], "summary": r["summary"]}, indent=1))'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload test-execution record
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-execution-record
+          path: spec/_build/html/test-execution-record.json
+          if-no-files-found: error

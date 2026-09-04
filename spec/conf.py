@@ -1,7 +1,11 @@
 """Sphinx configuration for the taktora architecture & specification site."""
 
 import json
+import sys
 from pathlib import Path
+
+# Local Sphinx extensions live under _ext/ (see `test_records` below).
+sys.path.insert(0, str(Path(__file__).parent / "_ext"))
 
 # -- Project information -------------------------------------------------------
 
@@ -17,6 +21,10 @@ extensions = [
     "sphinx_needs",
     "sphinx_hextra",
     "sphinxcontrib.mermaid",
+    # Test-execution records (FEAT_0122, ADR_0138): loads sphinx-test-reports
+    # itself and drives the sphinx-codelinks analysis library — see
+    # _ext/test_records/__init__.py and the `test_records_*` values below.
+    "test_records",
 ]
 
 templates_path = ["_templates"]
@@ -27,6 +35,10 @@ exclude_patterns = [
     ".venv",
     "README.md",
     ".pharaoh",
+    # pytest drops a cache (with a README.md) next to the local extension tests
+    # under _ext/; neither it nor the extension sources are spec content.
+    ".pytest_cache",
+    "_ext",
     # `scripts/` hosts the Node.js mermaid validator (validate-mermaid.mjs)
     # and its npm dependency tree. None of it is spec content; MyST would
     # otherwise parse every README.md / .md file under scripts/node_modules
@@ -60,6 +72,21 @@ needs_from_toml = "ubproject.toml"
 needs_schema_validation_enabled = True
 with (Path(__file__).parent / "schemas.json").open("r", encoding="utf-8") as _fh:
     needs_schema_definitions = json.load(_fh)
+
+# -- Test-execution records (FEAT_0122) ----------------------------------------
+
+# Medkit pilot: markers are extracted from the medkit crates only, the record
+# projects the medkit verification subtree, and the JUnit (when present) is
+# ingested by verification/medkit/test-results.rst. Paths are relative to
+# this directory. `tr_rootdir` (sphinx-test-reports) keeps its default — this
+# directory — so the `:file:` option on the ingestion page is relative to it.
+test_records_sources = {
+    "src_dir": "../crates",
+    "include": ["taktora-medkit-*/**/*.rs"],
+}
+test_records_marker = "@need-ids:"
+test_records_scope = "verification/medkit"
+test_records_output = "test-execution-record.json"
 
 # -- HTML output (sphinx-hextra theme) -----------------------------------------
 

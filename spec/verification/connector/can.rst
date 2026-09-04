@@ -9,7 +9,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: CanConnector trait surface
    :id: TEST_0500
-   :status: open
+   :status: implemented
    :verifies: REQ_0600
 
    Compile-time API surface check that ``CanConnector<C>`` implements
@@ -22,7 +22,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: CanRouting field round-trip
    :id: TEST_0501
-   :status: open
+   :status: implemented
    :verifies: REQ_0601, REQ_0615
 
    Property test (``proptest``) generating arbitrary
@@ -35,7 +35,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: Classical CAN round-trip via MockCanInterface
    :id: TEST_0502
-   :status: open
+   :status: implemented
    :verifies: REQ_0610, REQ_0612, REQ_0613, REQ_0614
 
    Layer-1 end-to-end test: ``CanConnector`` over
@@ -48,7 +48,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: CAN-FD round-trip via MockCanInterface
    :id: TEST_0503
-   :status: open
+   :status: implemented
    :verifies: REQ_0611, REQ_0613
 
    As :need:`TEST_0502` but with ``CanFrameKind::Fd`` channels
@@ -59,7 +59,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: Per-iface filter union
    :id: TEST_0504
-   :status: open
+   :status: implemented
    :verifies: REQ_0622, REQ_0623
 
    Open three inbound readers on the same mock iface with
@@ -72,7 +72,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: Multi-iface inbound demux
    :id: TEST_0505
-   :status: open
+   :status: implemented
    :verifies: REQ_0620, REQ_0621, REQ_0624
 
    Gateway owns two mock ifaces (``vcan0``, ``vcan1``). Open one
@@ -86,7 +86,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: Bus-off → Down → ReconnectPolicy reopen
    :id: TEST_0506
-   :status: open
+   :status: implemented
    :verifies: REQ_0633, REQ_0634
 
    Drive ``MockCanInterface`` through ``Connecting → Up`` then
@@ -101,7 +101,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: error-passive → Degraded → recovery
    :id: TEST_0507
-   :status: open
+   :status: implemented
    :verifies: REQ_0630, REQ_0632, REQ_0635
 
    Two-iface gateway. Inject an error-passive error frame on
@@ -143,7 +143,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: Inbound bridge saturation surfaces as DroppedInbound
    :id: TEST_0510
-   :status: open
+   :status: implemented
    :verifies: REQ_0606, REQ_0608
 
    With ``inbound_bridge_capacity = 1`` and a deliberately
@@ -155,7 +155,7 @@ vcan && ip link set up vcan0``).
 .. test:: socketcan-integration feature gates the real socketcan dep
    :id: TEST_0511
    :status: implemented
-   :verifies: REQ_0603, REQ_0604
+   :verifies: REQ_0602, REQ_0603, REQ_0604
    :links: BB_0070, IMPL_0080
 
    Build the crate twice — once with default features, once with
@@ -173,7 +173,7 @@ vcan && ip link set up vcan0``).
 .. test:: Linux raw-socket smoke against vcan0
    :id: TEST_0512
    :status: implemented
-   :verifies: REQ_0502, REQ_0613, REQ_0614
+   :verifies: REQ_0502, REQ_0602, REQ_0613, REQ_0614, REQ_0615
    :links: BB_0070, IMPL_0080
 
    Layer-2 integration test (``socketcan-integration`` feature,
@@ -192,7 +192,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: Error frames not exposed to plugin
    :id: TEST_0513
-   :status: open
+   :status: implemented
    :verifies: REQ_0631, REQ_0636, REQ_0643
 
    Regression-guard for the explicit anti-requirement
@@ -204,7 +204,7 @@ vcan && ip link set up vcan0``).
 
 .. test:: Per-iface routing registry has stable iteration order
    :id: TEST_0514
-   :status: open
+   :status: implemented
    :verifies: REQ_0625
 
    Add 8 channels to the same mock iface in a known order; assert

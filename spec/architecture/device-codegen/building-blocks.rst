@@ -34,8 +34,8 @@ to the runtime trait surface the generated drivers implement.
 
 .. building-block:: ethercat-esi (parser crate)
    :id: BB_0060
-   :status: open
-   :implements: FEAT_0051
+   :status: implemented
+   :implements: FEAT_0051, REQ_0500, REQ_0502, REQ_0503, REQ_0504, REQ_0505, REQ_0506, REQ_0529, REQ_0843, REQ_0848, REQ_0849, REQ_0850
    :refines: REQ_0843
 
    The parse crate. Reads ESI XML via ``quick-xml`` +
@@ -48,8 +48,8 @@ to the runtime trait surface the generated drivers implement.
 
 .. building-block:: ethercat-esi-codegen (IR + backend trait)
    :id: BB_0061
-   :status: open
-   :implements: FEAT_0052
+   :status: implemented
+   :implements: FEAT_0052, REQ_0511, REQ_0512
 
    Codegen layer. Owns the ``CodegenBackend`` trait
    (:need:`REQ_0510`), naming sanitisation (:need:`REQ_0511`),
@@ -60,8 +60,8 @@ to the runtime trait surface the generated drivers implement.
 
 .. building-block:: ethercat-esi-codegen-ethercrab (concrete backend)
    :id: BB_0062
-   :status: open
-   :implements: FEAT_0053
+   :status: implemented
+   :implements: FEAT_0053, REQ_0521, REQ_0522, REQ_0523, REQ_0524, REQ_0525, REQ_0527, REQ_0528
 
    The one concrete backend shipped in this round. Emits per-device
    structs implementing ``EsiDevice`` and (where the device has
@@ -70,8 +70,8 @@ to the runtime trait surface the generated drivers implement.
 
 .. building-block:: ethercat-esi-rt (runtime trait crate)
    :id: BB_0063
-   :status: open
-   :implements: FEAT_0054
+   :status: implemented
+   :implements: FEAT_0054, REQ_0530, REQ_0534
 
    The minimal trait crate consumed by generated devices and
    adapters. Owns the object-safe ``EsiDevice``, ``EsiConfigurable``,
@@ -87,8 +87,8 @@ to the runtime trait surface the generated drivers implement.
 
 .. building-block:: ethercat-esi-build (build.rs glue)
    :id: BB_0064
-   :status: open
-   :implements: FEAT_0055
+   :status: implemented
+   :implements: FEAT_0055, REQ_0540, REQ_0541
 
    Build-script helper consumed by downstream crates from their
    ``build.rs``. One method: ``Builder::new().glob(...).backend(...)

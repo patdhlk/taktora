@@ -55,48 +55,59 @@ impl CyclicFieldbus for RefBus {
     type Routing = usize;
     type Error = BusFault;
 
-    async fn exchange(&mut self) -> Result<CycleQuality, Self::Error> {
-        let faulted = self.fault_next;
-        self.fault_next = false;
+    // The reference bus completes synchronously; do the work eagerly and
+    // return a ready future (the trait is async for real buses that await
+    // the cycle phase and the wire round).
+    fn exchange(
+        &mut self,
+    ) -> impl core::future::Future<Output = Result<CycleQuality, Self::Error>> {
+        core::future::ready((|| -> Result<CycleQuality, Self::Error> {
+            let faulted = self.fault_next;
+            self.fault_next = false;
 
-        // Driver-supplied durations: None on a hard fault (REQ_0267).
-        let (wire_round_ns, phase_wait_ns) = if faulted {
-            (None, None)
-        } else {
-            (Some(1000u32), Some(500u32))
-        };
+            // Driver-supplied durations: None on a hard fault (REQ_0267).
+            let (wire_round_ns, phase_wait_ns) = if faulted {
+                (None, None)
+            } else {
+                (Some(1000u32), Some(500u32))
+            };
 
-        // Derive the observation's stale_device_count once; all_fresh reuses it.
-        let stale_count = u16::try_from(self.stale.iter().filter(|s| **s).count())
-            .expect("device count fits u16");
-        let all_fresh = stale_count == 0;
-        // Fixture simplification: a real fieldbus checks the working counter
-        // (wire-level participation) and per-device freshness independently.
-        // Here a stale device is also treated as a WC mismatch to keep the
-        // reference bus minimal; ConnectorCycleStats tracks the two separately.
-        let wc_ok = !faulted && all_fresh;
+            // Derive the observation's stale_device_count once; all_fresh reuses it.
+            let stale_count = u16::try_from(self.stale.iter().filter(|s| **s).count())
+                .expect("device count fits u16");
+            let all_fresh = stale_count == 0;
+            // Fixture simplification: a real fieldbus checks the working counter
+            // (wire-level participation) and per-device freshness independently.
+            // Here a stale device is also treated as a WC mismatch to keep the
+            // reference bus minimal; ConnectorCycleStats tracks the two separately.
+            let wc_ok = !faulted && all_fresh;
 
-        let idx =
-            self.stats
-                .record_cycle(wire_round_ns, phase_wait_ns, all_fresh, wc_ok, &self.stale);
+            let idx = self.stats.record_cycle(
+                wire_round_ns,
+                phase_wait_ns,
+                all_fresh,
+                wc_ok,
+                &self.stale,
+            );
 
-        let obs = CycleObservation {
-            cycle_index: idx,
-            wire_round_ns,
-            phase_wait_ns,
-            all_devices_fresh: all_fresh,
-            wc_ok,
-            stale_device_count: stale_count,
-        };
-        self.recorder.on_connector_cycle(&obs);
+            let obs = CycleObservation {
+                cycle_index: idx,
+                wire_round_ns,
+                phase_wait_ns,
+                all_devices_fresh: all_fresh,
+                wc_ok,
+                stale_device_count: stale_count,
+            };
+            self.recorder.on_connector_cycle(&obs);
 
-        if faulted {
-            return Err(BusFault);
-        }
-        Ok(CycleQuality {
-            cycle_index: idx,
-            all_devices_fresh: all_fresh,
-        })
+            if faulted {
+                return Err(BusFault);
+            }
+            Ok(CycleQuality {
+                cycle_index: idx,
+                all_devices_fresh: all_fresh,
+            })
+        })())
     }
 
     fn read_input(&self, _r: &usize, _dst: &mut [u8]) -> Validity {

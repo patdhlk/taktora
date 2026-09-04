@@ -35,8 +35,9 @@ feature directly.
 
 .. req:: CanConnector implements Connector
    :id: REQ_0600
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0070, BB_0071, IMPL_0080, TEST_0500
 
    The connector crate shall expose ``CanConnector<C: PayloadCodec>``
    that implements the ``Connector`` trait with
@@ -44,8 +45,9 @@ feature directly.
 
 .. req:: CanRouting carries iface, can_id, mask, kind, fd_flags
    :id: REQ_0601
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0071, IMPL_0080, TEST_0501
 
    The ``CanRouting`` struct shall identify one channel by Linux
    network interface name (``iface``, bounded ASCII string of
@@ -59,8 +61,9 @@ feature directly.
 
 .. req:: Linux is the supported host OS for real I/O
    :id: REQ_0602
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0070, IMPL_0080, TEST_0511, TEST_0512
 
    The CAN gateway shall open SocketCAN interfaces via the Linux
    ``PF_CAN`` socket family, requiring the ``CAP_NET_RAW``
@@ -71,8 +74,9 @@ feature directly.
 
 .. req:: socketcan-integration cargo feature gates the real socketcan dep
    :id: REQ_0603
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0070, IMPL_0080, TEST_0511
 
    The ``socketcan`` crate shall be an optional dependency of
    ``taktora-connector-can``, activated only by a default-off
@@ -82,8 +86,9 @@ feature directly.
 
 .. req:: MockCanInterface ships unfeature-gated
    :id: REQ_0604
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0070, BB_0075, IMPL_0080, TEST_0511
 
    ``MockCanInterface`` — an in-process loopback implementation of
    the ``CanInterfaceLike`` trait — shall ship in the default
@@ -105,8 +110,9 @@ feature directly.
 
 .. req:: CAN bridge channels are bounded
    :id: REQ_0606
-   :status: approved
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0073, IMPL_0080, TEST_0510
 
    The outbound (taktora-executor → tokio) and inbound (tokio →
    taktora-executor) bridges between the plugin and the CAN gateway
@@ -125,8 +131,9 @@ feature directly.
 
 .. req:: Inbound bridge saturation drops frames and signals Degraded
    :id: REQ_0608
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0046
+   :links: BB_0073, IMPL_0080, TEST_0510
 
    When the inbound bridge channel is full, the gateway shall
    (1) increment the per-channel inbound-drop counter exposed via

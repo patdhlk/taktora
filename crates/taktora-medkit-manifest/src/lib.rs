@@ -404,6 +404,7 @@ mod tests {
 
     /// `TEST_0909` — the builder and the TOML loader produce identical manifests,
     /// so the two surfaces over one shape never drift (`REQ_0920`).
+    // @need-ids: TEST_0909
     #[test]
     fn builder_and_toml_agree() {
         let from_toml = Manifest::from_toml_str(TOML).expect("parse manifest TOML");
@@ -412,6 +413,7 @@ mod tests {
 
     /// `TEST_0909` — the committed `medkit.toml` example parses into a non-empty
     /// manifest (`REQ_0920`).
+    // @need-ids: TEST_0909
     #[test]
     fn committed_example_parses() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/medkit.toml");
@@ -423,6 +425,7 @@ mod tests {
 
     /// `TEST_0909` — `parent_of` resolves the binding id conventions and rejects
     /// unmapped / unprefixed ids.
+    // @need-ids: TEST_0909
     #[test]
     fn parent_of_resolves_conventions() {
         let manifest = built();
@@ -434,6 +437,7 @@ mod tests {
 
     /// `TEST_0909` — `declared_entities` yields parentless areas then
     /// area-parented components, each tagged as manifest-sourced (`REQ_0921`).
+    // @need-ids: TEST_0909
     #[test]
     fn declared_entities_carry_hierarchy() {
         let entities = built().declared_entities();
@@ -458,6 +462,7 @@ mod tests {
 
     /// `TEST_0911` — the default manifest is empty, so the pipeline falls back to
     /// flat grouping (`REQ_0922`).
+    // @need-ids: TEST_0911
     #[test]
     fn default_is_empty() {
         assert!(Manifest::default().is_empty());

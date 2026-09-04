@@ -7,7 +7,7 @@ polling.
 
 .. feat:: Event-driven I/O dispatch
    :id: FEAT_0012
-   :status: open
+   :status: implemented
    :satisfies: FEAT_0010
 
    Inter-process inputs and outputs flow through iceoryx2 channels so

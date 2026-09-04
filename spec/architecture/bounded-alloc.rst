@@ -74,7 +74,7 @@ Building blocks
 
 .. building-block:: taktora-bounded-alloc crate
    :id: BB_0024
-   :status: open
+   :status: implemented
    :implements: REQ_0300, REQ_0301, REQ_0302, REQ_0303, REQ_0304
    :refines: ADR_0012
 
@@ -133,7 +133,7 @@ Implementation
 
 .. impl:: taktora-bounded-alloc crate + sample binary
    :id: IMPL_0002
-   :status: open
+   :status: implemented
    :implements: BB_0024
    :refines: REQ_0300, REQ_0301, REQ_0302, REQ_0303, REQ_0304
 
