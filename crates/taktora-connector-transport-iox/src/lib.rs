@@ -39,7 +39,7 @@ pub mod slice;
 
 pub use channel::{ChannelReader, ChannelWriter, RecvEnvelope};
 pub use envelope::ConnectorEnvelope;
-pub use factory::ServiceFactory;
+pub use factory::{ChannelSpec, ServiceFactory};
 pub use raw::{RawChannelReader, RawChannelWriter, RawSample, RawSendOutcome};
 pub use slice::{
     RecvSlice, SliceChannelConfig, SliceChannelReader, SliceChannelWriter, SliceSendOutcome,
