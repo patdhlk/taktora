@@ -4,12 +4,10 @@
 use crate::error::ExecutorError;
 use crate::payload::Payload;
 use iceoryx2::port::listener::Listener as IxListener;
-use iceoryx2::port::notifier::Notifier as IxNotifier;
-use iceoryx2::port::publisher::Publisher as IxPublisher;
-use iceoryx2::port::subscriber::Subscriber as IxSubscriber;
 use iceoryx2::prelude::*;
 use iceoryx2::sample::Sample as IxSample;
 use std::sync::Arc;
+use taktora_executor_sys::ports::{SendListener, SendNotifier, SendPublisher, SendSubscriber};
 
 /// Outcome of a [`Publisher`] send operation.
 ///
@@ -102,7 +100,10 @@ impl<T: Payload> Channel<T> {
             .notifier_builder()
             .create()
             .map_err(ExecutorError::iceoryx2)?;
-        Ok(Publisher { inner, notifier })
+        Ok(Publisher {
+            inner: SendPublisher::new(inner),
+            notifier: SendNotifier::new(notifier),
+        })
     }
 
     /// Create a new subscriber attached to this channel.
@@ -117,27 +118,24 @@ impl<T: Payload> Channel<T> {
             .listener_builder()
             .create()
             .map_err(ExecutorError::iceoryx2)?;
-        // SAFETY: iceoryx2's `Listener<ipc::Service>` is conditionally
-        // `Send + Sync` (the impl exists but clippy cannot verify the concrete
-        // service type satisfies the bounds at this generic call site).
+        // SAFETY: After port creation, only `try_wait_one()` is called on the
+        // listener (via the executor's WaitSet), which does not touch the
+        // iceoryx2 `Rc` refcount. Moving the `Arc<Listener>` across threads is
+        // sound per the `SendListener` wrapper's documented contract.
         #[allow(clippy::arc_with_non_send_sync)]
-        let listener = Arc::new(listener);
-        Ok(Subscriber { inner, listener })
+        let listener = SendListener::new(Arc::new(listener));
+        Ok(Subscriber {
+            inner: SendSubscriber::new(inner),
+            listener,
+        })
     }
 }
 
 /// Pub/sub publisher that auto-notifies the paired event service on every send.
 pub struct Publisher<T: core::fmt::Debug + ZeroCopySend + 'static> {
-    inner: IxPublisher<IpcService, T, ()>,
-    notifier: IxNotifier<IpcService>,
+    inner: SendPublisher<T>,
+    notifier: SendNotifier,
 }
-
-// SAFETY: same rationale as `Subscriber<T>` above. `IxPublisher` is
-// `!Send` only because of the same `SingleThreaded` Rc; after port
-// creation, `publisher.send_copy(...)` and `publisher.loan_send(...)`
-// don't touch the Rc concurrently. Move-only, no Sync.
-#[allow(unsafe_code, clippy::non_send_fields_in_send_ty)]
-unsafe impl<T: core::fmt::Debug + ZeroCopySend + 'static> Send for Publisher<T> {}
 
 impl<T: Payload + Copy> Publisher<T> {
     /// Send by value (copies). Notifies the paired event service on success.
@@ -266,54 +264,34 @@ impl<T: Payload> Publisher<T> {
     /// })?;
     /// # Ok(()) }
     /// ```
-    #[allow(unsafe_code)]
     pub fn loan<F>(&self, f: F) -> Result<NotifyOutcome, ExecutorError>
     where
         F: FnOnce(&mut core::mem::MaybeUninit<T>) -> bool,
     {
-        let mut sample = self.inner.loan_uninit().map_err(ExecutorError::iceoryx2)?;
-        let cont = f(sample.payload_mut());
-        if !cont {
-            return Ok(NotifyOutcome {
+        let sample_opt = self.inner.loan_init(f).map_err(ExecutorError::iceoryx2)?;
+        match sample_opt {
+            None => Ok(NotifyOutcome {
                 sent: false,
                 listeners_notified: 0,
-            });
+            }),
+            Some(sample) => {
+                sample.send().map_err(ExecutorError::iceoryx2)?;
+                let listeners_notified = self.notifier.notify().map_err(ExecutorError::iceoryx2)?;
+                Ok(NotifyOutcome {
+                    sent: true,
+                    listeners_notified,
+                })
+            }
         }
-        // SAFETY: the closure returned `true`, asserting that the payload was
-        // fully initialised before this point. Per the documented contract,
-        // a closure that returns `true` without writing a valid `T` is a
-        // contract violation and the resulting behaviour is undefined.
-        let sample = unsafe { sample.assume_init() };
-        sample.send().map_err(ExecutorError::iceoryx2)?;
-        let listeners_notified = self.notifier.notify().map_err(ExecutorError::iceoryx2)?;
-        Ok(NotifyOutcome {
-            sent: true,
-            listeners_notified,
-        })
     }
 }
 
 /// Pub/sub subscriber. Carries the paired event listener as `Arc<Listener>`
 /// so the executor can attach it to its `WaitSet`.
 pub struct Subscriber<T: core::fmt::Debug + ZeroCopySend + 'static> {
-    inner: IxSubscriber<IpcService, T, ()>,
-    listener: Arc<IxListener<IpcService>>,
+    inner: SendSubscriber<T>,
+    listener: SendListener,
 }
-
-// SAFETY:
-// `IxSubscriber<ipc::Service, T, ()>` is `!Send` because the `ipc::Service`
-// `ArcThreadSafetyPolicy` is `SingleThreaded`, which holds an `Rc<...>`.
-// The Rc is mutated only when methods that call `lock()` on the policy
-// run — primarily during port creation. After construction, the executor
-// only invokes:
-//   * `subscriber.take()` → `IxSubscriber::receive()` (does not touch the
-//     listener's Rc; pure shared-memory read path)
-//   * `subscriber.listener_handle()` → cheap `Arc::clone` (own Arc, not iceoryx2's Rc)
-// No two threads concurrently mutate the same Rc refcount, so moving a
-// `Subscriber` to a pool worker is sound. We do not implement `Sync`;
-// `Subscriber` is move-only across threads, never shared.
-#[allow(unsafe_code, clippy::non_send_fields_in_send_ty)]
-unsafe impl<T: core::fmt::Debug + ZeroCopySend + 'static> Send for Subscriber<T> {}
 
 impl<T: Payload> Subscriber<T> {
     /// Take the next sample, if any.
@@ -324,6 +302,6 @@ impl<T: Payload> Subscriber<T> {
     /// Borrow the listener handle (executor uses this for trigger attachment).
     #[doc(hidden)]
     pub fn listener_handle(&self) -> Arc<IxListener<IpcService>> {
-        Arc::clone(&self.listener)
+        self.listener.clone_inner()
     }
 }

@@ -8,6 +8,7 @@ use core::time::Duration;
 use iceoryx2::port::listener::Listener as IxListener;
 use iceoryx2::prelude::ipc;
 use std::sync::Arc;
+use taktora_executor_sys::ports::SendListener;
 
 /// Listener type the rest of the crate manipulates. Aliased so client code
 /// using `RawListener` keeps working if iceoryx2 renames its types.
@@ -20,7 +21,7 @@ pub(crate) enum TriggerDecl {
     /// Wake when the listener (paired with a subscriber's channel) fires.
     Subscriber {
         /// Listener cloned from the subscriber's paired event service.
-        listener: Arc<RawListener>,
+        listener: SendListener,
     },
     /// Wake periodically.
     Interval(Duration),
@@ -31,12 +32,12 @@ pub(crate) enum TriggerDecl {
     /// would create a footgun where one could be attached without the other.
     Deadline {
         /// Listener cloned from the subscriber's paired event service.
-        listener: Arc<RawListener>,
+        listener: SendListener,
         /// Deadline duration after which a missed-deadline event fires.
         deadline: Duration,
     },
     /// Raw user-supplied listener, used as the escape hatch.
-    RawListener(Arc<RawListener>),
+    RawListener(SendListener),
 }
 
 /// Records trigger intentions. Consumed by the executor at add-time.
@@ -68,7 +69,7 @@ impl TriggerDeclarer<'_> {
     /// Declare that the item should fire when the given subscriber receives.
     pub fn subscriber<T: Payload>(&mut self, sub: &Subscriber<T>) -> &mut Self {
         self.decls.push(TriggerDecl::Subscriber {
-            listener: sub.listener_handle(),
+            listener: SendListener::new(sub.listener_handle()),
         });
         self
     }
@@ -87,7 +88,7 @@ impl TriggerDeclarer<'_> {
         deadline: impl Into<Duration>,
     ) -> &mut Self {
         self.decls.push(TriggerDecl::Deadline {
-            listener: sub.listener_handle(),
+            listener: SendListener::new(sub.listener_handle()),
             deadline: deadline.into(),
         });
         self
@@ -104,7 +105,8 @@ impl TriggerDeclarer<'_> {
 
     /// Escape hatch — attach a raw iceoryx2 listener directly.
     pub fn raw_listener(&mut self, listener: Arc<RawListener>) -> &mut Self {
-        self.decls.push(TriggerDecl::RawListener(listener));
+        self.decls
+            .push(TriggerDecl::RawListener(SendListener::new(listener)));
         self
     }
 
@@ -115,7 +117,7 @@ impl TriggerDeclarer<'_> {
         Resp: iceoryx2::prelude::ZeroCopySend + Default + core::fmt::Debug + Copy + 'static,
     {
         self.decls.push(TriggerDecl::Subscriber {
-            listener: srv.listener_handle(),
+            listener: SendListener::new(srv.listener_handle()),
         });
         self
     }
@@ -127,7 +129,7 @@ impl TriggerDeclarer<'_> {
         Resp: iceoryx2::prelude::ZeroCopySend + Default + core::fmt::Debug + Copy + 'static,
     {
         self.decls.push(TriggerDecl::Subscriber {
-            listener: cl.listener_handle(),
+            listener: SendListener::new(cl.listener_handle()),
         });
         self
     }
@@ -174,7 +176,7 @@ mod tests {
         let TriggerDecl::Subscriber { listener } = &d.decls[0] else {
             panic!("expected Subscriber variant");
         };
-        assert!(std::sync::Arc::ptr_eq(listener, &expected));
+        assert!(std::sync::Arc::ptr_eq(&listener.clone_inner(), &expected));
     }
 
     #[test]
@@ -195,7 +197,10 @@ mod tests {
         let TriggerDecl::Deadline { listener, deadline } = &d.decls[0] else {
             panic!("expected Deadline variant");
         };
-        assert!(std::sync::Arc::ptr_eq(listener, &expected_listener));
+        assert!(std::sync::Arc::ptr_eq(
+            &listener.clone_inner(),
+            &expected_listener
+        ));
         assert_eq!(*deadline, Duration::from_millis(50));
     }
 
@@ -209,7 +214,7 @@ mod tests {
         let TriggerDecl::RawListener(stored) = &d.decls[0] else {
             panic!("expected RawListener variant");
         };
-        assert!(std::sync::Arc::ptr_eq(stored, &expected));
+        assert!(std::sync::Arc::ptr_eq(&stored.clone_inner(), &expected));
     }
 
     #[test]

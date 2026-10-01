@@ -15,6 +15,9 @@
 //!
 //! See the workspace `README.md` for a quick-start.
 #![cfg_attr(docsrs, feature(doc_cfg))]
+// All unsafe code lives in `taktora-executor-sys`; enforced by the cargo-geiger
+// gate (`scripts/check-unsafe.sh`, FEAT_0201).
+#![forbid(unsafe_code)]
 
 mod admission;
 mod attachment_map;

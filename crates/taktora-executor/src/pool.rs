@@ -12,6 +12,7 @@ use crate::fatal::{FatalDispatch, FatalSite, guard_or_fatal};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use taktora_executor_sys::dispatch::ExclusiveCell;
 
 // `Tracker`'s sync primitives are aliased so its quiescence handshake can be
 // model-checked under `--cfg loom` (see the `loom_tests` module). Only the
@@ -40,41 +41,8 @@ use std::sync::{Condvar, Mutex};
 ///   (zero-alloc steady-state dispatch).
 enum Job {
     Owned(Box<dyn FnOnce() + Send + 'static>),
-    Borrowed(BorrowedJob),
+    Shared(std::sync::Arc<ExclusiveCell<dyn FnMut() + Send>>),
 }
-
-/// Send-able raw pointer to a caller-owned `FnMut` closure.
-///
-/// # Safety
-///
-/// `Send` is asserted by the pool's discipline: the caller (the
-/// executor) holds exclusive access to the closure between dispatches
-/// because `pool.barrier()` is called at the end of each `WaitSet`
-/// callback iteration, sequencing the closure's invocation strictly
-/// inside one iteration of `dispatch_loop`. The pointer is therefore
-/// not aliased on the worker side at the moment a new iteration's
-/// callback runs.
-#[allow(unsafe_code)]
-pub(crate) struct BorrowedJob(*mut (dyn FnMut() + Send));
-
-impl BorrowedJob {
-    /// Wrap a raw pointer to a caller-owned closure for the pool channel.
-    ///
-    /// # Safety
-    ///
-    /// The closure must outlive every submission of this `BorrowedJob`,
-    /// and the caller must serialise submissions with `pool.barrier()`
-    /// so the worker thread is not invoking it concurrently with the
-    /// caller's own access.
-    #[allow(unsafe_code)]
-    pub(crate) const unsafe fn new(ptr: *mut (dyn FnMut() + Send)) -> Self {
-        Self(ptr)
-    }
-}
-
-// SAFETY: see [`BorrowedJob`] doc comment.
-#[allow(unsafe_code)]
-unsafe impl Send for BorrowedJob {}
 
 /// Shared progress tracker — counts jobs submitted vs completed, used for
 /// `barrier()`.
@@ -231,7 +199,6 @@ enum PoolMode {
 // Each Arc is an owned clone given to the spawned thread; pass-by-value
 // is intentional — the thread takes ownership of its share.
 #[allow(clippy::needless_pass_by_value)]
-#[allow(unsafe_code)]
 fn run_worker(
     rx: Receiver<Job>,
     tracker: Arc<Tracker>,
@@ -244,11 +211,16 @@ fn run_worker(
                 guard_or_fatal(&fatal, FatalSite::PoolWorker, f);
                 tracker.complete();
             }
-            Ok(Job::Borrowed(b)) => {
-                // SAFETY: see BorrowedJob — caller's barrier() pairs with
-                // this invocation to ensure exclusive access.
-                guard_or_fatal(&fatal, FatalSite::PoolWorker, || unsafe {
-                    (*b.0)();
+            Ok(Job::Shared(cell)) => {
+                guard_or_fatal(&fatal, FatalSite::PoolWorker, || {
+                    // Invariant: ExclusiveCell::try_with returns None if the
+                    // cell is busy (concurrent or re-entrant access). This is
+                    // an internal invariant breach (graph in-degree sequencing
+                    // should prevent it), so treat None as fatal.
+                    #[allow(clippy::expect_used)]
+                    // Invariant: in-degree discipline ensures try_with succeeds
+                    cell.try_with(|f| f())
+                        .expect("ExclusiveCell busy: graph in-degree invariant breach");
                 });
                 tracker.complete();
             }
@@ -362,26 +334,27 @@ impl Pool {
         }
     }
 
-    /// Submit a job whose closure is owned by the caller and remains valid
-    /// across submissions. Performs **no heap allocation** per call (the
-    /// closure was allocated once when the caller built it). Required by
-    /// `REQ_0060`.
+    /// Submit a job whose closure is shared via `Arc<ExclusiveCell<...>>`.
+    /// Performs **no heap allocation** per call (the Arc is cloned, refcount
+    /// only). Required by `REQ_0060`.
     ///
-    /// # Safety
-    ///
-    /// See [`BorrowedJob::new`] — caller must hold exclusive access to the
-    /// closure between submissions and pair every submit with `barrier()`
-    /// before the closure could be touched again.
+    /// The closure is invoked via `ExclusiveCell::try_with`; a `None` result
+    /// (cell busy) is treated as a fatal invariant breach (the graph's
+    /// in-degree sequencing should prevent concurrent access to the same
+    /// closure).
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[track_caller]
-    #[allow(unsafe_code)]
-    pub(crate) unsafe fn submit_borrowed(&self, job: BorrowedJob) {
+    pub(crate) fn submit_shared(&self, job: &std::sync::Arc<ExclusiveCell<dyn FnMut() + Send>>) {
         self.tracker.submit();
         match &self.mode {
             PoolMode::Inline => {
-                // SAFETY: caller invariant.
-                guard_or_fatal(&self.fatal, FatalSite::InlineSubmit, || unsafe {
-                    (*job.0)();
+                guard_or_fatal(&self.fatal, FatalSite::InlineSubmit, || {
+                    // Invariant: ExclusiveCell busy is a graph sequencing
+                    // invariant breach; fail-fast.
+                    #[allow(clippy::expect_used)]
+                    // Invariant: in-degree discipline ensures try_with succeeds
+                    job.try_with(|f| f())
+                        .expect("ExclusiveCell busy in inline mode");
                 });
                 self.tracker.complete();
             }
@@ -389,7 +362,8 @@ impl Pool {
                 // fail-fast: pool channel only closes in Pool::drop, which
                 // cannot run concurrently with dispatch
                 #[allow(clippy::expect_used)]
-                tx.send(Job::Borrowed(job)).expect("pool channel closed");
+                tx.send(Job::Shared(std::sync::Arc::clone(job)))
+                    .expect("pool channel closed");
             }
         }
     }

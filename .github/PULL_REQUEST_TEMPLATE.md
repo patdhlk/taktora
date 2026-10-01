@@ -11,6 +11,7 @@ Closes #<!-- issue number -->
 ## Crates touched
 
 - [ ] taktora-executor
+- [ ] taktora-executor-sys
 - [ ] taktora-executor-tracing
 - [ ] taktora-connector-core
 - [ ] taktora-connector-host

@@ -34,8 +34,9 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use taktora_stats::ExecutorCycleStats;
-
+use taktora_executor_sys::dispatch::ExclusiveCell;
+use taktora_executor_sys::ports::SendListener;
+pub(crate) use taktora_stats::ExecutorCycleStats;
 /// Monotonically increasing counter so multiple executors in the same process
 /// each get a unique stop-event service name.
 static EXEC_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -67,14 +68,14 @@ pub(crate) struct TaskEntry {
     pub(crate) kind: TaskKind,
     /// Trigger declarations recorded at `add` time.
     pub(crate) decls: Vec<TriggerDecl>,
-    /// Pre-allocated dispatch closure. Built once at `add` / `add_chain`
-    /// time and re-invoked on every dispatch iteration via
-    /// `Pool::submit_borrowed`, avoiding the per-iteration `Box::new(closure)`
-    /// that `Pool::submit<F>` requires in threaded mode. Required for
-    /// `REQ_0060` (zero-alloc steady-state dispatch). `None` for
-    /// `TaskKind::Graph`, which dispatches its vertices via a separate
-    /// path and is handled by `REQ_0062` / `REQ_0063` follow-on work.
-    pub(crate) job: Option<Box<dyn FnMut() + Send + 'static>>,
+    /// Pre-allocated dispatch closure wrapped in `Arc<ExclusiveCell<...>>` for
+    /// shared access between the `TaskEntry` and `Pool::submit_shared`. Built
+    /// once at `add` / `add_chain` time and re-invoked on every dispatch
+    /// iteration, avoiding the per-iteration `Box::new(closure)` that
+    /// `Pool::submit<F>` requires in threaded mode. Required for `REQ_0060`
+    /// (zero-alloc steady-state dispatch). `None` for `TaskKind::Graph`, which
+    /// dispatches its vertices via a separate path.
+    pub(crate) job: Option<Arc<ExclusiveCell<dyn FnMut() + Send>>>,
 
     /// Per-task budget declared via `TriggerDeclarer::budget`. `None`
     /// means no per-task check; the executor-wide iteration budget
@@ -94,10 +95,10 @@ pub(crate) struct TaskEntry {
     /// `Arc::clone`. `REQ_0102`.
     pub(crate) overrun_count: Arc<AtomicU64>,
 
-    /// Pre-built dispatch closure for the fault-handler item. Mirrors
-    /// `job`. `None` means no handler — the task is simply skipped
-    /// during fault. `REQ_0072`.
-    pub(crate) handler_job: Option<Box<dyn FnMut() + Send + 'static>>,
+    /// Pre-built dispatch closure for the fault-handler item, wrapped in
+    /// `Arc<ExclusiveCell<...>>`. Mirrors `job`. `None` means no handler —
+    /// the task is simply skipped during fault. `REQ_0072`.
+    pub(crate) handler_job: Option<Arc<ExclusiveCell<dyn FnMut() + Send>>>,
 
     /// Declared scan period for cyclic tasks (the `TriggerDecl::Interval`
     /// duration), or `None` for event-driven tasks. Cached at add time so the
@@ -178,7 +179,11 @@ pub struct Executor {
     /// Listener for the internal stop event service. Held here so it outlives
     /// the `WaitSet` guard inside `dispatch_loop`. Created at `build()` time so
     /// any `Stoppable` clone (taken before or after `run()`) carries the waker.
-    pub(crate) stop_listener: Arc<IxListener<ipc::Service>>,
+    ///
+    /// Wrapped in [`SendListener`] (the audited `Send` boundary in
+    /// `taktora-executor-sys`) so `Executor` stays auto-`Send` without any
+    /// `unsafe impl` in this crate.
+    pub(crate) stop_listener: SendListener,
     /// Lifecycle observer. Defaults to a no-op.
     pub(crate) observer: Arc<dyn Observer>,
     /// Execution monitor. Defaults to a no-op.
@@ -261,14 +266,6 @@ struct HeartbeatState {
     /// Running sequence counter. Starts at 0, incremented before each tick.
     seq: u64,
 }
-
-// SAFETY: `IxListener<ipc::Service>` is `!Send` for the same Rc-based
-// `SingleThreaded` reason as `IxNotifier`. After construction, the only
-// per-iteration call is `listener.try_wait_one()`, which does not mutate the
-// Rc. `Executor` is never shared across threads (it requires `&mut self` for
-// `run()`), so there is no aliased concurrent mutation.
-#[allow(unsafe_code, clippy::non_send_fields_in_send_ty)]
-unsafe impl Send for Executor {}
 
 impl Executor {
     /// Start a new builder.
@@ -360,18 +357,11 @@ impl Executor {
             }
         }
 
-        let mut item_box: Box<dyn ExecutableItem> = Box::new(item);
-        let app_id = item_box.app_id();
-        let app_inst = item_box.app_instance_id();
-        // SAFETY: the raw pointer points into the heap allocation of
-        // `item_box`. `Box` keeps that allocation at a stable address even
-        // when the `Box` itself is moved (e.g. when `self.tasks` grows),
-        // so the pointer remains valid for the lifetime of the
-        // `TaskEntry`. See SendItemPtr safety doc for the rest of the
-        // discipline (barrier() pairs with worker access).
-        #[allow(unsafe_code)]
-        let item_ptr =
-            SendItemPtr::new(std::ptr::from_mut::<dyn ExecutableItem>(item_box.as_mut()));
+        // Read the app identity before the item is shared, so no fallible
+        // cell access is needed on this path.
+        let app_id = item.app_id();
+        let app_inst = item.app_instance_id();
+        let item_cell = Arc::new(ExclusiveCell::new(Box::new(item) as Box<dyn ExecutableItem>));
 
         // Allocate the per-task atomics now so the dispatch closure
         // and the `TaskEntry` share the same `Arc` storage. The task
@@ -405,7 +395,7 @@ impl Executor {
             Arc::clone(&self.iter_err),
             app_id,
             app_inst,
-            item_ptr,
+            Arc::clone(&item_cell),
             fault_ctx,
             Arc::clone(&last_took_ns),
             Arc::clone(&self.clock),
@@ -413,7 +403,7 @@ impl Executor {
 
         self.tasks.push(TaskEntry {
             id: id.clone(),
-            kind: TaskKind::Single(item_box),
+            kind: TaskKind::Single(item_cell),
             decls,
             job: Some(job),
             budget,
@@ -476,6 +466,7 @@ impl Executor {
 
         let app_id = handler_box.app_id();
         let app_inst = handler_box.app_instance_id();
+        let handler_cell = Arc::new(ExclusiveCell::new(handler_box));
 
         // Locate the task we just added so we can share its per-task
         // atomics with the handler's `FaultDispatchCtx`. The handler
@@ -511,7 +502,7 @@ impl Executor {
             Arc::clone(&self.iter_err),
             app_id,
             app_inst,
-            handler_box,
+            handler_cell,
             handler_fault_ctx,
         );
 
@@ -712,23 +703,7 @@ impl Executor {
             }
         }
 
-        let mut items = items;
-        // SAFETY: pointer into the chain's `items` Vec. The Vec lives
-        // inside `TaskKind::Chain` inside `TaskEntry`. The Vec's buffer
-        // is stable once `add_chain` returns — `self.tasks` may grow
-        // (moving the `Vec<Box<...>>` header itself), but the Vec's
-        // heap buffer is referenced via the header's data pointer and
-        // is unaffected by header moves. We never resize the chain Vec
-        // after this point. See SendChainPtr safety doc for the rest.
-        #[allow(unsafe_code)]
-        let chain_ptr = SendChainPtr::new(std::ptr::from_mut::<Vec<Box<dyn ExecutableItem>>>(
-            &mut items,
-        ));
-        // NB: the pointer above is to the local `items` Vec on the
-        // stack — it's invalid after the `push` below moves items into
-        // the TaskEntry. We rederive a stable pointer after the push.
-        // (See the rebuild step below.)
-        let _ = chain_ptr;
+        let chain_cell = Arc::new(ExclusiveCell::new(items));
 
         // Pre-allocate the per-task atomics so the chain's dispatch
         // closure can capture clones of the same `Arc`s the `TaskEntry`
@@ -740,51 +715,10 @@ impl Executor {
         #[allow(clippy::cast_possible_truncation)]
         let task_idx_u32 = self.tasks.len() as u32;
 
-        self.tasks.push(TaskEntry {
-            id: id.clone(),
-            kind: TaskKind::Chain(items),
-            decls,
-            job: None, // populated in the rebuild step below
-            // TODO(post-Task-10): chain budgets carried separately; for now None.
-            budget: None,
-            fault: Arc::clone(&task_fault),
-            overrun_count: Arc::clone(&overrun_count),
-            handler_job: None,
-            scan_period,
-            last_took_ns: Arc::clone(&last_took_ns),
-            last_dispatch: None,
-            grid_slot: 0,
-            grid_epoch: None,
-            pending_skipped: 0,
-            pending_late: None,
-            pending_cycle: None,
-        });
-        self.cycle_stats
-            .push(TaskCycleStats::new(self.stats_window));
-
-        // After the push, the TaskEntry lives at a stable position in
-        // `self.tasks` for the duration of this `add_chain_with_id_boxed`
-        // call. Take a stable pointer to its chain Vec and build the
-        // dispatch closure. If `self.tasks` later grows, the Vec header
-        // inside the TaskEntry moves but the header's data pointer
-        // (which addresses the chain's heap buffer) does not — and the
-        // closure derefs that pointer per dispatch, so it re-reads the
-        // current heap address each time. Sound under the same
-        // discipline as `tasks_ptr` in dispatch_loop.
-        let task_idx = self.tasks.len() - 1;
-        let chain_vec_ptr: *mut Vec<Box<dyn ExecutableItem>> = match &mut self.tasks[task_idx].kind
-        {
-            TaskKind::Chain(v) => std::ptr::from_mut::<Vec<Box<dyn ExecutableItem>>>(v),
-            // The push above used TaskKind::Chain, so this arm is
-            // unreachable. Mark it explicitly to satisfy `match`.
-            _ => unreachable!("just-pushed task is TaskKind::Chain"),
-        };
-        #[allow(unsafe_code)]
-        let chain_ptr = SendChainPtr::new(chain_vec_ptr);
         let fault_ctx = FaultDispatchCtx {
             task_budget: None, // chain budgets are intentionally None for now
-            task_fault,
-            overrun_count,
+            task_fault: Arc::clone(&task_fault),
+            overrun_count: Arc::clone(&overrun_count),
             iteration_budget: self.iteration_budget,
             exec_fault: Arc::clone(&self.exec_fault),
             exec_fault_task_idx: Arc::clone(&self.exec_fault_task_idx),
@@ -799,12 +733,33 @@ impl Executor {
             Arc::clone(&self.observer),
             Arc::clone(&self.monitor),
             Arc::clone(&self.iter_err),
-            chain_ptr,
+            Arc::clone(&chain_cell),
             fault_ctx,
             Arc::clone(&last_took_ns),
             Arc::clone(&self.clock),
         );
-        self.tasks[task_idx].job = Some(job);
+
+        self.tasks.push(TaskEntry {
+            id: id.clone(),
+            kind: TaskKind::Chain(chain_cell),
+            decls,
+            job: Some(job),
+            budget: None,
+            fault: task_fault,
+            overrun_count,
+            handler_job: None,
+            scan_period,
+            last_took_ns: Arc::clone(&last_took_ns),
+            last_dispatch: None,
+            grid_slot: 0,
+            grid_epoch: None,
+            pending_skipped: 0,
+            pending_late: None,
+            pending_cycle: None,
+        });
+        self.cycle_stats
+            .push(TaskCycleStats::new(self.stats_window));
+
         Ok(id)
     }
 
@@ -1131,14 +1086,14 @@ impl ExecutorBuilder {
                 .map_err(ExecutorError::iceoryx2)?,
         );
 
-        // SAFETY: see module-level note; Arc<IxListener> is held here and only
-        // accessed on the executor thread.
-        let stop_listener = Arc::new(
+        // Invariant: the listener is only polled from the executor thread; the
+        // `SendListener` wrapper documents the `Send` rationale.
+        let stop_listener = SendListener::new(Arc::new(
             stop_event
                 .listener_builder()
                 .create()
                 .map_err(ExecutorError::iceoryx2)?,
-        );
+        ));
 
         // Wire the notifier into the Stoppable so every clone is waker-aware
         // from the moment the executor is built.
@@ -1282,47 +1237,57 @@ enum RunMode<'a> {
     Predicate(&'a mut dyn FnMut() -> bool),
 }
 
+/// Bound `timeout` by the heartbeat deadline so the `WaitSet` wakes in
+/// time to emit the next tick (`TSR_0010`). Returns `timeout` unchanged
+/// when no heartbeat is configured. Alloc-free. A free function over
+/// disjoint field borrows so `dispatch_loop` can call it while the task
+/// table is borrowed `&mut`.
+#[inline]
+fn heartbeat_bounded_timeout(
+    heartbeat_state: Option<&HeartbeatState>,
+    cyclic_clock: &Arc<dyn crate::CyclicClock>,
+    timeout: Duration,
+) -> Duration {
+    let Some(hb_state) = heartbeat_state else {
+        return timeout;
+    };
+    let now_nanos = cyclic_clock.now_nanos();
+    let heartbeat_timeout = if now_nanos >= hb_state.next_due_nanos {
+        Duration::ZERO
+    } else {
+        Duration::from_nanos(hb_state.next_due_nanos - now_nanos)
+    };
+    timeout.min(heartbeat_timeout)
+}
+
+/// Emit a heartbeat tick via [`Observer::on_heartbeat`] when
+/// `now_nanos` has reached the next deadline, then advance the deadline
+/// by one period (catching up without an unbounded burst). Alloc-free:
+/// [`crate::heartbeat::HeartbeatTick`] is `Copy` on the stack.
+#[inline]
+fn emit_heartbeat_if_due(
+    heartbeat_state: Option<&mut HeartbeatState>,
+    observer: &Arc<dyn Observer>,
+    now_nanos: u64,
+) {
+    let Some(hb_state) = heartbeat_state else {
+        return;
+    };
+    if now_nanos < hb_state.next_due_nanos {
+        return;
+    }
+    hb_state.seq = hb_state.seq.wrapping_add(1);
+    let tick = crate::heartbeat::HeartbeatTick {
+        seq: hb_state.seq,
+        at_nanos: now_nanos,
+    };
+    observer.on_heartbeat(&tick);
+    hb_state.next_due_nanos = hb_state
+        .next_due_nanos
+        .saturating_add(hb_state.period_nanos);
+}
+
 impl Executor {
-    /// Bound `timeout` by the heartbeat deadline so the `WaitSet` wakes in
-    /// time to emit the next tick (`TSR_0010`). Returns `timeout` unchanged
-    /// when no heartbeat is configured. Alloc-free.
-    #[inline]
-    fn heartbeat_bounded_timeout(&self, timeout: Duration) -> Duration {
-        let Some(hb_state) = self.heartbeat_state.as_ref() else {
-            return timeout;
-        };
-        let now_nanos = self.cyclic_clock.now_nanos();
-        let heartbeat_timeout = if now_nanos >= hb_state.next_due_nanos {
-            Duration::ZERO
-        } else {
-            Duration::from_nanos(hb_state.next_due_nanos - now_nanos)
-        };
-        timeout.min(heartbeat_timeout)
-    }
-
-    /// Emit a heartbeat tick via [`Observer::on_heartbeat`] when
-    /// `now_nanos` has reached the next deadline, then advance the deadline
-    /// by one period (catching up without an unbounded burst). Alloc-free:
-    /// [`crate::heartbeat::HeartbeatTick`] is `Copy` on the stack.
-    #[inline]
-    fn emit_heartbeat_if_due(&mut self, now_nanos: u64) {
-        let Some(hb_state) = self.heartbeat_state.as_mut() else {
-            return;
-        };
-        if now_nanos < hb_state.next_due_nanos {
-            return;
-        }
-        hb_state.seq = hb_state.seq.wrapping_add(1);
-        let tick = crate::heartbeat::HeartbeatTick {
-            seq: hb_state.seq,
-            at_nanos: now_nanos,
-        };
-        self.observer.on_heartbeat(&tick);
-        hb_state.next_due_nanos = hb_state
-            .next_due_nanos
-            .saturating_add(hb_state.period_nanos);
-    }
-
     fn run_inner(&mut self, mut mode: RunMode<'_>) -> Result<(), ExecutorError> {
         // NOTE: Once `Stoppable::stop()` has been called, `self.stoppable.is_stopped()`
         // remains true permanently. Calling `run()` again after a stop will return
@@ -1366,12 +1331,7 @@ impl Executor {
     }
 
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    #[allow(
-        unsafe_code,
-        clippy::too_many_lines,
-        clippy::ref_as_ptr,
-        clippy::borrow_as_ptr
-    )]
+    #[allow(clippy::too_many_lines, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
     fn dispatch_loop(&mut self, mode: &mut RunMode<'_>) -> Result<(), ExecutorError> {
         // Clear the per-wake transient tokens on every TaskEntry, once per
         // `run_*` call (O(task_count), alloc-free). `pending_cycle` doubles as
@@ -1405,11 +1365,7 @@ impl Executor {
         // (exotic kernel) would only restore today's behavior, so the
         // return value is deliberately not checked.
         #[cfg(target_os = "linux")]
-        // SAFETY: prctl(PR_SET_TIMERSLACK) only adjusts the calling
-        // thread's timer slack; no memory is involved.
-        unsafe {
-            libc::prctl(libc::PR_SET_TIMERSLACK, 1_000u64, 0, 0, 0);
-        }
+        taktora_executor_sys::os::set_current_thread_timer_slack_ns(1_000);
 
         let waitset: WaitSet<ipc::Service> = WaitSetBuilder::new()
             .create()
@@ -1419,7 +1375,7 @@ impl Executor {
         // guards — the guard borrows the listener via 'attachment lifetime.
         let mut listener_storage: Vec<Arc<crate::trigger::RawListener>> = Vec::new();
         // Guards must outlive the run loop.
-        let mut guards: Vec<WaitSetGuard<'_, '_, ipc::Service>> = Vec::new();
+        let mut guards: Vec<AttachedGuard<'_, '_>> = Vec::new();
         // Maps guard index → task index.
         let mut attachment_to_task: Vec<usize> = Vec::new();
 
@@ -1495,19 +1451,11 @@ impl Executor {
         // so on scope exit it drops FIRST — detaching the fd from the WaitSet's
         // epoll set — and `master_timer` drops SECOND, closing the fd. That
         // ordering is what prevents iceoryx2's `EPOLL_CTL_DEL` from hitting a
-        // closed fd (EBADF). `master_timer`'s fd is referenced ONLY by this guard
-        // (independent of `guards`/`listener_storage`, which own other fds), so
-        // its drop position relative to those Vecs is immaterial.
         #[cfg(target_os = "linux")]
-        #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
         let _master_timer_guard = match &master_timer {
-            // SAFETY: `master_timer` is a stack local that outlives this guard
-            // (declared above it); the cast erases the borrow lifetime to the
-            // attachment lifetime, sound by the same discipline as the stop
-            // listener. Dropped before `master_timer` closes the fd.
             Some(tf) => Some(
                 waitset
-                    .attach_notification(unsafe { &*(tf as *const crate::timerfd::TimerFd) })
+                    .attach_notification(tf)
                     .map_err(ExecutorError::iceoryx2)?,
             ),
             None => None,
@@ -1515,15 +1463,10 @@ impl Executor {
 
         // Attach the internal stop listener so the WaitSet wakes when
         // stop() is called. We hold `self.stop_listener` (Arc) in the Executor
-        // struct which is valid for the lifetime of dispatch_loop. We use the
-        // same raw-pointer-cast pattern as user listeners above.
-        //
-        // SAFETY: `self.stop_listener` is an Arc stored on `self`, which is
-        // exclusively borrowed for the duration of `run_inner` (which calls
-        // `dispatch_loop`). The listener is not freed while the guard is alive
-        // because the Arc keeps it alive and `self` outlives this function.
-        let stop_listener_ref: &IxListener<ipc::Service> =
-            unsafe { &*(self.stop_listener.as_ref() as *const _) };
+        // struct which is valid for the lifetime of dispatch_loop. Since
+        // listener_storage already collected all task listeners, we can attach
+        // this one directly using the Arc's stable reference.
+        let stop_listener_ref = self.stop_listener.get();
         let _stop_guard = waitset
             .attach_notification(stop_listener_ref)
             .map_err(ExecutorError::iceoryx2)?;
@@ -1542,56 +1485,26 @@ impl Executor {
             *iter_err_guard = None;
             drop(iter_err_guard);
 
-            // SAFETY: we capture &mut self.tasks via a raw pointer because
-            // wait_and_process expects FnMut and Rust can't see the closure
-            // outlives `self`. The discipline that makes this sound:
-            //   1. The closure body on the executor thread is the *only* code that
-            //      reads `tasks_ptr`. The pool jobs it submits hold borrowed
-            //      `*mut dyn ExecutableItem` slices into individual TaskEntries,
-            //      not into the Vec itself, so they don't race with the Vec.
-            //   2. The single per-wake `barrier_and_record` in
-            //      `run_grid_cyclic_pass_guarded` (which runs after the callback
-            //      returns, plus the defensive `pool.barrier()` on the
-            //      `break Ok(())` bail paths) ensures every submitted pool job has
-            //      completed (and dropped its raw pointer) before the next wake.
-            //      The next iteration of the `WaitSet` loop is therefore the sole
-            //      user of `tasks_ptr` again.
-            //   3. The Vec is never resized inside this loop (no `push` / `remove`
-            //      after dispatch starts), so the underlying buffer addresses are
-            //      stable for the lifetime of `dispatch_loop`.
-            let tasks_ptr = &mut self.tasks as *mut Vec<TaskEntry>;
-            // Take the cycle_stats raw pointer before borrowing `observer`, so
-            // the &mut borrow is released first — same discipline as tasks_ptr.
-            let cycle_stats_ptr = &mut self.cycle_stats as *mut Vec<TaskCycleStats>;
-            let observer = &self.observer;
-            let pool = &self.pool;
-            // Refcount-only clone of the pre-allocated error slot. Pool jobs
-            // need a `'static` handle, and an `Arc::clone` does not allocate.
-            // The Single/Chain paths use the closure baked into `task.job`,
-            // which already captured stable Arc clones at `add`-time; the
-            // Graph path uses closures pre-built by `prepare_dispatch`. Only
-            // the error-aggregation logic on the WaitSet thread still needs
-            // the slot here.
+            // Destructure self into disjoint field borrows once per loop
+            // iteration: only the task table, cycle stats and heartbeat state
+            // are borrowed `&mut`; everything else is shared, so the stop
+            // listener (already attached to the WaitSet above) and other
+            // fields (`iter_err`, `fatal_dispatch`) stay readable.
+            let Self {
+                ref mut tasks,
+                ref mut cycle_stats,
+                ref observer,
+                ref pool,
+                ref exec_fault,
+                ref start_time,
+                ref clock,
+                ref stop_listener,
+                ref cyclic_clock,
+                ref mut heartbeat_state,
+                ..
+            } = *self;
+
             let iter_err_inner = Arc::clone(&self.iter_err);
-            // Raw pointer to the stop listener for draining inside the callback.
-            // SAFETY: same as stop_listener_ref above — the Arc is alive for
-            // the lifetime of dispatch_loop.
-            let stop_listener_ptr = self.stop_listener.as_ref() as *const IxListener<ipc::Service>;
-            // Raw pointer to the executor-wide fault state. Same safety
-            // discipline as `tasks_ptr`: `Executor` is alive for the
-            // duration of `dispatch_loop`; the WaitSet callback is the
-            // only reader. REQ_0071. `self.exec_fault` is
-            // `Arc<ExecutorFaultAtomic>` — we deref once to obtain a
-            // pointer to the inner `ExecutorFaultAtomic`.
-            let exec_fault_ptr = &*self.exec_fault as *const ExecutorFaultAtomic;
-            // Raw pointer to the executor start time. Used by the lazy
-            // cascade below to compute `since_ms` on task transitions
-            // triggered by an executor-wide fault.
-            let exec_start_ptr = &*self.start_time as *const OnceLock<Instant>;
-            // Telemetry clock. Same lifetime/aliasing discipline as the
-            // pointers above: the Executor outlives the dispatch loop and the
-            // WaitSet callback is the sole reader.
-            let clock = &self.clock;
 
             // Wrap the per-iteration dispatch body in the framework panic
             // boundary. A panic escaping here is *infrastructure* (the WaitSet
@@ -1610,13 +1523,13 @@ impl Executor {
                     let mut pass = DispatchPass {
                         guards: &guards,
                         attachment_to_task: &attachment_to_task,
-                        tasks_ptr,
-                        cycle_stats_ptr,
+                        tasks,
+                        cycle_stats,
                         observer,
-                        exec_fault_ptr,
-                        exec_start_ptr,
+                        exec_fault,
+                        exec_start: start_time,
                         clock,
-                        stop_listener_ptr,
+                        stop_listener: stop_listener.get(),
                         pool,
                         iter_err: &iter_err_inner,
                     };
@@ -1628,19 +1541,14 @@ impl Executor {
                     // heartbeat deadline (if configured). The heartbeat MUST fire
                     // at least every period regardless of other trigger activity.
                     #[cfg(target_os = "linux")]
-                    let mut timeout = std::time::Duration::MAX;
+                    let timeout = std::time::Duration::MAX;
                     #[cfg(not(target_os = "linux"))]
-                    let mut timeout = match dispatch_mode {
-                        crate::DispatchMode::Grid => {
-                            grid.next_timeout(self.cyclic_clock.now_nanos())
-                        }
+                    let timeout = match dispatch_mode {
+                        crate::DispatchMode::Grid => grid.next_timeout(cyclic_clock.now_nanos()),
                         crate::DispatchMode::Legacy => std::time::Duration::MAX,
                     };
-
-                    // Heartbeat deadline: fold into timeout so the WaitSet wakes
-                    // in time to emit the tick. Works on both Linux (timerfd path)
-                    // and macOS (self-computed-timeout fallback).
-                    timeout = self.heartbeat_bounded_timeout(timeout);
+                    let timeout =
+                        heartbeat_bounded_timeout(heartbeat_state.as_ref(), cyclic_clock, timeout);
                     waitset.wait_and_process_once_with_timeout(
                         |attachment_id: WaitSetAttachmentId<ipc::Service>| {
                             // `attachment_map` is a standalone local re-borrowed
@@ -1691,13 +1599,13 @@ impl Executor {
             let cpass = DispatchPass {
                 guards: &guards,
                 attachment_to_task: &attachment_to_task,
-                tasks_ptr,
-                cycle_stats_ptr,
+                tasks,
+                cycle_stats,
                 observer,
-                exec_fault_ptr,
-                exec_start_ptr,
+                exec_fault,
+                exec_start: start_time,
                 clock,
-                stop_listener_ptr,
+                stop_listener: stop_listener.get(),
                 pool,
                 iter_err: &iter_err_inner,
             };
@@ -1731,10 +1639,8 @@ impl Executor {
                 break Ok(());
             };
 
-            // Heartbeat tick: emit if now >= next_due, then advance next_due by
-            // period (catching up without unbounded burst). Alloc-free: HeartbeatTick
-            // is Copy on the stack.
-            self.emit_heartbeat_if_due(now_nanos);
+            // Heartbeat tick (TSR_0010): emit if due, then advance the deadline.
+            emit_heartbeat_if_due(heartbeat_state.as_mut(), observer, now_nanos);
 
             // Funnel the post-callback decision (interrupt / item error /
             // stop request / run-mode termination) through one helper that
@@ -1960,13 +1866,20 @@ fn run_grid_cyclic_pass_guarded(
 /// Kept as a free fn (sibling of `attach_trigger_decl`) so both the map's
 /// fallback and any direct caller share one definition.
 fn linear_scan(
-    guards: &[WaitSetGuard<'_, '_, ipc::Service>],
+    guards: &[AttachedGuard<'_, '_>],
     attachment_to_task: &[usize],
     id: &WaitSetAttachmentId<ipc::Service>,
 ) -> usize {
     let mut found = crate::attachment_map::IGNORE;
     for i in 0..guards.len() {
-        if id.has_event_from(&guards[i]) || id.has_missed_deadline(&guards[i]) {
+        // The arms bind guards of different types (`'s` vs `'static`
+        // attachment lifetime), so they cannot be merged into one pattern.
+        #[allow(clippy::match_same_arms)]
+        let matches = match &guards[i] {
+            AttachedGuard::Listener(g) => id.has_event_from(g) || id.has_missed_deadline(g),
+            AttachedGuard::Interval(g) => id.has_event_from(g) || id.has_missed_deadline(g),
+        };
+        if matches {
             // Debug: keep scanning to assert no second guard matches.
             // Release: first match is exact (uniqueness invariant), stop early.
             //
@@ -1989,120 +1902,154 @@ fn linear_scan(
     found
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_attachments<'w>(
-    waitset: &'w WaitSet<ipc::Service>,
+/// Pass 1 of `WaitSet` attachment: copies every listener-backed decl's listener
+/// into `listener_storage` (so pass 2 can borrow a complete, never-again-mutated
+/// storage) and, in grid mode, records the cyclic tasks and their periods.
+fn collect_trigger_listeners(
     tasks: &[TaskEntry],
     dispatch_mode: crate::DispatchMode,
     listener_storage: &mut Vec<Arc<crate::trigger::RawListener>>,
-    guards: &mut Vec<WaitSetGuard<'w, 'static, ipc::Service>>,
+    cyclic_task_indices: &mut Vec<usize>,
+    cyclic_periods: &mut Vec<u64>,
+) {
+    for (task_idx, task) in tasks.iter().enumerate() {
+        for decl in &task.decls {
+            match decl {
+                TriggerDecl::Interval(d) if dispatch_mode == crate::DispatchMode::Grid => {
+                    cyclic_task_indices.push(task_idx);
+                    cyclic_periods.push(u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
+                }
+                TriggerDecl::Subscriber { listener }
+                | TriggerDecl::RawListener(listener)
+                | TriggerDecl::Deadline { listener, .. } => {
+                    listener_storage.push(listener.clone_inner());
+                }
+                TriggerDecl::Interval(_) => {}
+            }
+        }
+    }
+}
+
+/// Attaches one decl to the `WaitSet`. Listener-backed decls borrow the next
+/// listener from the (complete, immutable) `listener_storage`, in the same
+/// order [`collect_trigger_listeners`] filled it.
+fn attach_decl<'w, 's>(
+    waitset: &'w WaitSet<ipc::Service>,
+    decl: &TriggerDecl,
+    listener_storage: &'s [Arc<crate::trigger::RawListener>],
+    listener_idx: &mut usize,
+) -> Result<AttachedGuard<'w, 's>, ExecutorError> {
+    let mut next_listener = || {
+        let l = listener_storage
+            .get(*listener_idx)
+            .ok_or_else(|| ExecutorError::DeclareTriggers("listener index out of bounds".into()));
+        *listener_idx += 1;
+        l.map(|arc| &**arc)
+    };
+    let guard = match decl {
+        TriggerDecl::Subscriber { .. } | TriggerDecl::RawListener(_) => AttachedGuard::Listener(
+            waitset
+                .attach_notification(next_listener()?)
+                .map_err(ExecutorError::iceoryx2)?,
+        ),
+        TriggerDecl::Interval(d) => AttachedGuard::Interval(
+            waitset
+                .attach_interval(*d)
+                .map_err(ExecutorError::iceoryx2)?,
+        ),
+        TriggerDecl::Deadline { deadline, .. } => AttachedGuard::Listener(
+            waitset
+                .attach_deadline(next_listener()?, *deadline)
+                .map_err(ExecutorError::iceoryx2)?,
+        ),
+    };
+    Ok(guard)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_attachments<'w, 's>(
+    waitset: &'w WaitSet<ipc::Service>,
+    tasks: &[TaskEntry],
+    dispatch_mode: crate::DispatchMode,
+    listener_storage: &'s mut Vec<Arc<crate::trigger::RawListener>>,
+    guards: &mut Vec<AttachedGuard<'w, 's>>,
     attachment_to_task: &mut Vec<usize>,
     cyclic_task_indices: &mut Vec<usize>,
     cyclic_periods: &mut Vec<u64>,
 ) -> Result<usize, ExecutorError> {
-    // Number of `Deadline` decls actually ATTACHED as guards (Grid-mode
-    // `Interval` decls are diverted to the cyclic vecs and never counted).
-    // Consumed by `AttachmentMap::build` (#94), which sizes its lazy-learned
-    // deadline-id bucket from this exact count.
+    // Pass 1: fill the listener storage completely before anything borrows it.
+    collect_trigger_listeners(
+        tasks,
+        dispatch_mode,
+        listener_storage,
+        cyclic_task_indices,
+        cyclic_periods,
+    );
+    // Pass 2: attach every decl, borrowing the now-immutable storage for 's.
+    let listener_storage: &'s [Arc<crate::trigger::RawListener>] = listener_storage;
+    let mut listener_idx = 0usize;
     let mut deadline_count = 0usize;
     for (task_idx, task) in tasks.iter().enumerate() {
         for decl in &task.decls {
-            if dispatch_mode == crate::DispatchMode::Grid {
-                if let TriggerDecl::Interval(d) = decl {
-                    // Grid mode owns cyclic timing via the master timer + GridTimer;
-                    // these decls are NOT attached as individual WaitSet triggers.
-                    cyclic_task_indices.push(task_idx);
-                    cyclic_periods.push(u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
-                    continue;
-                }
+            if dispatch_mode == crate::DispatchMode::Grid
+                && matches!(decl, TriggerDecl::Interval(_))
+            {
+                continue;
             }
-            // Count `Deadline` only on the path where it is actually attached
-            // (after the Grid-`Interval` `continue`), so the tally matches the
-            // guards pushed below one-for-one.
             if matches!(decl, TriggerDecl::Deadline { .. }) {
                 deadline_count += 1;
             }
-            let guard = attach_trigger_decl(waitset, listener_storage, decl)?;
-            guards.push(guard);
+            guards.push(attach_decl(
+                waitset,
+                decl,
+                listener_storage,
+                &mut listener_idx,
+            )?);
             attachment_to_task.push(task_idx);
         }
     }
     Ok(deadline_count)
 }
 
-/// Attaches a single [`TriggerDecl`] to `waitset`, returning the resulting
-/// guard.
+/// Wrapper for `WaitSet` guards with different attachment lifetimes.
 ///
-/// Listener-backed declarations (`Subscriber`, `Deadline`, `RawListener`)
-/// clone the listener `Arc` into `listener_storage` to extend its lifetime to
-/// the surrounding `dispatch_loop` scope; `Interval` attaches a bare timer.
-///
-/// # Safety
-///
-/// The returned guard borrows the listener via a raw-pointer cast that erases
-/// its lifetime. Soundness relies on the caller keeping `listener_storage` (and
-/// `waitset`) alive for at least as long as the guard, and dropping the guards
-/// before `listener_storage` — exactly the discipline `dispatch_loop` follows.
-#[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
-fn attach_trigger_decl<'w>(
-    waitset: &'w WaitSet<ipc::Service>,
-    listener_storage: &mut Vec<Arc<crate::trigger::RawListener>>,
-    decl: &TriggerDecl,
-) -> Result<WaitSetGuard<'w, 'static, ipc::Service>, ExecutorError> {
-    // Clone the listener Arc and obtain a lifetime-erased reference. SAFETY:
-    // both `listener_storage` and `waitset` are stack-local in `dispatch_loop`
-    // and dropped together at its end; guards are dropped before
-    // `listener_storage`. The reference is fabricated as `'static` so the
-    // 'attachment lifetime matches `WaitSet::attach_interval` (which yields a
-    // `'static` attachment on iceoryx2 0.9), letting all three arms below unify
-    // under `WaitSetGuard`'s invariance. `'static` is the maximal fabricated
-    // lifetime; runtime soundness still rests solely on the drop-order discipline
-    // documented above, not on the borrow.
-    let mut listener_ref = |listener: &Arc<crate::trigger::RawListener>| {
-        listener_storage.push(Arc::clone(listener));
-        let l_ref = listener_storage.last().unwrap().as_ref();
-        let l_ref: &'static crate::trigger::RawListener = unsafe { &*(l_ref as *const _) };
-        l_ref
-    };
-
-    let guard = match decl {
-        TriggerDecl::Subscriber { listener } | TriggerDecl::RawListener(listener) => {
-            waitset.attach_notification(listener_ref(listener))
-        }
-        TriggerDecl::Interval(d) => waitset.attach_interval(*d),
-        TriggerDecl::Deadline { listener, deadline } => {
-            waitset.attach_deadline(listener_ref(listener), *deadline)
-        }
-    };
-    guard.map_err(ExecutorError::iceoryx2)
+/// `attach_interval` yields `WaitSetGuard<'_, 'static, _>` while listener-backed
+/// attachments yield `WaitSetGuard<'_, 's, _>` where `'s` is the listener's
+/// lifetime. `WaitSetGuard` is invariant in its `'attachment` parameter, so the
+/// two cannot unify in a `Vec<WaitSetGuard<'w, 's, _>>`. This enum wraps both
+/// variants, letting `build_attachments` return a homogeneous `Vec` that
+/// `DispatchPass` and `AttachmentMap` can work with.
+pub(crate) enum AttachedGuard<'w, 's> {
+    Listener(WaitSetGuard<'w, 's, ipc::Service>),
+    Interval(WaitSetGuard<'w, 'static, ipc::Service>),
 }
 
 /// Per-iteration dispatch context handed to the `WaitSet` callback.
 ///
 /// `dispatch_loop` rebuilds one of these every iteration and the `WaitSet`
 /// callback is a thin adapter over [`DispatchPass::process_attachment`]. All
-/// fields are short-lived borrows / raw pointers into the `Executor` that owns
-/// the surrounding `dispatch_loop`; their soundness is documented at each use
-/// site in `dispatch_loop` (same single-threaded, barrier-bounded discipline).
+/// fields are short-lived borrows into the `Executor` that owns the surrounding
+/// `dispatch_loop`; their soundness relies on single-threaded, barrier-bounded
+/// dispatch discipline.
 struct DispatchPass<'a, 'g, 'w> {
     /// `WaitSet` guards, indexed in parallel with `attachment_to_task`.
-    guards: &'a [WaitSetGuard<'g, 'w, ipc::Service>],
-    /// Maps guard index to task index in `tasks_ptr`.
+    guards: &'a [AttachedGuard<'g, 'w>],
+    /// Maps guard index to task index in `tasks`.
     attachment_to_task: &'a [usize],
-    /// Raw pointer to `Executor::tasks`.
-    tasks_ptr: *mut Vec<TaskEntry>,
-    /// Raw pointer to `Executor::cycle_stats` (index-aligned with `tasks`).
-    cycle_stats_ptr: *mut Vec<TaskCycleStats>,
+    /// Mutable borrow of the executor's task table.
+    tasks: &'a mut Vec<TaskEntry>,
+    /// Mutable borrow of cycle stats (index-aligned with `tasks`).
+    cycle_stats: &'a mut Vec<TaskCycleStats>,
     /// Borrow of the executor's observer for the `on_cycle_stats` push.
     observer: &'a Arc<dyn Observer>,
-    /// Raw pointer to `Executor::exec_fault` inner state.
-    exec_fault_ptr: *const ExecutorFaultAtomic,
-    /// Raw pointer to `Executor::start_time`.
-    exec_start_ptr: *const OnceLock<Instant>,
+    /// Borrow of the executor-wide fault state.
+    exec_fault: &'a ExecutorFaultAtomic,
+    /// Borrow of the executor start time.
+    exec_start: &'a OnceLock<Instant>,
     /// Borrow of the executor's telemetry clock, read for each cycle's `pre`.
     clock: &'a Arc<dyn MonotonicClock>,
-    /// Raw pointer to the internal stop listener.
-    stop_listener_ptr: *const IxListener<ipc::Service>,
+    /// Borrow of the internal stop listener.
+    stop_listener: &'a IxListener<ipc::Service>,
     /// Borrow of the executor thread pool.
     pool: &'a Pool,
     /// Refcount-only handle to the per-iteration error slot.
@@ -2125,11 +2072,10 @@ impl DispatchPass<'_, '_, '_> {
     /// `grid_slot += 1 + skipped` (`REQ_0106` / `ADR_0101`). Only this
     /// discrete count crosses the scheduler→telemetry boundary; timestamps
     /// stay on the telemetry clock (`REQ_0268`).
-    #[allow(unsafe_code)]
     fn dispatch_cyclic(&mut self, task_idx: usize, skipped: u64, late_by: u64) {
         // SAFETY: same single-writer WaitSet-thread discipline as
         // dispatch_task; the pointer is valid for the duration of this call.
-        let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
+        let task = &mut self.tasks[task_idx];
         // Post-validate_decls one-interval-per-task (#93), this fires at most
         // once per task per grid pass — so these pending_skipped/pending_late
         // writes cannot be clobbered by a same-phase re-entry, and the
@@ -2141,65 +2087,25 @@ impl DispatchPass<'_, '_, '_> {
     }
 
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    #[allow(unsafe_code)]
     fn dispatch_task(&mut self, task_idx: usize) {
-        // SAFETY: we are the only thread that may touch the task table
-        // during the callback. wait_and_process_once is single-threaded
-        // and dispatch_loop holds &mut self. The pointer is valid for the
-        // duration of this call.
-        let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
-
-        // Per-phase dispatch dedup (REQ_0854, #93). `pending_cycle` is set at
-        // dispatch and `take`n only by `barrier_and_record`. Still `Some` ⇒ this
-        // task was already dispatched this wake-phase with no intervening
-        // barrier; re-submitting the borrowed job (main item OR fault handler)
-        // would alias one `*mut dyn FnMut` across two pool workers. Skip — the
-        // first run's listener `take()` loop drains all pending input. This is
-        // the structural backstop that makes the grid path (one barrier after
-        // the whole due-loop) and the future batched-barrier slice sound by
-        // construction.
+        // Disjoint field borrows: the task table is borrowed `&mut` while the
+        // shared executor state (fault atomic, start time, pool, error slot,
+        // clock) is borrowed `&` — no aliasing, no raw pointer.
+        let task = &mut self.tasks[task_idx];
+        // Per-phase dispatch dedup (REQ_0854, #93): still `Some` ⇒ this task
+        // was already dispatched this phase and has not been barriered yet.
         if task.pending_cycle.is_some() {
             return;
         }
-
-        // Pre-dispatch fault check (REQ_0070, REQ_0071, REQ_0072). When it
-        // routes to a (possible) handler, normal dispatch is skipped.
-        if self.handle_fault_routing(task) {
-            // REQ_0107: a faulted/fault-routed scan STILL advances
-            // cycle_index and emits on_cycle_stats, or the executor's count
-            // desyncs from the connector's join key (FEAT_0038). took/jitter
-            // are None (poison-safe); the index always moves. Allocation-free:
-            // a CyclePending { Instant, bool } written onto the TaskEntry,
-            // no heap.
-            //
-            // Set unconditionally (REQ_0854, #93): `pending_cycle` doubles as
-            // the per-phase dedup token for ALL task kinds, so it must cover the
-            // borrowed fault-handler submit too, not just cyclic tasks. Setting
-            // it for an event task is telemetry-neutral — `record_cycle_for`
-            // opens with `let Some(period) = task.scan_period else { return }`,
-            // before any state mutation, so an event task's token produces zero
-            // telemetry side effects (and REQ_0107's cyclic-faulted-scan cycle
-            // advance is unaffected).
-            task.pending_cycle = Some(CyclePending {
-                pre: self.clock.now_nanos(),
-                faulted: true,
-            });
-            return;
-        }
-
-        // Stash the pre-dispatch instant so the post-barrier record pass
-        // can fold this cycle's telemetry. Allocation-free: the timestamp
-        // lives on the TaskEntry, not in a per-wakeup Vec. `take`n in the
-        // post-barrier loop below — guarantees exactly-once even if two
-        // guards map to the same task. `faulted: false`: a task that faulted
-        // last wakeup and recovered this one records the normal path (the
-        // whole CyclePending is overwritten, so the flag can't be stale).
+        let routed_to_handler =
+            handle_fault_routing(self.exec_fault, self.exec_start, self.pool, task);
         task.pending_cycle = Some(CyclePending {
             pre: self.clock.now_nanos(),
-            faulted: false,
+            faulted: routed_to_handler,
         });
-
-        self.submit_task_job(task);
+        if !routed_to_handler {
+            submit_task_job(self.pool, self.iter_err, task);
+        }
     }
 
     /// Handles a single `WaitSet` wakeup: drains stop notifications, then
@@ -2226,7 +2132,6 @@ impl DispatchPass<'_, '_, '_> {
     /// match. Wake-only attachments (stop listener, master timer) resolve to
     /// [`crate::attachment_map::IGNORE`] and dispatch nothing.
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    #[allow(unsafe_code)]
     fn process_attachment(
         &mut self,
         attachment_id: &WaitSetAttachmentId<ipc::Service>,
@@ -2234,9 +2139,9 @@ impl DispatchPass<'_, '_, '_> {
     ) -> CallbackProgression {
         // Drain stop notifications first (no dispatch — the stop_flag check
         // after the callback returns handles termination).
-        // SAFETY: stop_listener_ptr is valid for the duration of the call;
-        // the Arc in self.stop_listener keeps it alive.
-        let stop_l = unsafe { &*self.stop_listener_ptr };
+        // Invariant: the listener is owned by the Executor driving this
+        // dispatch_loop and outlives this borrow.
+        let stop_l = self.stop_listener;
         while let Ok(Some(_)) = stop_l.try_wait_one() {}
 
         // Resolve the fired id to its task index. `map` caches per-id; the
@@ -2265,7 +2170,6 @@ impl DispatchPass<'_, '_, '_> {
     /// (cyclic tasks, `REQ_0268`). Keyed on `pending_cycle` so it records
     /// exactly the tasks dispatched this phase, exactly once.
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    #[allow(unsafe_code)]
     fn barrier_and_record(&mut self) {
         // Wait for all submitted jobs to finish before leaving the callback
         // scope (validates item_ptr safety contract). The barrier also makes
@@ -2284,11 +2188,11 @@ impl DispatchPass<'_, '_, '_> {
         // Allocation-free: iterate task indices in place.
         // SAFETY: same single-writer WaitSet-thread discipline as the dispatch
         // loop above; barrier-bounded, no in-flight pool job aliases `tasks`.
-        let task_count = unsafe { (*self.tasks_ptr).len() };
+        let task_count = self.tasks.len();
         for task_idx in 0..task_count {
             // SAFETY: single-writer WaitSet thread; borrow released before
             // the record_cycle_for call (which re-derefs tasks_ptr).
-            let pending = unsafe { (&mut *self.tasks_ptr)[task_idx].pending_cycle.take() };
+            let pending = self.tasks[task_idx].pending_cycle.take();
             if let Some(CyclePending { pre, faulted }) = pending {
                 self.record_cycle_for(task_idx, faulted, pre);
             }
@@ -2300,10 +2204,9 @@ impl DispatchPass<'_, '_, '_> {
     /// means the scan was skipped/errored: `took`/`jitter`/`lateness` are
     /// unmeasured. Event-driven tasks (no `scan_period`) are skipped entirely
     /// (`REQ_0106`).
-    #[allow(unsafe_code)]
     fn record_cycle_for(&mut self, task_idx: usize, faulted: bool, pre_ns: u64) {
         // SAFETY: single-writer WaitSet thread; same discipline as tasks_ptr.
-        let task = unsafe { &mut (&mut *self.tasks_ptr)[task_idx] };
+        let task = &mut self.tasks[task_idx];
         let Some(period) = task.scan_period else {
             return; // event-driven: no cycle telemetry
         };
@@ -2362,7 +2265,7 @@ impl DispatchPass<'_, '_, '_> {
         let grid_slot = task.grid_slot;
 
         // SAFETY: cycle_stats is index-aligned with tasks; single-writer.
-        let stats = unsafe { &mut (&mut *self.cycle_stats_ptr)[task_idx] };
+        let stats = &mut self.cycle_stats[task_idx];
 
         // Deadline lateness (REQ_0106): signed offset of the actual start
         // (`pre_ns`) from its nominal grid point `grid_epoch + grid_slot *
@@ -2398,193 +2301,103 @@ impl DispatchPass<'_, '_, '_> {
         };
         self.observer.on_cycle_stats(&obs);
     }
+}
 
-    /// Applies the pre-dispatch fault gate for `Single`/`Chain` tasks.
-    ///
-    /// Returns `true` when the task is routed to its fault handler (or
-    /// silently skipped because no handler is registered) and normal dispatch
-    /// must therefore be skipped. Returns `false` when normal dispatch should
-    /// proceed. `Graph` tasks always return `false` — they use their own
-    /// per-vertex scheduling and are out of scope for `FEAT_0018`.
-    #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
-    fn handle_fault_routing(&self, task: &mut TaskEntry) -> bool {
-        if !matches!(task.kind, TaskKind::Single(_) | TaskKind::Chain(_)) {
-            return false;
-        }
+/// Applies the pre-dispatch fault gate for `Single`/`Chain` tasks.
+///
+/// Returns `true` when the task is routed to its fault handler (or
+/// silently skipped because no handler is registered) and normal dispatch
+/// must therefore be skipped. Returns `false` when normal dispatch should
+/// proceed. `Graph` tasks always return `false` — they use their own
+/// per-vertex scheduling and are out of scope for `FEAT_0018`.
+fn handle_fault_routing(
+    exec_fault: &ExecutorFaultAtomic,
+    exec_start: &OnceLock<Instant>,
+    pool: &Pool,
+    task: &TaskEntry,
+) -> bool {
+    if !matches!(task.kind, TaskKind::Single(_) | TaskKind::Chain(_)) {
+        return false;
+    }
 
-        // SAFETY: exec_fault_ptr derefs into the Executor that owns the
-        // surrounding dispatch_loop — alive for this call's lifetime.
-        let exec_faulted = matches!(
-            unsafe { &*self.exec_fault_ptr }.load(0, 0),
-            ExecutorFaultState::Faulted { .. }
+    let exec_faulted = matches!(exec_fault.load(0, 0), ExecutorFaultState::Faulted { .. });
+    let task_budget_ms = task.budget.map_or(0_u32, duration_to_ms_sat);
+    let task_state = task.fault.load(task_budget_ms);
+
+    // Lazy cascade: if executor is `Faulted` and task is still `Running`,
+    // silently transition the task to `Faulted{ExecutorFaulted}`. No
+    // `on_task_fault` — the Observer already heard about the executor-wide
+    // fault via `on_executor_fault` (cascade-noise invariant, FEAT_0018
+    // §4.6).
+    let task_faulted = if exec_faulted && matches!(task_state, FaultState::Running) {
+        let exec_start = *exec_start.get_or_init(std::time::Instant::now);
+        let since_ms = instant_to_since_ms(std::time::Instant::now(), exec_start);
+        let _ = task.fault.swap(
+            FaultState::Faulted {
+                reason: FaultReason::ExecutorFaulted,
+                since_ms,
+            },
+            task_budget_ms,
         );
-        let task_budget_ms = task.budget.map_or(0_u32, duration_to_ms_sat);
-        let task_state = task.fault.load(task_budget_ms);
-
-        // Lazy cascade: if executor is `Faulted` and task is still `Running`,
-        // silently transition the task to `Faulted{ExecutorFaulted}`. No
-        // `on_task_fault` — the Observer already heard about the executor-wide
-        // fault via `on_executor_fault` (cascade-noise invariant, FEAT_0018
-        // §4.6).
-        let task_faulted = if exec_faulted && matches!(task_state, FaultState::Running) {
-            // SAFETY: exec_start_ptr derefs into the same Executor owning the
-            // dispatch_loop. The OnceLock is wait-free.
-            let exec_start = *unsafe { &*self.exec_start_ptr }.get_or_init(std::time::Instant::now);
-            let since_ms = instant_to_since_ms(std::time::Instant::now(), exec_start);
-            let _ = task.fault.swap(
-                FaultState::Faulted {
-                    reason: FaultReason::ExecutorFaulted,
-                    since_ms,
-                },
-                task_budget_ms,
-            );
-            true
-        } else {
-            matches!(task_state, FaultState::Faulted { .. })
-        };
-
-        if !(exec_faulted || task_faulted) {
-            return false;
-        }
-
-        // If a handler is registered, dispatch it. Otherwise, skip dispatch
-        // entirely this wakeup.
-        if let Some(handler_box) = task.handler_job.as_deref_mut() {
-            let job_ptr: *mut (dyn FnMut() + Send) = handler_box as *mut (dyn FnMut() + Send);
-            // SAFETY: same as the main-job dispatch below — handler_job is
-            // owned by the `TaskEntry`; the single per-wake
-            // `barrier_and_record` in `run_grid_cyclic_pass_guarded` awaits
-            // its completion before the next iteration (and before
-            // `Executor` drop), so the borrowed job is never reused while
-            // a worker still holds it.
-            unsafe {
-                self.pool
-                    .submit_borrowed(crate::pool::BorrowedJob::new(job_ptr));
-            }
-        }
         true
+    } else {
+        matches!(task_state, FaultState::Faulted { .. })
+    };
+
+    if !(exec_faulted || task_faulted) {
+        return false;
     }
 
-    /// Dispatches `task`'s normal (non-fault) work for one wakeup.
-    ///
-    /// `Single`/`Chain` tasks submit their pre-built job to the pool;
-    /// `Graph` tasks drive one pass and capture the first item error into the
-    /// per-iteration error slot.
-    #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
-    fn submit_task_job(&self, task: &mut TaskEntry) {
-        match &mut task.kind {
-            TaskKind::Single(_) | TaskKind::Chain(_) => {
-                // The dispatch closure was pre-allocated at task-add time and
-                // stashed on `task.job`. Submit it via `submit_borrowed` — no
-                // per-iteration Box allocation. Required by REQ_0060.
-                #[allow(clippy::expect_used)]
-                // fail-fast: Single/Chain task.job is always Some — set at add time in build_single_job/build_chain_job and never cleared
-                let job_box = task
-                    .job
-                    .as_deref_mut()
-                    .expect("Single/Chain tasks carry a pre-built job");
-                let job_ptr: *mut (dyn FnMut() + Send) = job_box as *mut (dyn FnMut() + Send);
-                // SAFETY: the closure lives in `task.job`, owned by
-                // `self.tasks[task_idx]`; `tasks_ptr` is sound for the
-                // duration of this callback. The single per-wake
-                // `barrier_and_record` in `run_grid_cyclic_pass_guarded`
-                // finishes the closure invocation before the next
-                // iteration (and before `Executor` drop). The `WaitSet`
-                // thread does not touch the closure between this submit and
-                // that barrier, so there is no aliased reuse of the
-                // borrowed job.
-                unsafe {
-                    self.pool
-                        .submit_borrowed(crate::pool::BorrowedJob::new(job_ptr));
+    // If a handler is registered, dispatch it. Otherwise, skip dispatch
+    // entirely this wakeup.
+    if let Some(handler_cell) = &task.handler_job {
+        pool.submit_shared(handler_cell);
+    }
+    true
+}
+
+/// Dispatches `task`'s normal (non-fault) work for one wakeup.
+///
+/// `Single`/`Chain` tasks submit their pre-built job to the pool via
+/// `submit_shared`; `Graph` tasks drive one pass and capture the first item
+/// error into the per-iteration error slot.
+#[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+fn submit_task_job(
+    pool: &Pool,
+    iter_err: &std::sync::Mutex<Option<ExecutorError>>,
+    task: &mut TaskEntry,
+) {
+    match &mut task.kind {
+        TaskKind::Single(_) | TaskKind::Chain(_) => {
+            // The dispatch closure was pre-allocated at task-add time and
+            // stashed on `task.job` as `Arc<ExclusiveCell<dyn FnMut() + Send>>`.
+            // Submit it via `submit_shared` — no per-iteration allocation.
+            // Required by REQ_0060.
+            if let Some(job_cell) = &task.job {
+                pool.submit_shared(job_cell);
+            }
+        }
+        TaskKind::Graph(graph) => {
+            // Outer driver runs on the WaitSet thread; vertices run on the
+            // pool. The graph holds its own pre-built per-vertex closures
+            // and SPSC ready ring (REQ_0060), so dispatch is
+            // allocation-free in steady state.
+            let outcome = graph.run_once_borrowed(pool);
+            if let Some(source) = outcome.error {
+                #[allow(clippy::unwrap_used)]
+                // fail-fast: poison unreachable — the lock is held only over an infallible Option insert/take, and any holder panic aborts the process before another thread observes it (ADR_0065)
+                let mut g = iter_err.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(ExecutorError::Item {
+                        task_id: task.id.clone(),
+                        source,
+                    });
                 }
             }
-            TaskKind::Graph(graph) => {
-                // Outer driver runs on the WaitSet thread; vertices run on the
-                // pool. The graph holds its own pre-built per-vertex closures
-                // and SPSC ready ring (REQ_0060), so dispatch is
-                // allocation-free in steady state.
-                let outcome = graph.run_once_borrowed(self.pool);
-                if let Some(source) = outcome.error {
-                    #[allow(clippy::unwrap_used)]
-                    // fail-fast: poison unreachable — the lock is held only over an infallible Option insert/take, and any holder panic aborts the process before another thread observes it (ADR_0065)
-                    let mut g = self.iter_err.lock().unwrap();
-                    if g.is_none() {
-                        *g = Some(ExecutorError::Item {
-                            task_id: task.id.clone(),
-                            source,
-                        });
-                    }
-                }
-                let _ = outcome.stopped_chain; // chain-abort semantics: no extra bookkeeping at task level
-            }
+            let _ = outcome.stopped_chain; // chain-abort semantics: no extra bookkeeping at task level
         }
     }
 }
-
-/// Wraps a `*mut dyn ExecutableItem` so it can cross thread boundaries inside
-/// `Pool::submit`. The send is safe because:
-///   1. The executor guarantees at most one invocation of a given item at a
-///      time (via `pool.barrier()` before the pointer is reused).
-///   2. `ExecutableItem: Send`, so moving the pointee across threads is sound
-///      when no aliasing exists.
-#[allow(unsafe_code)]
-struct SendItemPtr {
-    ptr: *mut dyn ExecutableItem,
-}
-
-impl SendItemPtr {
-    fn new(ptr: *mut dyn ExecutableItem) -> Self {
-        Self { ptr }
-    }
-
-    /// Returns the raw pointer. Takes `&self` so the wrapper can be invoked
-    /// repeatedly from an `FnMut` dispatch closure (`REQ_0060` requires the
-    /// dispatch closure to be reusable across iterations without allocation).
-    fn get(&self) -> *mut dyn ExecutableItem {
-        self.ptr
-    }
-}
-
-// SAFETY: see doc comment above. `Sync` is required so the FnMut dispatch
-// closure can borrow `&SendItemPtr` per invocation without making the
-// closure itself `!Send`.
-#[allow(unsafe_code)]
-unsafe impl Send for SendItemPtr {}
-#[allow(unsafe_code)]
-unsafe impl Sync for SendItemPtr {}
-
-/// Wraps a `*mut Vec<Box<dyn ExecutableItem>>` so a chain dispatch
-/// closure can iterate the chain's items in place without first
-/// collecting them into a freshly-allocated `Vec`. The send is safe
-/// for the same reason as [`SendItemPtr`] (see above): the executor
-/// holds `&mut self` for the duration of `dispatch_loop`, and the
-/// `pool.barrier()` at the end of each callback ensures the closure
-/// has finished using this pointer before the Vec could be touched
-/// from the `WaitSet` thread again. The Vec is never resized after
-/// dispatch begins. Required for `REQ_0060` — chain dispatch must not
-/// allocate per iteration.
-#[allow(unsafe_code)]
-struct SendChainPtr {
-    ptr: *mut Vec<Box<dyn ExecutableItem>>,
-}
-
-impl SendChainPtr {
-    fn new(ptr: *mut Vec<Box<dyn ExecutableItem>>) -> Self {
-        Self { ptr }
-    }
-
-    fn get(&self) -> *mut Vec<Box<dyn ExecutableItem>> {
-        self.ptr
-    }
-}
-
-// SAFETY: see doc comment above. `Sync` lets the FnMut dispatch closure
-// borrow `&SendChainPtr` per invocation while staying `Send`.
-#[allow(unsafe_code)]
-unsafe impl Send for SendChainPtr {}
-#[allow(unsafe_code)]
-unsafe impl Sync for SendChainPtr {}
 
 /// Captured state needed by a dispatch closure to perform post-execute
 /// fault detection. All fields are `Arc`-shared with the owning
@@ -2700,10 +2513,10 @@ fn scan_period_from_decls(decls: &[crate::trigger::TriggerDecl]) -> Option<Durat
 /// Build the per-iteration dispatch closure for a `TaskKind::Single`.
 ///
 /// The returned closure is stored on `TaskEntry::job` and invoked once
-/// per dispatch via `Pool::submit_borrowed`, which (unlike `submit`)
-/// performs no allocation. The closure captures Arc clones of the
-/// executor's shared state — those clones are refcount-only at build
-/// time and are reused on every dispatch. Required for `REQ_0060`.
+/// per dispatch via `Pool::submit_shared`, which performs no allocation.
+/// The closure captures Arc clones of the executor's shared state — those
+/// clones are refcount-only at build time and are reused on every dispatch.
+/// Required for `REQ_0060`.
 #[allow(clippy::too_many_arguments)]
 fn build_single_job(
     id: TaskId,
@@ -2713,35 +2526,39 @@ fn build_single_job(
     err_slot: Arc<std::sync::Mutex<Option<ExecutorError>>>,
     app_id: Option<u32>,
     app_inst: Option<u32>,
-    item_ptr: SendItemPtr,
+    item_cell: Arc<ExclusiveCell<Box<dyn ExecutableItem>>>,
     fault_ctx: FaultDispatchCtx,
     last_took_ns: Arc<AtomicU64>,
     clock: Arc<dyn MonotonicClock>,
-) -> Box<dyn FnMut() + Send + 'static> {
-    Box::new(move || {
+) -> Arc<ExclusiveCell<dyn FnMut() + Send>> {
+    let closure: Box<dyn FnMut() + Send> = Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
         if let Some(aid) = app_id {
             obs.on_app_start(id.clone(), aid, app_inst);
         }
-        let raw = item_ptr.get();
         let started = std::time::Instant::now();
         // Telemetry `took` is measured on the injected clock (REQ_0105) so a
         // MockClock can make it exact; the real `started`/`took` below stay on
         // the system clock for the monitor and fault-budget paths.
         let tele_t0 = clock.now_nanos();
         mon.pre_execute(id.clone(), started);
-        // SAFETY: barrier() pairs with this invocation; the WaitSet
-        // thread does not touch the item between `submit_borrowed` and
-        // the matching `barrier()`. See SendItemPtr safety doc.
-        #[allow(unsafe_code)]
-        let res = run_item_catch_unwind(unsafe { &mut *raw }, &mut ctx);
+        // Invariant: try_with returns None if the cell is busy (concurrent or
+        // re-entrant access). graph in-degree discipline ensures this never
+        // happens; None is an invariant breach routed to the fault path.
+        let res = item_cell
+            .try_with(|item| run_item_catch_unwind(item.as_mut(), &mut ctx))
+            .unwrap_or_else(|| {
+                Err(Box::new(InvariantBreach(
+                    "ExclusiveCell busy: concurrent item access".into(),
+                )))
+            });
         let took = started.elapsed();
         // Release pairs with the WaitSet-thread Acquire (swap) in
         // `record_cycle_for` (M2). `pool.barrier()` also fences, but the
         // explicit pairing documents intent and is robust on weak-memory archs.
         last_took_ns.store(clock.now_nanos().saturating_sub(tele_t0), Ordering::Release);
         mon.post_execute(id.clone(), started, took, res.is_ok());
-        if let Err(ref e) = res {
+        if let Err(e) = &res {
             obs.on_app_error(id.clone(), e.as_ref());
         }
         if app_id.is_some() {
@@ -2749,22 +2566,19 @@ fn build_single_job(
         }
         post_execute_detect_fault(&id, started, took, &fault_ctx);
         record_first_err(&err_slot, &id, res);
-    })
+    });
+    Arc::new(ExclusiveCell::new(closure))
 }
 
 /// Build the per-iteration dispatch closure for a fault-handler item.
 ///
 /// Mirrors [`build_single_job`] in every detail (same monitor /
-/// observer / first-error capture wiring) but owns the
-/// `Box<dyn ExecutableItem>` directly inside the closure instead of
-/// dereferencing a raw [`SendItemPtr`]. The handler has no parallel
-/// owner inside [`TaskEntry`] — the handler closure stored in
-/// `handler_job` is the sole owner — so the simpler owning form is
-/// both sound and avoids the aliasing dance the main item needs.
-/// (Unlike [`build_single_job`], this closure does NOT update
-/// `last_took_ns` — the handler runs in place of the main item, so the
-/// main item's `last_took_ns` keeps its sentinel `u64::MAX` = "no
-/// sample this cycle".)
+/// observer / first-error capture wiring). The handler is wrapped in
+/// `Arc<ExclusiveCell<...>>` and shared between this job closure and the
+/// (unused) `TaskEntry::handler_job` field. (Unlike [`build_single_job`],
+/// this closure does NOT update `last_took_ns` — the handler runs in place
+/// of the main item, so the main item's `last_took_ns` keeps its sentinel
+/// `u64::MAX` = "no sample this cycle".)
 /// `REQ_0072`.
 #[allow(clippy::too_many_arguments)]
 fn build_handler_job(
@@ -2775,20 +2589,26 @@ fn build_handler_job(
     err_slot: Arc<std::sync::Mutex<Option<ExecutorError>>>,
     app_id: Option<u32>,
     app_inst: Option<u32>,
-    mut handler: Box<dyn ExecutableItem>,
+    handler_cell: Arc<ExclusiveCell<Box<dyn ExecutableItem>>>,
     fault_ctx: FaultDispatchCtx,
-) -> Box<dyn FnMut() + Send + 'static> {
-    Box::new(move || {
+) -> Arc<ExclusiveCell<dyn FnMut() + Send>> {
+    let closure: Box<dyn FnMut() + Send> = Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
         if let Some(aid) = app_id {
             obs.on_app_start(id.clone(), aid, app_inst);
         }
         let started = std::time::Instant::now();
         mon.pre_execute(id.clone(), started);
-        let res = run_item_catch_unwind(handler.as_mut(), &mut ctx);
+        let res = handler_cell
+            .try_with(|handler| run_item_catch_unwind(handler.as_mut(), &mut ctx))
+            .unwrap_or_else(|| {
+                Err(Box::new(InvariantBreach(
+                    "ExclusiveCell busy: concurrent handler access".into(),
+                )))
+            });
         let took = started.elapsed();
         mon.post_execute(id.clone(), started, took, res.is_ok());
-        if let Err(ref e) = res {
+        if let Err(e) = &res {
             obs.on_app_error(id.clone(), e.as_ref());
         }
         if app_id.is_some() {
@@ -2801,7 +2621,8 @@ fn build_handler_job(
         // `post_execute_detect_fault` enforces that.
         post_execute_detect_fault(&id, started, took, &fault_ctx);
         record_first_err(&err_slot, &id, res);
-    })
+    });
+    Arc::new(ExclusiveCell::new(closure))
 }
 
 /// Build the per-iteration dispatch closure for a `TaskKind::Chain`.
@@ -2812,12 +2633,12 @@ fn build_chain_job(
     obs: Arc<dyn Observer>,
     mon: Arc<dyn ExecutionMonitor>,
     err_slot: Arc<std::sync::Mutex<Option<ExecutorError>>>,
-    chain_ptr: SendChainPtr,
+    chain_cell: Arc<ExclusiveCell<Vec<Box<dyn ExecutableItem>>>>,
     fault_ctx: FaultDispatchCtx,
     last_took_ns: Arc<AtomicU64>,
     clock: Arc<dyn MonotonicClock>,
-) -> Box<dyn FnMut() + Send + 'static> {
-    Box::new(move || {
+) -> Arc<ExclusiveCell<dyn FnMut() + Send>> {
+    let closure: Box<dyn FnMut() + Send> = Box::new(move || {
         let mut ctx = crate::context::Context::new(&id, &stop, obs.as_ref());
         // Overall chain scan timer — the chain's `took` is the elapsed
         // telemetry-clock time from the first item's pre-execute to the last
@@ -2825,43 +2646,48 @@ fn build_chain_job(
         // notion (REQ_0105). Per-item monitor timing uses each item's own
         // real-clock `started` below.
         let chain_tele_t0 = clock.now_nanos();
-        // SAFETY: barrier() pairs with this invocation; the chain Vec
-        // and the items it owns are not touched by the WaitSet thread
-        // until barrier() returns. See SendChainPtr safety doc.
-        #[allow(unsafe_code)]
-        let chain_items = unsafe { &mut *chain_ptr.get() };
-        for item_box in chain_items.iter_mut() {
-            let app_id = item_box.app_id();
-            let app_inst = item_box.app_instance_id();
-            if let Some(aid) = app_id {
-                obs.on_app_start(id.clone(), aid, app_inst);
-            }
-            let raw = std::ptr::from_mut::<dyn ExecutableItem>(item_box.as_mut());
-            let started = std::time::Instant::now();
-            mon.pre_execute(id.clone(), started);
-            #[allow(unsafe_code)]
-            let res = run_item_catch_unwind(unsafe { &mut *raw }, &mut ctx);
-            let took = started.elapsed();
-            mon.post_execute(id.clone(), started, took, res.is_ok());
-            if let Err(ref e) = res {
-                obs.on_app_error(id.clone(), e.as_ref());
-            }
-            if app_id.is_some() {
-                obs.on_app_stop(id.clone());
-            }
-            // Per-item post-execute fault detection. `task_budget` is
-            // `None` for chains (see `add_chain_with_id_boxed`), so the
-            // per-task check no-ops; the executor-wide iteration-budget
-            // check still fires per item. `REQ_0071`.
-            post_execute_detect_fault(&id, started, took, &fault_ctx);
-            match res {
-                Ok(crate::ItemFlow::Continue) => {}
-                Ok(crate::ItemFlow::StopChain) => break,
-                Err(_) => {
-                    record_first_err(&err_slot, &id, res);
-                    break;
+        // Invariant: try_with returns None if the cell is busy (concurrent access).
+        // The graph in-degree discipline ensures this never happens.
+        let chain_result = chain_cell.try_with(|chain_items| {
+            for item_box in chain_items.iter_mut() {
+                let app_id = item_box.app_id();
+                let app_inst = item_box.app_instance_id();
+                if let Some(aid) = app_id {
+                    obs.on_app_start(id.clone(), aid, app_inst);
+                }
+                let started = std::time::Instant::now();
+                mon.pre_execute(id.clone(), started);
+                let res = run_item_catch_unwind(item_box.as_mut(), &mut ctx);
+                let took = started.elapsed();
+                mon.post_execute(id.clone(), started, took, res.is_ok());
+                if let Err(e) = &res {
+                    obs.on_app_error(id.clone(), e.as_ref());
+                }
+                if app_id.is_some() {
+                    obs.on_app_stop(id.clone());
+                }
+                // Per-item post-execute fault detection. `task_budget` is
+                // `None` for chains (see `add_chain_with_id_boxed`), so the
+                // per-task check no-ops; the executor-wide iteration-budget
+                // check still fires per item. `REQ_0071`.
+                post_execute_detect_fault(&id, started, took, &fault_ctx);
+                match res {
+                    Ok(crate::ItemFlow::Continue) => {}
+                    Ok(crate::ItemFlow::StopChain) => break,
+                    Err(_) => {
+                        record_first_err(&err_slot, &id, res);
+                        break;
+                    }
                 }
             }
+            Ok::<(), ()>(())
+        });
+        if chain_result.is_none() {
+            // Invariant breach: cell was busy
+            let breach_err: Result<_, Box<dyn std::error::Error + Send + Sync>> = Err(Box::new(
+                InvariantBreach("ExclusiveCell busy: concurrent chain access".into()),
+            ));
+            record_first_err(&err_slot, &id, breach_err);
         }
         // Release pairs with the WaitSet-thread Acquire (swap) in
         // `record_cycle_for` (M2). See the Single-job store for the rationale.
@@ -2869,7 +2695,8 @@ fn build_chain_job(
             clock.now_nanos().saturating_sub(chain_tele_t0),
             Ordering::Release,
         );
-    })
+    });
+    Arc::new(ExclusiveCell::new(closure))
 }
 
 #[derive(Debug)]
@@ -2883,6 +2710,16 @@ impl core::fmt::Display for PanickedTask {
 
 impl std::error::Error for PanickedTask {}
 
+#[derive(Debug)]
+struct InvariantBreach(String);
+
+impl core::fmt::Display for InvariantBreach {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "invariant breach: {}", self.0)
+    }
+}
+
+impl std::error::Error for InvariantBreach {}
 /// Execute `item` inside `catch_unwind`, converting any panic into an `Err`.
 fn run_item_catch_unwind(
     item: &mut dyn ExecutableItem,
@@ -3072,8 +2909,7 @@ impl ExecutorGraphBuilder<'_> {
         // TSR_0003: reject any vertex whose integrity differs from the
         // executor pin.
         if let Some(expected) = self.executor.integrity_level {
-            for item in &g.items {
-                let found = item.integrity_level();
+            for &found in &g.integrity_levels {
                 if found != expected {
                     return Err(ExecutorError::MixedIntegrity { expected, found });
                 }
@@ -3138,30 +2974,19 @@ impl Executor {
     /// at the real Arc. Pins the per-phase dedup contract: the second dispatch
     /// must be skipped, so the borrowed job (main item or fault handler) is
     /// submitted at most once — never aliased across two pool workers.
-    #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
     fn dispatch_twice_one_barrier(&mut self, task_idx: usize) {
-        // Raw pointers taken first so the &mut borrows are released before the
-        // shared borrows below — same discipline as `dispatch_loop`.
-        let tasks_ptr = &mut self.tasks as *mut Vec<TaskEntry>;
-        let cycle_stats_ptr = &mut self.cycle_stats as *mut Vec<TaskCycleStats>;
-        let exec_fault_ptr = &*self.exec_fault as *const ExecutorFaultAtomic;
-        let exec_start_ptr = &*self.start_time as *const OnceLock<Instant>;
-        let stop_listener_ptr = self.stop_listener.as_ref() as *const IxListener<ipc::Service>;
-        let observer = &self.observer;
-        let pool = &self.pool;
-        let clock = &self.clock;
         let iter_err = Arc::clone(&self.iter_err);
         let mut pass = DispatchPass {
             guards: &[],
             attachment_to_task: &[],
-            tasks_ptr,
-            cycle_stats_ptr,
-            observer,
-            exec_fault_ptr,
-            exec_start_ptr,
-            clock,
-            stop_listener_ptr,
-            pool,
+            tasks: &mut self.tasks,
+            cycle_stats: &mut self.cycle_stats,
+            observer: &self.observer,
+            exec_fault: &self.exec_fault,
+            exec_start: &self.start_time,
+            clock: &self.clock,
+            stop_listener: self.stop_listener.get(),
+            pool: &self.pool,
             iter_err: &iter_err,
         };
         pass.dispatch_task(task_idx);
@@ -3429,7 +3254,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(unsafe_code, clippy::ref_as_ptr, clippy::borrow_as_ptr)]
     fn cyclic_fold_observer_panic_routes_to_fatal_boundary() {
         use crate::fatal::{FatalContext, FatalDispatch, FatalSite};
         use std::sync::{Arc, Mutex};
@@ -3486,31 +3310,23 @@ mod tests {
             },
         ));
 
-        // (4) Hand-build a guard-less DispatchPass over our own fields (raw
-        // pointers taken first so the &mut borrows release before the shared
-        // borrows below — same discipline as `dispatch_twice_one_barrier`).
-        let tasks_ptr = &mut exec.tasks as *mut Vec<TaskEntry>;
-        let cycle_stats_ptr = &mut exec.cycle_stats as *mut Vec<TaskCycleStats>;
-        let exec_fault_ptr = &*exec.exec_fault as *const ExecutorFaultAtomic;
-        let exec_start_ptr = &*exec.start_time as *const OnceLock<Instant>;
-        let stop_listener_ptr = exec.stop_listener.as_ref() as *const IxListener<ipc::Service>;
-        let observer = &exec.observer;
-        let pool = &exec.pool;
-        let clock = &exec.clock;
+        // (4) Hand-build a guard-less DispatchPass over our own fields
+        // (disjoint field borrows: task table and cycle stats `&mut`, the rest
+        // shared — same discipline as `dispatch_twice_one_barrier`).
         let iter_err = Arc::clone(&exec.iter_err);
         let stop_flag = exec.stoppable.clone();
         let fatal = Arc::clone(&exec.fatal_dispatch);
         let pass = DispatchPass {
             guards: &[],
             attachment_to_task: &[],
-            tasks_ptr,
-            cycle_stats_ptr,
-            observer,
-            exec_fault_ptr,
-            exec_start_ptr,
-            clock,
-            stop_listener_ptr,
-            pool,
+            tasks: &mut exec.tasks,
+            cycle_stats: &mut exec.cycle_stats,
+            observer: &exec.observer,
+            exec_fault: &exec.exec_fault,
+            exec_start: &exec.start_time,
+            clock: &exec.clock,
+            stop_listener: exec.stop_listener.get(),
+            pool: &exec.pool,
             iter_err: &iter_err,
         };
 

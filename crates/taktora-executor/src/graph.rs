@@ -4,6 +4,7 @@
 use crate::error::ExecutorError;
 use crate::item::ExecutableItem;
 use crate::trigger::{TriggerDecl, TriggerDeclarer};
+use taktora_executor_sys::dispatch::ExclusiveCell;
 
 /// Opaque handle to a graph vertex. Returned by [`GraphBuilder::vertex`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -18,49 +19,36 @@ pub struct Vertex(pub(crate) usize);
 /// in place each `run_once_borrowed` call. Required for `REQ_0060`.
 #[allow(clippy::redundant_pub_crate)]
 pub(crate) struct Graph {
-    pub(crate) items: Vec<Box<dyn ExecutableItem>>,
     pub(crate) successors: Vec<Vec<usize>>, // adjacency list
     pub(crate) in_degree: Vec<usize>,       // initial in-degree
     pub(crate) root: usize,
     pub(crate) decls: Vec<TriggerDecl>,
 
     // ── Pre-allocated dispatch state (REQ_0060) ────────────────────────
-    /// Stable raw pointers into each item's heap-allocated `Box`.
-    /// Populated once in `finish`. The `Box` contents do not move when
-    /// the outer `Vec` resizes, so these pointers stay valid for the
-    /// lifetime of the `Graph`.
-    vertex_ptrs: Vec<VertexPtr>,
-    /// Per-vertex in-degree counter; reset to `in_degree[i]` at the top
-    /// of every `run_once_borrowed`. `usize::MAX` is used as a "cancelled"
-    /// sentinel during stop-flag propagation.
-    counters: Vec<AtomicUsize>,
-    /// Number of vertices still pending in the current run.
-    pending: AtomicUsize,
-    /// Stop request observed during this run.
-    stop_flag: AtomicBool,
-    /// `ItemFlow::StopChain` observed during this run.
-    stop_chain_seen: AtomicBool,
-    /// First per-vertex error observed during this run.
-    first_err: Mutex<Option<crate::error::ItemError>>,
-    /// Completion condvar; signalled when `pending` reaches zero.
-    done_cv: (Mutex<()>, Condvar),
-    /// Re-dispatch ring — completed pool workers push ready successors;
-    /// the `WaitSet` thread drains and re-dispatches. Sized to
-    /// `next_power_of_two(n_vertices)` at `finish`. Required for `REQ_0060`.
-    ready_ring: crate::ready_ring::ReadyRing,
-    /// Per-vertex pre-built dispatch closures. Empty after `finish`,
-    /// populated by `prepare_dispatch` when the graph is registered with
-    /// an executor (it needs `task_id`/`stop`/`obs`/`mon`/`err_slot` from
-    /// the executor). Used by `run_once_borrowed` via
-    /// `Pool::submit_borrowed`, avoiding the per-vertex `Box` allocation
-    /// that `Pool::submit` requires.
-    vertex_jobs: Vec<Box<dyn FnMut() + Send + 'static>>,
+    /// Shared items wrapped in `Arc<ExclusiveCell<...>>` for zero-alloc
+    /// dispatch. Populated once in `finish`. Each vertex closure captures
+    /// an Arc clone (refcount only, no alloc per run).
+    pub(crate) items_shared: Vec<std::sync::Arc<ExclusiveCell<Box<dyn ExecutableItem>>>>,
+    /// Per-vertex integrity levels, captured at assembly (before the items
+    /// are shared) so setup-time checks need no cell access.
+    pub(crate) integrity_levels: Vec<crate::IntegrityLevel>,
+    /// The root vertex's `task_id()` override, captured at assembly.
+    root_task_id: Option<String>,
+    /// Shared runtime state accessed by vertex closures (atomics, ready ring,
+    /// etc.). Wrapped in Arc so closures can capture a clone (refcount only).
+    shared: std::sync::Arc<GraphShared>,
+    /// Per-vertex pre-built dispatch closures wrapped in `Arc<ExclusiveCell<...>>`.
+    /// Empty after `finish`, populated by `prepare_dispatch` when the graph
+    /// is registered with an executor. Used by `run_once_borrowed` via
+    /// `Pool::submit_shared`, avoiding per-vertex allocation (Arc clone is
+    /// refcount only). Required for `REQ_0060`.
+    vertex_jobs: Vec<std::sync::Arc<ExclusiveCell<dyn FnMut() + Send>>>,
 }
 
 impl core::fmt::Debug for Graph {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Graph")
-            .field("n_items", &self.items.len())
+            .field("n_items", &self.items_shared.len())
             .field("successors", &self.successors)
             .field("in_degree", &self.in_degree)
             .field("root", &self.root)
@@ -71,7 +59,7 @@ impl core::fmt::Debug for Graph {
 impl Graph {
     /// Return the root vertex's `task_id()` override, if any.
     pub(crate) fn root_task_id(&self) -> Option<&str> {
-        self.items[self.root].task_id()
+        self.root_task_id.as_deref()
     }
 }
 
@@ -253,29 +241,27 @@ impl GraphBuilder {
     /// Assemble the validated pieces into a `Graph`, pre-allocating the runtime
     /// dispatch state (`REQ_0060`).
     fn assemble(
-        mut items: Vec<Box<dyn ExecutableItem>>,
+        items: Vec<Box<dyn ExecutableItem>>,
         successors: Vec<Vec<usize>>,
         in_degree: Vec<usize>,
         root: usize,
         decls: Vec<TriggerDecl>,
     ) -> Graph {
         let n_items = items.len();
-        // SAFETY: each `Box<dyn ExecutableItem>` is heap-allocated; its
-        // contents do not move when the outer Vec resizes. Stable.
-        #[allow(unsafe_code)]
-        let vertex_ptrs: Vec<VertexPtr> = items
-            .iter_mut()
-            .map(|b| VertexPtr(std::ptr::from_mut(b.as_mut())))
+        let integrity_levels = items
+            .iter()
+            .map(|it| ExecutableItem::integrity_level(it.as_ref()))
+            .collect::<Vec<_>>();
+        let root_task_id = items[root].task_id().map(str::to_string);
+        // Wrap each item in Arc<ExclusiveCell<...>>. This is the single
+        // ownership location for items; all accesses (build-time and dispatch)
+        // go through ExclusiveCell::try_with. Required for `REQ_0060`.
+        let items_shared: Vec<std::sync::Arc<ExclusiveCell<Box<dyn ExecutableItem>>>> = items
+            .into_iter()
+            .map(|b| std::sync::Arc::new(ExclusiveCell::new(b)))
             .collect();
         let counters: Vec<AtomicUsize> = in_degree.iter().map(|d| AtomicUsize::new(*d)).collect();
-
-        Graph {
-            items,
-            successors,
-            in_degree,
-            root,
-            decls,
-            vertex_ptrs,
+        let shared = std::sync::Arc::new(GraphShared {
             counters,
             pending: AtomicUsize::new(n_items),
             stop_flag: AtomicBool::new(false),
@@ -283,6 +269,18 @@ impl GraphBuilder {
             first_err: Mutex::new(None),
             done_cv: (Mutex::new(()), Condvar::new()),
             ready_ring: crate::ready_ring::ReadyRing::new(n_items),
+            successors: successors.clone(),
+        });
+
+        Graph {
+            successors,
+            in_degree,
+            root,
+            decls,
+            items_shared,
+            integrity_levels,
+            root_task_id,
+            shared,
             vertex_jobs: Vec::new(),
         }
     }
@@ -307,43 +305,23 @@ pub(crate) struct GraphRunOutcome {
     pub(crate) stopped_chain: bool,
 }
 
-/// Wrapper around `*mut dyn ExecutableItem` that asserts Send+Sync.
-struct VertexPtr(*mut dyn ExecutableItem);
-
-// SAFETY: the executor guarantees a vertex runs on at most one thread at
-// a time (the in-degree counter sequences dispatches), and the pointer is
-// stable for the lifetime of `Graph::run_once` (the underlying Box is not
-// moved while we hold &mut self in run_once).
-#[allow(unsafe_code)]
-unsafe impl Send for VertexPtr {}
-#[allow(unsafe_code)]
-unsafe impl Sync for VertexPtr {}
-
-/// Send-able raw pointer back into a `Box<Graph>`. Used by the per-vertex
-/// dispatch closures to reach the graph's atomics and the ready ring
-/// without an `Arc`. Sound because the `Graph` is owned by
-/// `TaskKind::Graph(Box<Graph>)`, which keeps it at a stable heap
-/// address, and `pool.barrier()` (in `dispatch_loop`) serialises the
-/// closure's invocation with the executor thread's own access.
-#[allow(unsafe_code)]
-#[derive(Copy, Clone)]
-struct SendGraphPtr(*const Graph);
-
-impl SendGraphPtr {
-    /// Return the underlying pointer. Method form so Rust 2021 per-field
-    /// capture analysis grabs the whole `SendGraphPtr` (which is `Send +
-    /// Sync`) rather than `self.0` (a `*const`, which is not).
-    const fn get(&self) -> *const Graph {
-        self.0
-    }
+/// Shared graph state captured by vertex closures.
+///
+/// Contains only the fields accessed by vertex dispatch closures (atomics,
+/// Mutex slots, ready ring, and the adjacency list). The per-vertex items
+/// are captured separately as `Arc<ExclusiveCell<Box<dyn ExecutableItem>>>`.
+struct GraphShared {
+    counters: Vec<AtomicUsize>,
+    pending: AtomicUsize,
+    stop_flag: AtomicBool,
+    stop_chain_seen: AtomicBool,
+    first_err: Mutex<Option<crate::error::ItemError>>,
+    done_cv: (Mutex<()>, Condvar),
+    ready_ring: crate::ready_ring::ReadyRing,
+    successors: Vec<Vec<usize>>,
 }
 
-#[allow(unsafe_code)]
-unsafe impl Send for SendGraphPtr {}
-#[allow(unsafe_code)]
-unsafe impl Sync for SendGraphPtr {}
-
-impl Graph {
+impl GraphShared {
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn finalise_skipped(&self, i: usize) {
         if self.pending.fetch_sub(1, Ordering::AcqRel) == 1 {
@@ -357,13 +335,6 @@ impl Graph {
 
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn cancel_subtree(&self, root: usize) {
-        // Iterative DFS using a small stack on the heap. The stack is
-        // bounded by the number of vertices and used only on the stop
-        // path; the steady-state happy path (REQ_0060) never enters
-        // here, so this stack's allocation does not violate the
-        // requirement. A pre-allocated scratch stack would be needed if
-        // cancellation were ever a hot path; document as future work
-        // when that becomes relevant.
         let mut stack = vec![root];
         while let Some(u) = stack.pop() {
             let prev = self.counters[u].swap(usize::MAX, Ordering::AcqRel);
@@ -381,8 +352,6 @@ impl Graph {
 
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn notify_done(&self) {
-        // fail-fast: poison is unreachable — a holder panic aborts the process
-        // before any other thread observes the lock (ADR_0065)
         #[allow(clippy::unwrap_used)]
         let _g = self.done_cv.0.lock().unwrap();
         self.done_cv.1.notify_all();
@@ -392,13 +361,9 @@ impl Graph {
 impl Graph {
     /// Build per-vertex dispatch closures and stash them on the graph.
     /// Called once, when the graph is registered with an executor via
-    /// `ExecutorGraphBuilder::build`. The graph must already live inside
-    /// its `Box<Graph>` — closures capture `*const Graph` and rely on
-    /// that pointer remaining valid for the graph's lifetime.
-    ///
-    /// All captures are `Arc::clone`s (refcount-only at build time)
-    /// and `Copy` primitives; no per-iteration allocation occurs in
-    /// the resulting closures. Required for `REQ_0060`.
+    /// `ExecutorGraphBuilder::build`. Each closure captures `Arc` clones
+    /// (refcount-only at build time) and `Copy` primitives; no per-iteration
+    /// allocation occurs in the resulting closures. Required for `REQ_0060`.
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
     pub(crate) fn prepare_dispatch(
@@ -409,101 +374,103 @@ impl Graph {
         monitor: Arc<dyn ExecutionMonitor>,
         err_slot: Arc<Mutex<Option<crate::error::ExecutorError>>>,
     ) {
-        let n = self.items.len();
-        // SAFETY: we deref through the Box, getting a `*const Graph`
-        // that points at the Box's heap allocation. The Box's contents
-        // do not move while we hold the Box, so this pointer is stable
-        // for the lifetime of `self`. The pointer is shared with every
-        // per-vertex closure; the closures access only `&self`-style
-        // immutable atomics / Mutex slots on `Graph` (no aliasing
-        // mutation through this pointer).
-        #[allow(unsafe_code)]
-        let graph_ptr = SendGraphPtr(std::ptr::from_ref::<Self>(self.as_ref()));
+        let n = self.items_shared.len();
+        let shared = Arc::clone(&self.shared);
 
-        let mut jobs: Vec<Box<dyn FnMut() + Send + 'static>> = Vec::with_capacity(n);
+        let mut jobs: Vec<Arc<ExclusiveCell<dyn FnMut() + Send>>> = Vec::with_capacity(n);
         for i in 0..n {
             let task_id = task_id.clone();
             let stop = stop.clone();
             let observer = Arc::clone(&observer);
             let monitor = Arc::clone(&monitor);
             let err_slot = Arc::clone(&err_slot);
-            let job: Box<dyn FnMut() + Send + 'static> = Box::new(move || {
-                // SAFETY: see SendGraphPtr doc — pointer is stable, no
-                // aliasing mutation; pool.barrier() serialises the
-                // closure with the executor thread's own graph access.
-                #[allow(unsafe_code)]
-                let g: &Self = unsafe { &*graph_ptr.get() };
+            let item_cell = Arc::clone(&self.items_shared[i]);
+            let shared = Arc::clone(&shared);
+            let successors_i = self.successors[i].clone();
 
-                if g.stop_flag.load(Ordering::Acquire) {
-                    g.finalise_skipped(i);
-                    return;
-                }
-                let mut ctx = crate::context::Context::new(&task_id, &stop, observer.as_ref());
-                let ptr = g.vertex_ptrs[i].0;
-                // SAFETY: vertex_ptrs hold stable raw pointers into the
-                // graph's `items` Boxes (see VertexPtr). In-degree
-                // counters sequence pool dispatches so at most one
-                // thread executes vertex `i` at a time.
-                #[allow(unsafe_code)]
-                let app_id = unsafe { (*ptr).app_id() };
-                #[allow(unsafe_code)]
-                let app_inst = unsafe { (*ptr).app_instance_id() };
-                if let Some(aid) = app_id {
-                    observer.on_app_start(task_id.clone(), aid, app_inst);
-                }
-                let started = std::time::Instant::now();
-                monitor.pre_execute(task_id.clone(), started);
-                #[allow(unsafe_code)]
-                let res =
-                    crate::executor::run_item_catch_unwind_external(unsafe { &mut *ptr }, &mut ctx);
-                let took = started.elapsed();
-                monitor.post_execute(task_id.clone(), started, took, res.is_ok());
-                if let Err(ref e) = res {
-                    observer.on_app_error(task_id.clone(), e.as_ref());
-                }
-                if app_id.is_some() {
-                    observer.on_app_stop(task_id.clone());
-                }
-                match &res {
-                    Ok(crate::ItemFlow::Continue) => {}
-                    Ok(crate::ItemFlow::StopChain) => {
-                        g.stop_chain_seen.store(true, Ordering::Release);
-                        g.stop_flag.store(true, Ordering::Release);
+            let job: Arc<ExclusiveCell<dyn FnMut() + Send>> =
+                Arc::new(ExclusiveCell::new(Box::new(move || {
+                    if shared.stop_flag.load(Ordering::Acquire) {
+                        shared.finalise_skipped(i);
+                        return;
                     }
-                    Err(_) => g.stop_flag.store(true, Ordering::Release),
-                }
-                if let Err(e) = res {
-                    // fail-fast: poison is unreachable — a holder panic aborts
-                    // the process before any other thread observes the lock
-                    // (ADR_0065)
-                    #[allow(clippy::unwrap_used)]
-                    let mut fe = g.first_err.lock().unwrap();
-                    if fe.is_none() {
-                        *fe = Some(e);
+
+                    let mut ctx = crate::context::Context::new(&task_id, &stop, observer.as_ref());
+
+                    // Invariant: ExclusiveCell::try_with returns None if the item
+                    // is busy. The graph's in-degree sequencing ensures at most one
+                    // thread per vertex, so None is an invariant breach.
+                    #[allow(clippy::expect_used)]
+                    // Invariant: in-degree discipline ensures try_with succeeds
+                    let (app_id, res) = item_cell
+                        .try_with(|item| {
+                            let app_id = item.app_id();
+                            let app_inst = item.app_instance_id();
+                            if let Some(aid) = app_id {
+                                observer.on_app_start(task_id.clone(), aid, app_inst);
+                            }
+                            let started = std::time::Instant::now();
+                            monitor.pre_execute(task_id.clone(), started);
+                            let res = crate::executor::run_item_catch_unwind_external(
+                                item.as_mut(),
+                                &mut ctx,
+                            );
+                            let took = started.elapsed();
+                            monitor.post_execute(task_id.clone(), started, took, res.is_ok());
+                            (app_id, res)
+                        })
+                        .expect("ExclusiveCell busy: graph in-degree invariant breach");
+
+                    if let Err(ref e) = res {
+                        observer.on_app_error(task_id.clone(), e.as_ref());
                     }
-                }
-                if g.pending.fetch_sub(1, Ordering::AcqRel) == 1 {
-                    g.notify_done();
-                } else if g.stop_flag.load(Ordering::Acquire) {
-                    for &j in &g.successors[i] {
-                        g.cancel_subtree(j);
+                    if app_id.is_some() {
+                        observer.on_app_stop(task_id.clone());
                     }
-                } else {
-                    for &j in &g.successors[i] {
-                        if g.counters[j].fetch_sub(1, Ordering::AcqRel) == 1 {
-                            // fail-fast: ring is sized to next_power_of_two(n_vertices);
-                            // each vertex becomes ready at most once per run, so overflow
-                            // means broken in-degree accounting
-                            #[allow(clippy::expect_used)]
-                            g.ready_ring
-                                .push(j)
-                                .expect("ready_ring sized to n_vertices");
+
+                    match &res {
+                        Ok(crate::ItemFlow::Continue) => {}
+                        Ok(crate::ItemFlow::StopChain) => {
+                            shared.stop_chain_seen.store(true, Ordering::Release);
+                            shared.stop_flag.store(true, Ordering::Release);
+                        }
+                        Err(_) => shared.stop_flag.store(true, Ordering::Release),
+                    }
+
+                    if let Err(e) = res {
+                        // fail-fast: poison is unreachable — a holder panic aborts
+                        // the process before any other thread observes the lock
+                        // (ADR_0065)
+                        #[allow(clippy::unwrap_used)]
+                        let mut fe = shared.first_err.lock().unwrap();
+                        if fe.is_none() {
+                            *fe = Some(e);
                         }
                     }
-                }
-                let _ = &err_slot; // currently unused on the vertex path
-                // (errors are bubbled via first_err / GraphRunOutcome)
-            });
+
+                    if shared.pending.fetch_sub(1, Ordering::AcqRel) == 1 {
+                        shared.notify_done();
+                    } else if shared.stop_flag.load(Ordering::Acquire) {
+                        for &j in &successors_i {
+                            shared.cancel_subtree(j);
+                        }
+                    } else {
+                        for &j in &successors_i {
+                            if shared.counters[j].fetch_sub(1, Ordering::AcqRel) == 1 {
+                                // fail-fast: ring is sized to next_power_of_two(n_vertices);
+                                // each vertex becomes ready at most once per run, so overflow
+                                // means broken in-degree accounting
+                                #[allow(clippy::expect_used)]
+                                shared
+                                    .ready_ring
+                                    .push(j)
+                                    .expect("ready_ring sized to n_vertices");
+                            }
+                        }
+                    }
+                    let _ = &err_slot;
+                })
+                    as Box<dyn FnMut() + Send>));
             jobs.push(job);
         }
         self.vertex_jobs = jobs;
@@ -513,25 +480,26 @@ impl Graph {
     /// in the steady state — runtime state was pre-allocated by
     /// `Graph::finish` and per-vertex closures by `prepare_dispatch`.
     /// Required by `REQ_0060`.
+    // &mut enforces single-threaded access (contract), though atomics mean no direct mutation
+    #[allow(clippy::needless_pass_by_ref_mut)]
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    #[allow(unsafe_code)]
     pub(crate) fn run_once_borrowed(&mut self, pool: &Pool) -> GraphRunOutcome {
-        let n = self.items.len();
+        let n = self.items_shared.len();
 
         // Reset per-iteration state in place.
-        for (c, d) in self.counters.iter().zip(self.in_degree.iter()) {
+        for (c, d) in self.shared.counters.iter().zip(self.in_degree.iter()) {
             c.store(*d, Ordering::Relaxed);
         }
-        self.pending.store(n, Ordering::Relaxed);
-        self.stop_flag.store(false, Ordering::Relaxed);
-        self.stop_chain_seen.store(false, Ordering::Relaxed);
+        self.shared.pending.store(n, Ordering::Relaxed);
+        self.shared.stop_flag.store(false, Ordering::Relaxed);
+        self.shared.stop_chain_seen.store(false, Ordering::Relaxed);
         // fail-fast: poison is unreachable — a holder panic aborts the process
         // before any other thread observes the lock (ADR_0065)
         #[allow(clippy::unwrap_used)]
         {
-            *self.first_err.lock().unwrap() = None;
+            *self.shared.first_err.lock().unwrap() = None;
         }
-        self.ready_ring.reset();
+        self.shared.ready_ring.reset();
 
         // Seed: dispatch every initially-ready vertex (those whose
         // **initial** in-degree is zero). Race-free — `in_degree` is
@@ -550,17 +518,17 @@ impl Graph {
 
         // Drain ready_ring until pending hits 0.
         loop {
-            while let Some(i) = self.ready_ring.pop() {
+            while let Some(i) = self.shared.ready_ring.pop() {
                 self.dispatch_vertex(pool, i);
             }
-            if self.pending.load(Ordering::Acquire) == 0 {
+            if self.shared.pending.load(Ordering::Acquire) == 0 {
                 break;
             }
             // fail-fast: poison is unreachable — a holder panic aborts the
             // process before any other thread observes the lock (ADR_0065)
             #[allow(clippy::unwrap_used)]
-            let guard = self.done_cv.0.lock().unwrap();
-            if self.pending.load(Ordering::Acquire) == 0 {
+            let guard = self.shared.done_cv.0.lock().unwrap();
+            if self.shared.pending.load(Ordering::Acquire) == 0 {
                 drop(guard);
                 break;
             }
@@ -568,7 +536,8 @@ impl Graph {
             // boundary (ADR_0065)
             #[allow(clippy::unwrap_used)]
             drop(
-                self.done_cv
+                self.shared
+                    .done_cv
                     .1
                     .wait_timeout(guard, std::time::Duration::from_millis(5))
                     .unwrap()
@@ -576,39 +545,23 @@ impl Graph {
             );
         }
         // Final drain.
-        while self.ready_ring.pop().is_some() {}
+        while self.shared.ready_ring.pop().is_some() {}
 
         // fail-fast: poison is unreachable — a holder panic aborts the process
         // before any other thread observes the lock (ADR_0065)
         #[allow(clippy::unwrap_used)]
-        let mut first_err = self.first_err.lock().unwrap();
+        let mut first_err = self.shared.first_err.lock().unwrap();
         GraphRunOutcome {
             error: first_err.take(),
-            stopped_chain: self.stop_chain_seen.load(Ordering::Acquire),
+            stopped_chain: self.shared.stop_chain_seen.load(Ordering::Acquire),
         }
     }
 
     /// Submit vertex `i`'s pre-built closure to the pool. Allocation-free
-    /// (uses `Pool::submit_borrowed`).
+    /// (uses `Pool::submit_shared`).
     #[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    #[allow(unsafe_code)]
-    fn dispatch_vertex(&mut self, pool: &Pool, i: usize) {
-        let job_ptr: *mut (dyn FnMut() + Send) =
-            std::ptr::from_mut::<dyn FnMut() + Send>(self.vertex_jobs[i].as_mut());
-        // SAFETY: closure lives on this Graph, which lives inside
-        // `Box<Graph>` inside `TaskEntry`. The primary release point is
-        // the `done_cv` / `pending == 0` join in `run_once_borrowed`: that
-        // call blocks until every dispatched vertex job has finished and
-        // `pending` has drained to 0 before it returns — i.e. before
-        // `dispatch_task` returns, well ahead of any outer barrier. The
-        // single per-wake `barrier_and_record` in
-        // `run_grid_cyclic_pass_guarded` is a redundant backstop. We hold
-        // `&mut self` throughout `run_once_borrowed`, so the `WaitSet`
-        // thread is the sole user of the graph state outside of the pool
-        // worker's closure invocation.
-        unsafe {
-            pool.submit_borrowed(crate::pool::BorrowedJob::new(job_ptr));
-        }
+    fn dispatch_vertex(&self, pool: &Pool, i: usize) {
+        pool.submit_shared(&self.vertex_jobs[i]);
     }
 }
 

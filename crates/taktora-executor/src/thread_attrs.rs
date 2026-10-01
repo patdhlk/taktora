@@ -53,26 +53,11 @@ mod inner {
             }
             #[cfg(target_os = "linux")]
             if let Some(prio) = self.priority {
-                set_sched_fifo(prio);
+                taktora_executor_sys::os::set_current_thread_sched_fifo(prio);
             }
             // Suppress unused-variable warning on non-Linux targets.
             #[cfg(not(target_os = "linux"))]
             let _ = self.priority;
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    #[allow(unsafe_code)]
-    fn set_sched_fifo(prio: i32) {
-        use std::mem::MaybeUninit;
-        let mut param: MaybeUninit<libc::sched_param> = MaybeUninit::zeroed();
-        // SAFETY: pthread_setschedparam takes a pointer to sched_param;
-        // the param is zero-initialised then we set sched_priority before
-        // passing it. Failure (e.g. no CAP_SYS_NICE) is silently ignored.
-        unsafe {
-            (*param.as_mut_ptr()).sched_priority = prio;
-            let _ =
-                libc::pthread_setschedparam(libc::pthread_self(), libc::SCHED_FIFO, param.as_ptr());
         }
     }
 }

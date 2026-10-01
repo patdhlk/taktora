@@ -36,6 +36,7 @@ body:
       description: Which workspace crate (or cross-cutting bucket) is affected?
       options:
         - taktora-executor
+        - taktora-executor-sys
         - taktora-executor-tracing
         - taktora-connector-core
         - taktora-connector-host

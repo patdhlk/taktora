@@ -70,6 +70,7 @@ grouped by layer.
 | Crate | Purpose |
 |---|---|
 | [`taktora-executor`](crates/taktora-executor) | The execution core. Items, triggers, executor, runner, channels, services, chains, graphs, signal/slot, observer + execution monitor, optional thread tuning. |
+| [`taktora-executor-sys`](crates/taktora-executor-sys) | The executor's audited unsafe boundary: Linux FFI (timerfd, timer slack, `SCHED_FIFO`), iceoryx2 port `Send` wrappers, and borrowed dispatch pointers behind safe APIs. `taktora-executor` itself is `#![forbid(unsafe_code)]`, enforced by the cargo-geiger gate. |
 | [`taktora-executor-tracing`](crates/taktora-executor-tracing) | `Observer` adapter forwarding executor lifecycle and user events to the global `tracing` subscriber. |
 | [`taktora-stats`](crates/taktora-stats) | Allocation-free `no_std` statistics primitives for telemetry: a windowed-percentile rolling histogram (octave buckets) + exact windowed min/max via a monotonic deque. `ADR_0062` / `BB_0053`. |
 | [`taktora-telemetry-export`](crates/taktora-telemetry-export) | Off-RT-thread export of executor `CycleObservation`s: a single-producer/single-consumer overwrite-oldest seqlock ring drained to NDJSON for offline jitter analysis, never blocking the WaitSet thread. `REQ_0110` / `REQ_0111`. |
@@ -483,7 +484,7 @@ cargo test  --workspace --all-features -- --test-threads=1
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
-Pre-push hooks (cargo-clippy, cargo-doc, complexity-gate) mirror the CI jobs.
+Pre-push hooks (cargo-clippy, cargo-doc, complexity-gate, unsafe-gate) mirror the CI jobs.
 Install with `pre-commit install && pre-commit install --hook-type pre-push`.
 Per-tool notes:
 
@@ -492,6 +493,11 @@ Per-tool notes:
   a plain `cargo install` fails to build on current toolchains) so the
   `complexity-gate` pre-push hook runs. Without it the hook self-skips; CI
   enforces it regardless.
+- **Unsafe gate (optional locally):** install once with
+  `cargo install --locked cargo-geiger` so the `unsafe-gate` pre-push hook runs.
+  Without it the hook self-skips; CI enforces it regardless. The gate verifies
+  that designated crates (`taktora-executor`) forbid `unsafe` code and have zero
+  unsafe usage (their unsafe operations live in companion `-sys` crates).
 
 Tests run single-threaded in CI because each test creates its own iceoryx2
 service in shared memory (parallel runs would contend on the same names) and

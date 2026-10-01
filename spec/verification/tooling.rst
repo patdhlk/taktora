@@ -202,3 +202,56 @@ Test-execution records
    extension unit tests, strict spec build and upload all green; artifact
    ``test-execution-record`` (2571 bytes) published with the record's
    ``build`` / ``summary`` block in the job summary.
+
+Unsafe-code gate
+----------------
+
+.. test:: taktora-executor-sys compiles with documented unsafe, executor forbids unsafe
+   :id: TEST_0987
+   :status: implemented
+   :verifies: REQ_1208, REQ_1209, REQ_1210
+
+   ``taktora-executor-sys`` compiles with clippy
+   ``undocumented_unsafe_blocks = "deny"`` and ``unsafe_op_in_unsafe_fn =
+   "deny"`` enforcing that every unsafe block carries a ``// SAFETY:``
+   comment. ``taktora-executor`` compiles with ``#![forbid(unsafe_code)]``
+   in ``lib.rs``, making any unsafe use a hard error. Verified by the
+   ``unsafe`` CI job and locally via ``cargo build -p taktora-executor-sys
+   -p taktora-executor``.
+
+.. test:: Geiger gate enforces forbid and reports workspace unsafe
+   :id: TEST_0988
+   :status: implemented
+   :verifies: REQ_1211, REQ_1212, REQ_1215
+
+   ``scripts/check-unsafe.sh`` parses ``cargo geiger`` JSON output and
+   exits nonzero if any crate in ``FORBID_CRATES`` has
+   ``forbids_unsafe == false`` or non-zero used unsafe
+   (functions/expressions/impls/traits). With ``GEIGER_REPORT=1``, emits
+   per-crate markdown + JSON reports to ``target/geiger/``. Verified by
+   the ``unsafe`` CI job which runs the script, appends the report to the
+   GitHub job summary, and uploads ``target/geiger/`` as artifact
+   ``geiger-report``.
+
+.. test:: Missing-tool self-skip with install hints
+   :id: TEST_0989
+   :status: implemented
+   :verifies: REQ_1213
+
+   With ``cargo-geiger`` or ``jq`` absent from ``PATH``,
+   ``scripts/check-unsafe.sh`` exits zero and prints an install hint
+   (``cargo install cargo-geiger --locked`` and the ``jq`` package) so
+   contributor builds degrade gracefully while CI (which installs the
+   tools) gates strictly. Verified by running the script on a machine
+   without the tools installed.
+
+.. test:: Contributor documentation present
+   :id: TEST_0990
+   :status: implemented
+   :verifies: REQ_1214
+
+   Doc inspection: ``CONTRIBUTING.md`` carries an "Unsafe code
+   (cargo-geiger)" section documenting the forbid policy, the
+   ``taktora-executor-sys`` boundary, the local gate entrypoint
+   (``scripts/check-unsafe.sh``), report generation
+   (``GEIGER_REPORT=1``), and CI behaviour.

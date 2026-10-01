@@ -4,7 +4,8 @@ Workspace tooling
 Repo-wide developer-tooling requirements — infrastructure that spans all
 workspace crates rather than any one subsystem. Residents: test-coverage
 measurement (:need:`FEAT_0120`), the onboarding golden path
-(:need:`FEAT_0121`) and test-execution records (:need:`FEAT_0122`).
+(:need:`FEAT_0121`), test-execution records (:need:`FEAT_0122`), and the
+unsafe-code gate (:need:`FEAT_0201`).
 Candidates for later migration: the complexity gate, the publish-ordering
 guards.
 
@@ -14,3 +15,4 @@ guards.
    coverage
    onboarding
    test-records
+   unsafe
