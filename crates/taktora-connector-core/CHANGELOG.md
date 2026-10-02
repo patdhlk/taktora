@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.11](https://github.com/patdhlk/taktora/compare/taktora-connector-core-v0.2.10...taktora-connector-core-v0.2.11) - 2026-10-02
+
+
+### Added
+
+- *(executor)* Forbid unsafe code; move unsafe into taktora-executor-sys, gate with cargo-geiger ([#271](https://github.com/patdhlk/taktora/pull/271))
+
 ## [0.2.10](https://github.com/patdhlk/taktora/compare/taktora-connector-core-v0.2.9...taktora-connector-core-v0.2.10) - 2026-07-15
 
 
