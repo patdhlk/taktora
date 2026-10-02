@@ -84,7 +84,7 @@ fn c2_continuity_across_all_seams() {
     let saw = FlyingSaw::plan(home, t_on, t_sync, master, limits).unwrap();
     let trace = run_to_home(saw, master.vel, master.pos);
 
-    assert!(!trace.is_empty());
+    assert_ne!(trace.len(), 0, "trace must not be empty");
     // Tolerances: Lipschitz bounds from the limits, plus float slack.
     let v_step = limits.a_max * DT + 1e-6;
     let a_step = limits.j_max * DT + 1e-3;

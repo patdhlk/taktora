@@ -10,7 +10,7 @@ fn txpdo_preserves_metadata_entries_and_padding() {
     let file = parse(EL3001).expect("fixture parses");
     let dev = &file.devices[0];
     assert_eq!(dev.tx_pdos.len(), 1);
-    assert!(dev.rx_pdos.is_empty());
+    assert_eq!(dev.rx_pdos, [] as [taktora_ethercat_esi::Pdo; 0]);
 
     let pdo = &dev.tx_pdos[0];
     assert_eq!(pdo.index, 0x1A00);

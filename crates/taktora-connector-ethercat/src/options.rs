@@ -419,7 +419,7 @@ mod tests {
             value: SdoValue::U16(1800),
         }];
         let base = SubDeviceMap::new(0x1003, &[], &[], 3);
-        assert!(base.startup_sdos.is_empty());
+        assert_eq!(base.startup_sdos.len(), 0);
         let cfg = base.with_startup_sdos(S);
         assert_eq!(cfg.startup_sdos.len(), 1);
         assert_eq!(cfg.startup_sdos[0].index, 0x8010);

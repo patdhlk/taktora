@@ -77,7 +77,7 @@ fn reply_frame_decode_end_of_stream() {
     let envelope = [0x02u8];
     let frame = ReplyFrame::decode(&envelope).expect("known kind");
     assert_eq!(frame.kind(), FrameKind::EndOfStream);
-    assert!(frame.body().is_empty());
+    assert_eq!(frame.body(), b"");
 }
 
 #[test]

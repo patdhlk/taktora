@@ -177,7 +177,7 @@ mod startup_tests {
     #[test]
     fn empty_startup_sdos_produce_no_writes() {
         let map = SubDeviceMap::new(0x1003, &[], &[], 3);
-        assert!(startup_sdo_writes(&map).is_empty());
+        assert_eq!(startup_sdo_writes(&map).len(), 0);
     }
 
     #[test]

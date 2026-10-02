@@ -1258,7 +1258,10 @@ mod tests {
         let plain = view
             .fault_detail(EntityKind::Component, "spark", "MOTOR")
             .unwrap();
-        assert!(plain.environment_data.snapshots.is_empty());
+        assert_eq!(
+            plain.environment_data.snapshots,
+            [] as [taktora_medkit_model::FreezeFrame<serde_json::Value>; 0]
+        );
     }
 
     /// `TEST_0906` — data navigates the topic path and 404s past the leaf.
@@ -1394,7 +1397,10 @@ mod tests {
         assert!(view.entity("app:planner").unwrap().parent_id.is_none());
         // The parentless app surfaces under no synthesized relationship.
         assert_eq!(view.list(EntityKind::App).items.len(), 1);
-        assert!(view.list(EntityKind::Area).items.is_empty());
+        assert_eq!(
+            view.list(EntityKind::Area).items,
+            [] as [taktora_medkit_model::Entity; 0]
+        );
     }
 
     /// `REQ_0990` — the version catalogue carries the injected build identity

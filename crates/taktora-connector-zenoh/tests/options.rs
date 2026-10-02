@@ -14,8 +14,8 @@ use taktora_connector_zenoh::{
 fn defaults_are_peer_mode() {
     let opts = ZenohConnectorOptions::builder().build();
     assert_eq!(opts.mode, SessionMode::Peer);
-    assert!(opts.connect.is_empty());
-    assert!(opts.listen.is_empty());
+    assert_eq!(opts.connect, [] as [taktora_connector_zenoh::Locator; 0]);
+    assert_eq!(opts.listen, [] as [taktora_connector_zenoh::Locator; 0]);
 }
 
 #[test]

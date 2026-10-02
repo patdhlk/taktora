@@ -46,7 +46,10 @@ static THREE_TX_ENTRIES: &[PdoEntry] = &[
 #[test]
 fn empty_pdo_map_emits_no_writes() {
     let map = SubDeviceMap::new(0x0001, EMPTY_ENTRIES, EMPTY_ENTRIES, 0);
-    assert!(pdo_sdo_writes(&map).is_empty());
+    assert_eq!(
+        pdo_sdo_writes(&map),
+        [] as [taktora_connector_ethercat::SdoWrite; 0]
+    );
 }
 
 #[test]

@@ -371,7 +371,7 @@ mod tests {
         assert_eq!(opts.inbound_capacity(), 1);
         assert_eq!(opts.inbound_drop_threshold(), 1);
         assert_eq!(opts.tokio_worker_threads(), 1);
-        assert!(opts.interfaces().is_empty());
+        assert_eq!(opts.interfaces().len(), 0);
     }
 
     #[test]

@@ -358,7 +358,7 @@ async fn version_info_reports_injected_build_identity() {
     assert!(vendor["git_sha"].is_string());
     assert!(vendor["git_dirty"].is_boolean());
     // The capture actually ran against this repo — a real hash, not empty.
-    assert!(!build.git_sha.is_empty());
+    assert_ne!(build.git_sha, "");
 }
 
 /// `TEST_0956` — with no injected identity the document stays well-formed: git

@@ -161,10 +161,10 @@ async fn absent_manifest_stays_flat() {
 
     let (status, areas) = get_json(addr, "/api/v1/areas").await;
     assert_eq!(status, 200);
-    assert!(ids(&areas).is_empty());
+    assert_eq!(ids(&areas), [] as [std::string::String; 0]);
 
     // The raw subdevice component is present but groups nothing under it.
     let (status, hosts) = get_json(addr, "/api/v1/components/component:0x01/hosts").await;
     assert_eq!(status, 200);
-    assert!(ids(&hosts).is_empty());
+    assert_eq!(ids(&hosts), [] as [std::string::String; 0]);
 }

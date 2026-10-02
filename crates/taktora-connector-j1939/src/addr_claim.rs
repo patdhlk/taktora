@@ -445,7 +445,7 @@ mod tests {
         assert_eq!(u64::from_le_bytes(out[0].data), OUR_NAME);
 
         // Before the wait elapses: still Claiming.
-        assert!(eng.poll(t0 + Duration::from_millis(249)).is_empty());
+        assert_eq!(eng.poll(t0 + Duration::from_millis(249)).len(), 0);
         assert_eq!(eng.state(), ClaimState::Claiming);
 
         // After the wait: Claimed.
@@ -498,7 +498,7 @@ mod tests {
             &competitor_name.to_le_bytes(),
             t0,
         );
-        assert!(ev.is_empty());
+        assert_eq!(ev.len(), 0);
         assert_eq!(eng.state(), ClaimState::Claiming);
         // We re-asserted our claim.
         let out = eng.take_outbound();
@@ -518,7 +518,7 @@ mod tests {
             &REQUEST_FOR_ADDRESS_CLAIMED,
             t0,
         );
-        assert!(ev.is_empty());
+        assert_eq!(ev.len(), 0);
         let out = eng.take_outbound();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].wire_pgn.value(), ADDRESS_CLAIMED_PGN);
@@ -588,9 +588,9 @@ mod tests {
         let mut payload = (OUR_NAME ^ 0xFFFF).to_le_bytes().to_vec();
         payload.push(0x42);
         let ev = eng.on_frame(&decoded(COMMANDED_ADDRESS_PGN, 0x00), &payload, t0);
-        assert!(ev.is_empty());
+        assert_eq!(ev.len(), 0);
         assert_eq!(eng.source_addr(), OUR_SA);
-        assert!(eng.take_outbound().is_empty());
+        assert_eq!(eng.take_outbound().len(), 0);
     }
 
     #[test]

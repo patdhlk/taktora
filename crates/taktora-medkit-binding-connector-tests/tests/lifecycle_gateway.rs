@@ -55,7 +55,10 @@ fn up_degraded_down_up_drives_dtc_lifecycle_through_gateway() {
     assert_eq!(gateway.entities().items.len(), 1);
     assert_eq!(gateway.entities().items[0].kind, EntityKind::Component);
     assert_eq!(gateway.rolled_up_health(COMPONENT), Health::Ok);
-    assert!(gateway.faults(COMPONENT).items.is_empty());
+    assert_eq!(
+        gateway.faults(COMPONENT).items,
+        [] as [taktora_medkit_model::FaultSummary; 0]
+    );
 
     // --- Degraded: a Warning DTC carrying the reason, Component Warning. ------
     binding.apply(&degraded("working counter below expected"), 2.0);

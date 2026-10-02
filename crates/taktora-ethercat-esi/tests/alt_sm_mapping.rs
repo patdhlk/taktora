@@ -38,5 +38,8 @@ fn device_without_vendor_block_has_no_mappings() {
     // EL1008 fixture has no AlternativeSmMapping.
     let el1008 = include_str!("fixtures/beckhoff_el1008.xml");
     let file = parse(el1008).expect("el1008 parses");
-    assert!(file.devices[0].alt_sm_mappings.is_empty());
+    assert_eq!(
+        file.devices[0].alt_sm_mappings,
+        [] as [taktora_ethercat_esi::AlternativeSmMapping; 0]
+    );
 }

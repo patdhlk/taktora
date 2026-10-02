@@ -419,8 +419,8 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/medkit.toml");
         let manifest = Manifest::from_toml(path).expect("load committed medkit.toml");
         assert!(!manifest.is_empty());
-        assert!(!manifest.areas().is_empty());
-        assert!(!manifest.components().is_empty());
+        assert_ne!(manifest.areas(), []);
+        assert_ne!(manifest.components(), []);
     }
 
     /// `TEST_0909` — `parent_of` resolves the binding id conventions and rejects

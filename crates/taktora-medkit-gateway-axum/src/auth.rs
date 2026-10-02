@@ -331,7 +331,7 @@ mod tests {
             .expect("permissive never rejects");
         assert_eq!(token.token_type, "Bearer");
         assert_eq!(token.expires_in, DEFAULT_EXPIRES_IN);
-        assert!(!token.scope.is_empty());
+        assert_ne!(token.scope, "");
         let segments: Vec<&str> = token.access_token.split('.').collect();
         assert_eq!(segments.len(), 3, "JWT shape: 3 segments");
         assert!(segments.iter().all(|s| !s.is_empty()));
