@@ -1,0 +1,32 @@
+[package]
+name         = "taktora-executor-sys"
+version      = "0.1.0"
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+homepage     = { workspace = true }
+readme       = { workspace = true }
+keywords     = { workspace = true }
+categories   = { workspace = true }
+description  = "Audited unsafe primitives for taktora-executor: OS FFI, iceoryx2 port Send wrappers, and borrowed dispatch pointers behind safe APIs."
+
+[dependencies]
+iceoryx2 = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc              = "0.2"
+iceoryx2-bb-posix = "0.9"
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"

@@ -247,7 +247,7 @@ mod tests {
         assert_eq!(opts.inbound_drop_threshold(), 1);
         assert_eq!(opts.tokio_worker_threads(), 1);
         assert_eq!(opts.recovery_window(), Duration::from_secs(1));
-        assert!(opts.ifaces().is_empty());
+        assert_eq!(opts.ifaces(), []);
     }
 
     #[test]

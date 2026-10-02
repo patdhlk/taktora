@@ -35,7 +35,7 @@ fn unknown_fmmu_usage_is_tolerated_as_other() {
 #[test]
 fn device_without_fmmus_has_empty_vec() {
     let file = parse(&esi("")).expect("parses");
-    assert!(file.devices[0].fmmus.is_empty());
+    assert_eq!(file.devices[0].fmmus, [] as [taktora_ethercat_esi::Fmmu; 0]);
 }
 
 #[test]

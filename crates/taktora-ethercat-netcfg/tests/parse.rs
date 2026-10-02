@@ -55,7 +55,7 @@ channels:
     let DeviceSource::Inline { rx, tx } = &device.source else {
         panic!("inline device should resolve to DeviceSource::Inline");
     };
-    assert!(rx.is_empty());
+    assert_eq!(rx.as_slice(), []);
     assert_eq!(
         tx,
         &vec![PdoEntry {

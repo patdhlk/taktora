@@ -137,3 +137,14 @@ repos:
         description: >-
           Cyclomatic/exit-point gate. Self-skips if rust-code-analysis-cli/jq
           are not installed. Matches the `complexity` CI job.
+
+      - id: unsafe-gate
+        name: unsafe gate (cargo-geiger)
+        entry: ./scripts/check-unsafe.sh
+        language: system
+        pass_filenames: false
+        files: \.rs$
+        stages: [pre-push]
+        description: >-
+          Unsafe gate for FORBID_CRATES. Self-skips if cargo-geiger/jq are not
+          installed. Matches the `unsafe` CI job.

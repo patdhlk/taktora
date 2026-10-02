@@ -5,13 +5,13 @@ use crate::error::ExecutorError;
 use crate::payload::Payload;
 use core::marker::PhantomData;
 use iceoryx2::node::Node;
-use iceoryx2::port::client::Client as IxClient;
 use iceoryx2::port::listener::Listener as IxListener;
-use iceoryx2::port::notifier::Notifier as IxNotifier;
-use iceoryx2::port::server::Server as IxServer;
 use iceoryx2::prelude::*;
 use iceoryx2::response::Response as IxResponse;
 use std::sync::Arc;
+use taktora_executor_sys::ports::{
+    SendClient, SendListener, SendNotifier, SendPendingRequest, SendServer,
+};
 
 type IpcService = ipc::Service;
 
@@ -97,13 +97,15 @@ where
             .notifier_builder()
             .create()
             .map_err(ExecutorError::iceoryx2)?;
-        // SAFETY: see `impl Send for Server<Req, Resp>` below.
+        // SAFETY: After port creation, only `try_wait_one()` is called on the
+        // listener, which does not touch the iceoryx2 `Rc` refcount. Moving the
+        // Arc<Listener> across threads is sound per SendListener's contract.
         #[allow(clippy::arc_with_non_send_sync)]
-        let listener = Arc::new(listener);
+        let listener = SendListener::new(Arc::new(listener));
         Ok(Server {
-            inner,
+            inner: SendServer::new(inner),
             listener,
-            resp_notifier,
+            resp_notifier: SendNotifier::new(resp_notifier),
             _service: Arc::clone(self),
         })
     }
@@ -125,13 +127,15 @@ where
             .notifier_builder()
             .create()
             .map_err(ExecutorError::iceoryx2)?;
-        // SAFETY: see `impl Send for Client<Req, Resp>` below.
+        // SAFETY: After port creation, only `try_wait_one()` is called on the
+        // listener, which does not touch the iceoryx2 `Rc` refcount. Moving the
+        // Arc<Listener> across threads is sound per SendListener's contract.
         #[allow(clippy::arc_with_non_send_sync)]
-        let listener = Arc::new(listener);
+        let listener = SendListener::new(Arc::new(listener));
         Ok(Client {
-            inner,
+            inner: SendClient::new(inner),
             listener,
-            req_notifier,
+            req_notifier: SendNotifier::new(req_notifier),
             _service: Arc::clone(self),
         })
     }
@@ -143,27 +147,10 @@ where
     Req: Payload,
     Resp: Payload,
 {
-    inner: IxServer<IpcService, Req, (), Resp, ()>,
-    listener: Arc<IxListener<IpcService>>,
-    resp_notifier: IxNotifier<IpcService>,
+    inner: SendServer<Req, Resp>,
+    listener: SendListener,
+    resp_notifier: SendNotifier,
     _service: Arc<Service<Req, Resp>>,
-}
-
-// SAFETY: `IxServer<ipc::Service, …>` is `!Send` because
-// `ipc::Service::ArcThreadSafetyPolicy` is `SingleThreaded`, which wraps an
-// `Rc`-like interior.  The Rc is only mutated during port creation (constructor)
-// and during `update_connections` (called inside `receive()`).  After
-// construction, the executor only calls:
-//   * `server.receive()` — drives `update_connections()` + shared-memory read
-//   * `server.listener_handle()` — cheap `Arc::clone` of our own Arc
-// No two threads concurrently touch the Rc, so moving a `Server` is sound.
-// We do not implement `Sync`; the struct is move-only across threads.
-#[allow(unsafe_code, clippy::non_send_fields_in_send_ty)]
-unsafe impl<Req, Resp> Send for Server<Req, Resp>
-where
-    Req: Payload,
-    Resp: Payload,
-{
 }
 
 impl<Req, Resp> Server<Req, Resp>
@@ -196,7 +183,7 @@ where
 
     /// Borrow the request-event listener (executor uses this for trigger attachment).
     pub fn listener_handle(&self) -> Arc<IxListener<IpcService>> {
-        Arc::clone(&self.listener)
+        self.listener.clone_inner()
     }
 }
 
@@ -234,24 +221,10 @@ where
     Req: Payload,
     Resp: Payload,
 {
-    inner: IxClient<IpcService, Req, (), Resp, ()>,
-    listener: Arc<IxListener<IpcService>>,
-    req_notifier: IxNotifier<IpcService>,
+    inner: SendClient<Req, Resp>,
+    listener: SendListener,
+    req_notifier: SendNotifier,
     _service: Arc<Service<Req, Resp>>,
-}
-
-// SAFETY: same rationale as `Server<Req, Resp>` above.
-// `IxClient<ipc::Service, …>` is `!Send` because `SingleThreaded` holds an Rc.
-// After construction, only `send_copy` and `listener_handle` are called.
-// `send_copy` does not touch the Rc concurrently; `listener_handle` is an
-// `Arc::clone`. No concurrent Rc mutation, so moving a `Client` is sound.
-// We do not implement `Sync`.
-#[allow(unsafe_code, clippy::non_send_fields_in_send_ty)]
-unsafe impl<Req, Resp> Send for Client<Req, Resp>
-where
-    Req: Payload,
-    Resp: Payload,
-{
 }
 
 impl<Req, Resp> Client<Req, Resp>
@@ -266,12 +239,14 @@ where
         self.req_notifier
             .notify()
             .map_err(ExecutorError::iceoryx2)?;
-        Ok(PendingRequest { inner: pending })
+        Ok(PendingRequest {
+            inner: SendPendingRequest::new(pending),
+        })
     }
 
     /// Borrow the response-event listener (executor uses this for trigger attachment).
     pub fn listener_handle(&self) -> Arc<IxListener<IpcService>> {
-        Arc::clone(&self.listener)
+        self.listener.clone_inner()
     }
 }
 
@@ -281,19 +256,7 @@ where
     Req: Payload,
     Resp: Payload,
 {
-    inner: iceoryx2::pending_response::PendingResponse<IpcService, Req, (), Resp, ()>,
-}
-
-// SAFETY: `PendingResponse<ipc::Service, …>` is `!Send` for the same
-// `SingleThreaded` Rc reason.  After construction, only `receive()` is
-// called (shared-memory read path, no concurrent Rc mutation).
-// Move-only across threads; no `Sync`.
-#[allow(unsafe_code, clippy::non_send_fields_in_send_ty)]
-unsafe impl<Req, Resp> Send for PendingRequest<Req, Resp>
-where
-    Req: Payload,
-    Resp: Payload,
-{
+    inner: SendPendingRequest<Req, Resp>,
 }
 
 impl<Req, Resp> PendingRequest<Req, Resp>

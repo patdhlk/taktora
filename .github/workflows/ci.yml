@@ -191,6 +191,32 @@ jobs:
       - name: Run complexity gate
         run: ./scripts/check-complexity.sh
 
+  # Unsafe gate: taktora-executor forbids unsafe code; its unsafe operations
+  # live in the dedicated taktora-executor-sys crate. Every unsafe block in
+  # -sys carries a `// SAFETY:` rationale. Connector crates are reported in
+  # the artifact but not gated yet (they remain `allow(unsafe_code)`).
+  unsafe:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: Unsafe gate (cargo-geiger)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-geiger
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-geiger
+      - name: Run unsafe gate
+        run: GEIGER_REPORT=1 ./scripts/check-unsafe.sh
+      - name: Upload geiger report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geiger-report
+          path: target/geiger/
+
   spec:
     needs: changes
     # Validate the spec on any spec change, and on code changes (codelinks /

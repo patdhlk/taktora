@@ -91,6 +91,31 @@ from the denominator. CI runs the same script on code-changing PRs
 informational only, no coverage floor is enforced. Spec: `FEAT_0120` /
 `ADR_0134` / `ADR_0135`.
 
+### Unsafe code (cargo-geiger)
+
+```bash
+# Run the unsafe gate (checks FORBID_CRATES).
+./scripts/check-unsafe.sh
+
+# Generate full workspace report (slower).
+GEIGER_REPORT=1 ./scripts/check-unsafe.sh
+```
+
+Policy: `taktora-executor` is `#![forbid(unsafe_code)]`. Its `unsafe`
+operations live in the dedicated `taktora-executor-sys` crate
+(`crates/taktora-executor-sys`), where every `unsafe` block carries a
+`// SAFETY:` comment documenting the invariant it relies on. Connector crates
+are not gated yet (they remain `#[allow(unsafe_code)]`). The gate runs in CI
+and via the `unsafe-gate` pre-push hook (self-skips if `cargo-geiger` or `jq`
+are missing; install with `cargo install --locked cargo-geiger`).
+
+Output lands in `target/geiger/`: per-crate JSON, logs, and (when
+`GEIGER_REPORT=1`) a markdown summary table at `target/geiger/report.md`.
+
+To add a crate to the gate: insert it in the `FORBID_CRATES` array at the top
+of `scripts/check-unsafe.sh`, add `#![forbid(unsafe_code)]` to its `lib.rs`,
+and move any `unsafe` blocks out to a companion `-sys` crate or eliminate them.
+
 ## Coding conventions
 
 - Workspace edition 2024, MSRV 1.85.

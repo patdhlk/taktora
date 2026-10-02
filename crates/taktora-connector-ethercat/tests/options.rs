@@ -33,7 +33,7 @@ fn default_options_match_spec() {
     assert_eq!(opts.outbound_capacity(), 256);
     assert_eq!(opts.inbound_capacity(), 256);
     // Empty PDO map by default.
-    assert!(opts.pdo_map().is_empty());
+    assert_eq!(opts.pdo_map(), []);
 }
 
 #[test]

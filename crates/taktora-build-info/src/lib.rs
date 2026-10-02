@@ -67,9 +67,9 @@ mod tests {
     fn capture_is_populated() {
         // The env constants are always present (build.rs emits every key), so
         // no field is empty; git fields are a hash or the `"unknown"` fallback.
-        assert!(!CAPTURED.git_sha.is_empty());
-        assert!(!CAPTURED.git_short.is_empty());
-        assert!(!CAPTURED.build_timestamp.is_empty());
-        assert!(!CAPTURED.rustc_version.is_empty());
+        assert_ne!(CAPTURED.git_sha, "");
+        assert_ne!(CAPTURED.git_short, "");
+        assert_ne!(CAPTURED.build_timestamp, "");
+        assert_ne!(CAPTURED.rustc_version, "");
     }
 }

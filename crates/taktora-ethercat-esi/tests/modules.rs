@@ -14,7 +14,7 @@ fn module_catalog_is_captured() {
     assert_eq!(di.product_type.as_deref(), Some("DI-8"));
     assert_eq!(di.name.as_deref(), Some("8-channel digital input"));
     assert_eq!(di.tx_pdos.len(), 1);
-    assert!(di.rx_pdos.is_empty());
+    assert_eq!(di.rx_pdos, [] as [taktora_ethercat_esi::Pdo; 0]);
     assert_eq!(di.tx_pdos[0].index, 0x1A00);
     assert_eq!(di.tx_pdos[0].entries[0].bit_length, 8);
 
@@ -54,7 +54,7 @@ fn slot_constraints_are_captured() {
 fn non_modular_device_has_no_slots_and_file_has_no_modules() {
     let file = parse(include_str!("fixtures/beckhoff_el1008.xml")).expect("parses");
     assert!(file.devices[0].slots.is_none());
-    assert!(file.modules.is_empty());
+    assert_eq!(file.modules, [] as [taktora_ethercat_esi::Module; 0]);
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn modules_only_file_parses_with_empty_devices() {
                <Module><Type ModuleIdent=\"#x1\">M-1</Type></Module>\
                </Modules></Descriptions></EtherCATInfo>";
     let file = parse(xml).expect("a modules-only ESI file is valid input");
-    assert!(file.devices.is_empty());
+    assert_eq!(file.devices, [] as [taktora_ethercat_esi::EsiDevice; 0]);
     assert_eq!(file.modules.len(), 1);
     assert_eq!(file.modules[0].ident, Some(1));
 }

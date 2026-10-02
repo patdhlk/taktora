@@ -54,5 +54,8 @@ fn no_startup_sdos_is_empty() {
         "schema_version: 1\nbus: { cycle_time_ms: 2, distributed_clocks: false, max_subdevices: 16, max_pdi_bytes: 256 }\ndevices:\n  - label: din\n    pdos: { tx: [{ index: 0x1a00, bit_offset: 0, bit_length: 8 }] }\nchannels: []\n",
     )
     .expect("parses");
-    assert!(cfg.devices[0].startup_sdos.is_empty());
+    assert_eq!(
+        cfg.devices[0].startup_sdos,
+        [] as [taktora_ethercat_netcfg::StartupSdoSpec; 0]
+    );
 }

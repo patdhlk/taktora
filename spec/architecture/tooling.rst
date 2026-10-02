@@ -237,6 +237,111 @@ Test-execution records — implementation footprint
    * CI wiring (the medkit ``cargo-nextest`` leg feeding the spec build) that
      regenerates and uploads the record as a workflow artifact.
 
+
+Unsafe-code gate — solution strategy
+------------------------------------
+
+.. arch-decision:: Extract unsafe into sys crate with sound safe abstractions
+   :id: ADR_0204
+   :status: accepted
+   :refines: FEAT_0201
+
+   **Context.** ``taktora-executor`` scatters unsafe blocks across its
+   modules (OS FFI for timerfd / thread scheduling, iceoryx2 port lifetime
+   wrappers, dispatch-table and shared-job primitives) with no enforcement
+   that a refactor cannot add unsafe to the hot path. For a project
+   building a safety argument, unsafe surface must be minimised, audited,
+   and enforced. The question is how to achieve ``#![forbid(unsafe_code)]``
+   on the executor crate: eliminate unsafe entirely, extract into a sys
+   crate with sound abstractions, extract into raw-pointer helpers, or
+   gate without forbid.
+
+   **Decision.** Extract unsafe into ``taktora-executor-sys`` behind sound
+   safe abstractions (``ExclusiveCell<T>`` for CAS-based exclusive access
+   to shared jobs/vertices/chains via ``Arc<ExclusiveCell<...>>``;
+   iceoryx2 IPC port ``Send`` / ``Send+Sync`` wrappers; Linux OS FFI) with
+   every block carrying ``// SAFETY:`` comments
+   (``undocumented_unsafe_blocks = "deny"``); ``taktora-executor``
+   declares ``#![forbid(unsafe_code)]`` and consumes safe APIs only.
+   Enforce via ``cargo-geiger`` hard gate in ``scripts/check-unsafe.sh``
+   (CI job ``unsafe`` + pre-push hook). Considered and rejected:
+
+   * **Leave raw-pointer unsafe fn helpers in sys, call from executor** —
+     impossible under ``#![forbid(unsafe_code)]`` (forbid blocks all
+     unsafe use, including calls to ``unsafe fn``). Only moves the proof
+     obligation to the caller without providing a safe abstraction.
+   * **Arc<Mutex> everywhere / iceoryx2 threadsafe service** — ``Mutex``
+     adds lock contention to the hot path and changes RT characteristics;
+     a threadsafe iceoryx2 service is a larger architectural change. Both
+     are incompatible with the executor's current dispatch model.
+   * **Ratchet-only gate (report, no forbid)** — measures current unsafe
+     counts but cannot prevent a contributor adding unsafe to a forbid
+     crate; the gate is soft (fails on an increase) rather than hard
+     (compile error). Does not achieve the requirement: an audited
+     boundary must be a compiler-enforced boundary, not a CI suggestion.
+
+   **Consequences.** ✅ Compile-time hard boundary: adding unsafe to
+   ``taktora-executor`` is a build failure, not a gate failure. ✅ Unsafe
+   surface is auditable — every block documented, isolated in one crate,
+   LoC-counted by geiger. ✅ Hot-path dispatch stays zero-alloc
+   steady-state (:need:`REQ_0104`). ❌ A new published crate
+   (``taktora-executor-sys``) enters the workspace, adding a versioning /
+   publish-ordering obligation. ❌ Per-dispatch cost: one CAS + one Arc
+   refcount (``Arc<ExclusiveCell<...>>`` shared ownership). ❌ The
+   iceoryx2 port ``Send`` wrappers still rely on a documented
+   library-internal assumption (SingleThreaded Rc arc policy touched only
+   at construction). ❌ Connector crates stay ungated (deferred — they
+   consume third-party protocol libraries whose unsafe is not ours to
+   audit), so the gate is partial.
+
+Unsafe-code gate — implementation footprint
+-------------------------------------------
+
+.. impl:: Unsafe-code gate — taktora-executor-sys + scripts/check-unsafe.sh + CI
+   :id: IMPL_0094
+   :status: implemented
+   :refines: REQ_1208, REQ_1209, REQ_1210, REQ_1211, REQ_1212, REQ_1213, REQ_1214, REQ_1215
+
+   The realising artefacts, all in-repo:
+
+   * ``crates/taktora-executor-sys/`` — the audited unsafe boundary:
+     ``src/dispatch.rs`` (``ExclusiveCell<T: ?Sized>`` — AtomicBool busy
+     flag + UnsafeCell, providing ``try_with(|&mut T| ..) -> Option<R>``
+     CAS-acquired exclusive access with panic-safe drop-guard release;
+     ``Send+Sync`` iff ``T: Send``); ``src/ports.rs`` (iceoryx2 IPC port
+     wrappers: ``SendPublisher``, ``SendSubscriber``, ``SendNotifier``,
+     ``SharedNotifier`` (Clone+Send+Sync, Arc-backed),
+     ``SendServer``, ``SendClient``, ``SendPendingRequest``,
+     ``SendListener`` — each exposing only the methods the executor calls;
+     soundness relies on iceoryx2's SingleThreaded Rc arc policy being
+     touched only at construction); ``src/os.rs`` (Linux-only: ``TimerFd``
+     + iceoryx2-bb-posix fd traits, ``set_current_thread_timer_slack_ns``,
+     ``set_current_thread_sched_fifo``). The ``ExclusiveCell<T>`` design
+     removes a raw-pointer hazard: chain dispatch closures previously held
+     a raw pointer to the chain Vec header inside the growing task table.
+     Every unsafe block carries ``// SAFETY:`` rationale; Cargo.toml
+     lints: clippy pedantic + nursery,
+     ``undocumented_unsafe_blocks = "deny"``,
+     ``unsafe_op_in_unsafe_fn = "deny"``, ``missing_docs = "warn"``.
+   * ``crates/taktora-executor/src/lib.rs`` — ``#![forbid(unsafe_code)]``
+     declaration, making any unsafe a compile error in that crate.
+   * ``scripts/check-unsafe.sh`` — the single entrypoint: tool-presence
+     check (``cargo-geiger`` + ``jq``) with install hints (self-skip on
+     missing, so contributor builds degrade gracefully); ``cargo geiger``
+     JSON output parsing; hard gate that each crate in ``FORBID_CRATES``
+     (initially ``taktora-executor``) has ``forbids_unsafe == true`` and
+     zero used unsafe; optional ``GEIGER_REPORT=1`` emits informational
+     per-crate report (all workspace members, incl. connectors) to
+     ``target/geiger/report.md`` + ``report.json``.
+   * ``.github/workflows/ci.yml`` — ``unsafe`` job (shared diff
+     classifier) invoking the script with ``GEIGER_REPORT=1``; job summary
+     + artifact publication of ``target/geiger/`` as ``geiger-report``.
+   * ``.githooks/pre-push.d/unsafe-gate`` — local pre-push hook running
+     the same script (no report flag, so fast).
+   * ``CONTRIBUTING.md`` "Unsafe code (cargo-geiger)" section —
+     contributor-facing documentation: the forbid policy, sys crate
+     boundary, local gate run, report locations.
+
 Decisions at a glance
 ---------------------
 

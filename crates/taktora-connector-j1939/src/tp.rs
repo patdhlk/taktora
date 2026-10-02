@@ -1996,18 +1996,18 @@ mod tests {
             frames[0].source_addr,
             frames[0].dest_addr,
         ));
-        assert!(rx.on_frame(&cm, &frames[0].data, t0).is_empty());
+        assert_eq!(rx.on_frame(&cm, &frames[0].data, t0).len(), 0);
         let dt = decode_extended_id(encode_extended_id(
             frames[1].wire_pgn,
             7,
             frames[1].source_addr,
             frames[1].dest_addr,
         ));
-        assert!(rx.on_frame(&dt, &frames[1].data, t0).is_empty());
+        assert_eq!(rx.on_frame(&dt, &frames[1].data, t0).len(), 0);
         assert_eq!(rx.active_inbound_sessions(), 1);
 
         // No timeout just before T1.
-        assert!(rx.poll_timeouts(t0 + Duration::from_millis(749)).is_empty());
+        assert_eq!(rx.poll_timeouts(t0 + Duration::from_millis(749)).len(), 0);
         // Aborted just after T1.
         let events = rx.poll_timeouts(t0 + Duration::from_millis(751));
         assert_eq!(events.len(), 1);
@@ -2034,7 +2034,7 @@ mod tests {
             rts[0].source_addr,
             rts[0].dest_addr,
         ));
-        assert!(rx.on_frame(&dec, &rts[0].data, now).is_empty());
+        assert_eq!(rx.on_frame(&dec, &rts[0].data, now).len(), 0);
         let cts = rx.take_outbound();
         assert_eq!(cts.len(), 1);
         assert_eq!(cts[0].data[0], CTS_CONTROL);
@@ -2062,10 +2062,7 @@ mod tests {
         let _ = rx.take_outbound(); // first CTS
 
         // No TP.DT arrives; T2 (1250ms) fires.
-        assert!(
-            rx.poll_timeouts(t0 + Duration::from_millis(1249))
-                .is_empty()
-        );
+        assert_eq!(rx.poll_timeouts(t0 + Duration::from_millis(1249)).len(), 0);
         let events = rx.poll_timeouts(t0 + Duration::from_millis(1251));
         assert_eq!(events.len(), 1);
         assert!(matches!(

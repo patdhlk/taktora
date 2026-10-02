@@ -9,8 +9,8 @@
 // dispatch loop reaches for these items from `executor` (#94).
 #![allow(clippy::redundant_pub_crate)]
 
+use iceoryx2::prelude::WaitSetAttachmentId;
 use iceoryx2::prelude::ipc;
-use iceoryx2::prelude::{WaitSetAttachmentId, WaitSetGuard};
 
 /// Sentinel task index for ids that resolve to no task (negative cache).
 pub(crate) const IGNORE: usize = usize::MAX;
@@ -29,16 +29,18 @@ impl AttachmentMap {
     /// stop-listener negative-cache entries — the only ids that fire from
     /// outside `guards`.
     pub(crate) fn build(
-        guards: &[WaitSetGuard<'_, '_, ipc::Service>],
+        guards: &[crate::executor::AttachedGuard<'_, '_>],
         attachment_to_task: &[usize],
         deadline_count: usize,
     ) -> Self {
         let mut entries: Vec<(Id, usize)> = Vec::with_capacity(guards.len() + deadline_count + 2);
         for (i, guard) in guards.iter().enumerate() {
-            entries.push((
-                WaitSetAttachmentId::from_guard(guard),
-                attachment_to_task[i],
-            ));
+            #[allow(clippy::match_same_arms)] // Arms have different lifetimes, cannot combine
+            let id = match guard {
+                crate::executor::AttachedGuard::Listener(g) => WaitSetAttachmentId::from_guard(g),
+                crate::executor::AttachedGuard::Interval(g) => WaitSetAttachmentId::from_guard(g),
+            };
+            entries.push((id, attachment_to_task[i]));
         }
         // Unique keys (one fd per attachment, unique tick indices), so an
         // unstable sort is correct and matches the alloc-conscious style.
@@ -84,13 +86,14 @@ mod tests {
     fn make_guards(
         waitset: &WaitSet<ipc::Service>,
         n: usize,
-    ) -> Vec<WaitSetGuard<'_, 'static, ipc::Service>> {
+    ) -> Vec<crate::executor::AttachedGuard<'_, 'static>> {
         (0..n)
             .map(|i| {
                 // Distinct durations → distinct interval attachments → distinct ids.
-                waitset
+                let guard = waitset
                     .attach_interval(Duration::from_millis((i as u64) + 1))
-                    .expect("attach_interval")
+                    .expect("attach_interval");
+                crate::executor::AttachedGuard::Interval(guard)
             })
             .collect()
     }
@@ -110,7 +113,11 @@ mod tests {
 
         let slow_calls = Cell::new(0_usize);
         for (i, guard) in guards.iter().enumerate() {
-            let id = WaitSetAttachmentId::from_guard(guard);
+            #[allow(clippy::match_same_arms)] // Arms have different lifetimes, cannot combine
+            let id = match guard {
+                crate::executor::AttachedGuard::Listener(g) => WaitSetAttachmentId::from_guard(g),
+                crate::executor::AttachedGuard::Interval(g) => WaitSetAttachmentId::from_guard(g),
+            };
             let got = map.resolve(&id, |_| {
                 slow_calls.set(slow_calls.get() + 1);
                 IGNORE
@@ -130,7 +137,11 @@ mod tests {
         // an unknown that must be lazy-learned. Reserve room for it via
         // `deadline_count = 1`.
         let (built_guards, held) = guards.split_at(guards.len() - 1);
-        let held_id = WaitSetAttachmentId::from_guard(&held[0]);
+        #[allow(clippy::match_same_arms)] // Arms have different lifetimes, cannot combine
+        let held_id = match &held[0] {
+            crate::executor::AttachedGuard::Listener(g) => WaitSetAttachmentId::from_guard(g),
+            crate::executor::AttachedGuard::Interval(g) => WaitSetAttachmentId::from_guard(g),
+        };
         let held_task = tasks[tasks.len() - 1];
 
         let mut map = AttachmentMap::build(built_guards, &tasks[..built_guards.len()], 1);
@@ -160,7 +171,11 @@ mod tests {
         let tasks = task_indices(guards.len());
 
         let (built_guards, held) = guards.split_at(guards.len() - 1);
-        let held_id = WaitSetAttachmentId::from_guard(&held[0]);
+        #[allow(clippy::match_same_arms)] // Arms have different lifetimes, cannot combine
+        let held_id = match &held[0] {
+            crate::executor::AttachedGuard::Listener(g) => WaitSetAttachmentId::from_guard(g),
+            crate::executor::AttachedGuard::Interval(g) => WaitSetAttachmentId::from_guard(g),
+        };
 
         let mut map = AttachmentMap::build(built_guards, &tasks[..built_guards.len()], 1);
 
@@ -198,7 +213,11 @@ mod tests {
         let mut map = AttachmentMap::build(&[], &[], 0);
 
         for guard in &guards {
-            let id = WaitSetAttachmentId::from_guard(guard);
+            #[allow(clippy::match_same_arms)] // Arms have different lifetimes, cannot combine
+            let id = match guard {
+                crate::executor::AttachedGuard::Listener(g) => WaitSetAttachmentId::from_guard(g),
+                crate::executor::AttachedGuard::Interval(g) => WaitSetAttachmentId::from_guard(g),
+            };
             map.resolve(&id, |_| 0);
         }
     }

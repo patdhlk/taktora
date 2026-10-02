@@ -6,6 +6,7 @@ use iceoryx2::port::notifier::Notifier as IxNotifier;
 use iceoryx2::prelude::ipc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use taktora_executor_sys::ports::SharedNotifier;
 
 /// Shared stop flag passed via [`Context::stoppable`].
 ///
@@ -15,20 +16,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Clone)]
 pub struct Stoppable {
     flag: Arc<AtomicBool>,
-    waker: Option<Arc<IxNotifier<ipc::Service>>>,
+    waker: Option<SharedNotifier>,
 }
-
-// SAFETY: `IxNotifier<ipc::Service>` is `!Send` only because `ipc::Service`
-// uses `SingleThreaded` (an `Rc`-backed arc policy) which is mutated only at
-// port-construction time.  After the notifier is created and wrapped in `Arc`,
-// the only operation we perform on it from any thread is `notifier.notify()`,
-// which does not touch the `Rc` refcount — it writes into a lock-free shared
-// memory ring.  We never expose a `&mut Notifier` across thread boundaries and
-// we do not implement `Sync` (Arc<Stoppable> is only Clone, not Deref-to-mut),
-// so concurrent mutation of the Rc is impossible.  Moving the Arc across
-// threads is therefore sound.
-#[allow(unsafe_code, clippy::non_send_fields_in_send_ty)]
-unsafe impl Send for Stoppable {}
 
 impl Default for Stoppable {
     fn default() -> Self {
@@ -51,9 +40,12 @@ impl Stoppable {
     /// wakes the WaitSet thread.
     #[doc(hidden)]
     pub(crate) fn with_waker(waker: Arc<IxNotifier<ipc::Service>>) -> Self {
+        // Invariant: The notifier is wrapped in SharedNotifier to make Stoppable
+        // Clone + Send. SharedNotifier documents why Arc<IxNotifier> can be safely
+        // shared across threads.
         Self {
             flag: Arc::new(AtomicBool::new(false)),
-            waker: Some(waker),
+            waker: Some(SharedNotifier::new(waker)),
         }
     }
 

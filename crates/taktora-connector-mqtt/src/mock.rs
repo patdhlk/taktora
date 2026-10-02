@@ -374,7 +374,10 @@ mod tests {
         let m = MockMqttSession::new();
         assert_eq!(m.state(), MqttConnectionState::Connected);
         assert_eq!(m.subscriber_count(), 0);
-        assert!(m.published().is_empty());
+        assert_eq!(
+            m.published(),
+            [] as [(std::string::String, std::vec::Vec<u8>); 0]
+        );
     }
 
     #[test]

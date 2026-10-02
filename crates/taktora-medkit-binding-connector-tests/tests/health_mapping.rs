@@ -28,7 +28,13 @@ fn fresh_binding_emits_raw_component_and_no_faults() {
     // Emitted raw — no placement until the manifest (#82) provides one.
     assert!(entities[0].parent_id.is_none());
 
-    assert!(binding.faults("component:ethercat0").is_empty());
-    assert!(binding.faults("something-else").is_empty());
+    assert_eq!(
+        binding.faults("component:ethercat0"),
+        [] as [taktora_medkit_model::FaultSummary; 0]
+    );
+    assert_eq!(
+        binding.faults("something-else"),
+        [] as [taktora_medkit_model::FaultSummary; 0]
+    );
     assert_eq!(binding.health("component:ethercat0"), Health::Ok);
 }

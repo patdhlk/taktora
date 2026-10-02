@@ -25,7 +25,7 @@ fn eeprom_fields_decode() {
         eeprom.bootstrap.as_deref(),
         Some(&[0x00, 0x10, 0x80, 0x00, 0x80, 0x10, 0x80, 0x00][..])
     );
-    assert!(eeprom.categories.is_empty());
+    assert_eq!(eeprom.categories, [] as [taktora_ethercat_esi::RawXml; 0]);
 }
 
 #[test]
@@ -78,7 +78,10 @@ fn self_closing_eeprom_child_is_captured() {
     let eeprom = file.devices[0].eeprom.as_ref().expect("eeprom present");
     assert_eq!(eeprom.categories.len(), 1);
     assert_eq!(eeprom.categories[0].name, "Category");
-    assert!(eeprom.categories[0].children.is_empty());
+    assert_eq!(
+        eeprom.categories[0].children,
+        [] as [taktora_ethercat_esi::RawXml; 0]
+    );
 }
 
 #[test]
