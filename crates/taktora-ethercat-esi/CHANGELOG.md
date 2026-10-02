@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4](https://github.com/patdhlk/taktora/compare/taktora-ethercat-esi-v0.5.3...taktora-ethercat-esi-v0.5.4) - 2026-10-02
+
+
+### Added
+
+- *(executor)* Forbid unsafe code; move unsafe into taktora-executor-sys, gate with cargo-geiger ([#271](https://github.com/patdhlk/taktora/pull/271))
+
+### Spec
+
+- Close the traceability loop — status reconciliation + test-execution records (FEAT_0122) ([#192](https://github.com/patdhlk/taktora/pull/192))
+
 ## [0.5.3](https://github.com/patdhlk/taktora/compare/taktora-ethercat-esi-v0.5.2...taktora-ethercat-esi-v0.5.3) - 2026-07-15
 
 

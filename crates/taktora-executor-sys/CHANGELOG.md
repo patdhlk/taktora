@@ -5,44 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.4](https://github.com/patdhlk/taktora/compare/taktora-idl-codegen-v0.1.3...taktora-idl-codegen-v0.1.4) - 2026-10-02
+## [0.1.0](https://github.com/patdhlk/taktora/releases/tag/taktora-executor-sys-v0.1.0) - 2026-10-02
 
 
 ### Added
 
 - *(executor)* Forbid unsafe code; move unsafe into taktora-executor-sys, gate with cargo-geiger ([#271](https://github.com/patdhlk/taktora/pull/271))
-
-## [0.1.3](https://github.com/patdhlk/taktora/compare/taktora-idl-codegen-v0.1.2...taktora-idl-codegen-v0.1.3) - 2026-07-15
-
-
-### Added
-
 - Onboarding golden path + assembly guide (FEAT_0121) ([#186](https://github.com/patdhlk/taktora/pull/186))
-
-## [0.1.2](https://github.com/patdhlk/taktora/compare/taktora-idl-codegen-v0.1.1...taktora-idl-codegen-v0.1.2) - 2026-06-29
-
-
-### Documentation
-
-- *(idl)* Spec the message-plane codegen subsystem and reconcile crate need-IDs ([#147](https://github.com/patdhlk/taktora/pull/147))
-
-### Fixed
-
-- *(spec)* De-collide idl need-IDs from the merged medkit cluster ([#156](https://github.com/patdhlk/taktora/pull/156)) ([#157](https://github.com/patdhlk/taktora/pull/157))
-
-## [0.1.1](https://github.com/patdhlk/taktora/compare/taktora-idl-codegen-v0.1.0...taktora-idl-codegen-v0.1.1) - 2026-06-27
-
-
-### Documentation
-
-- *(readme)* Document the J1939 connector and slice channel ([#130](https://github.com/patdhlk/taktora/pull/130))
-
-## [0.1.0](https://github.com/patdhlk/taktora/releases/tag/taktora-idl-codegen-v0.1.0) - 2026-06-27
-
-
-### Added
-
-- *(idl)* Message-plane IR with DBC frontend and CAN/wire codegen ([#113](https://github.com/patdhlk/taktora/pull/113))
 - *(examples)* Add ethercat-real-bus (EK1100 + EL1008) ([#8](https://github.com/patdhlk/taktora/pull/8))
 - *(examples)* Add ethercat-mock-loop integration example against 0.1.1 ([#2](https://github.com/patdhlk/taktora/pull/2))
 - *(channel)* NotifyOutcome surfaces dropped wakeups
@@ -50,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- *(readme)* Document the J1939 connector and slice channel ([#130](https://github.com/patdhlk/taktora/pull/130))
 - *(readme)* Document EtherCAT codegen toolchains, CAN connector, od-core, new examples
 - *(readme)* Split Examples section into per-crate and integration subsections
 - *(readme)* Mention taktora-log and taktora-log-dlt
