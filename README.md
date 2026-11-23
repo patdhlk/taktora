@@ -32,6 +32,11 @@ Four layered pieces:
 
 **Specification:** [https://taktora.dev/](https://taktora.dev/) — built from `spec/` on every push to `main`.
 
+**AI assistance:** taktora is developed with the help of AI coding assistants
+(Claude Code). The project follows the Linux kernel's rules for tool-generated
+content — human responsibility and disclosure in commit messages; see
+[CONTRIBUTING.md](CONTRIBUTING.md#tool-generated-content-and-ai-assistants).
+
 ## Start here
 
 The crate list below is long, but you don't wire all 41 crates together.

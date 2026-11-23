@@ -178,6 +178,45 @@ than a paragraph to explain — goes through this loop:
 5. Open the implementation PR; link the RFC issue and the need
    IDs it satisfies via `:satisfies:` on `impl::` directives.
 
+## Tool-generated content and AI assistants
+
+taktora follows the Linux kernel's rules for tool-generated content
+([Kernel Guidelines for Tool-Generated Content](https://docs.kernel.org/process/generated-content.html)
+and [AI Coding Assistants](https://docs.kernel.org/process/coding-assistants.html)),
+adapted to this project. taktora itself is developed with the help of AI
+coding assistants, and the same rules apply to the maintainer.
+
+**Responsibility.** A human is the author of every contribution and takes
+full responsibility for it. You are expected to understand and be able to
+defend everything you submit. If you cannot, do not submit it; such changes
+may be rejected without detailed review.
+
+**Transparency.** When a meaningful amount of a contribution was created by
+a tool rather than written by you, say so in the commit message or the PR
+description:
+
+- which tool was used (for an AI assistant: the product and model version);
+- the input to the tool. If the change came largely from a single prompt
+  or a short set of prompts, include them; for longer sessions, summarise
+  the prompts and the nature of the assistance;
+- which portions of the change were affected;
+- how the change was tested.
+
+If a tool found the problem a change fixes, note that too. If in doubt,
+choose transparency.
+
+**Out of scope.** Spelling and grammar fixes, completion and other typing
+aids, purely mechanical transformations such as renaming, and reformatting
+(`rustfmt`) need no disclosure.
+
+**Licensing.** AI tools cannot certify authorship or licensing. The human
+submitter must make sure the contribution can be published under
+`MIT OR Apache-2.0` and does not reproduce incompatible material.
+
+**Review.** Expect scrutiny in proportion to how much of a change was
+generated. Tool-generated changes pass the same gates as any other: tests,
+clippy, the unsafe gate, and the spec build.
+
 ## Agent tooling
 
 The repo carries a small set of project-local [Claude Code](https://docs.claude.com/en/docs/claude-code)
